@@ -1,0 +1,23 @@
+[package]
+name = "msgbus"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[example]]
+name = "chat"
+
+[dependencies]
+uuid = "*"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full", "sync"] }
+erased-serde = "0.3"
+serde_cbor = "0.10"
+rand = "*"
+itertools = "0.10.5"
+thiserror = "1.0.40"
+sorted-vec = "0.8.2"
+socket2 = "0.5.3"
+lazy_static = "1.4.0"
+binrw = "0.11.2"
