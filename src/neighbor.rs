@@ -3,6 +3,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 
 use std::io::{self, Cursor};
+use std::net::SocketAddrV6;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     str::FromStr,
@@ -24,50 +25,119 @@ use binrw::{
 };
 
 const VERSION: u8 = 1;
-const MAGIC: u8 = 109; // 'm' for Msgbus
+// const MAGIC: u8 = 109; // 'm' for Msgbus  // Weirdly can't use this in brw(magic)
+
+#[allow(dead_code)]
+struct NDContext {
+    all_socket: SocketAddr,
+    dr_socket: SocketAddr,
+    socket: UdpSocket,
+    local_port: u16,
+    local_addr: Ipv6Addr,
+}
+
+
+#[allow(dead_code)]
 pub(crate) struct NeighborDiscovery {
     id: Uuid,
     state: NDState,
     bcs_rx: tokio::sync::watch::Receiver<BusControlMsg>,
+    ip_addr: Ipv6Addr,
+    neighbors: HashMap<Uuid, Neighbor>,
+    int_index: u32,
+    dr: Option<Uuid>,
+    bdr: Option<Uuid>,
+    context: NDContext,
 }
 
 lazy_static! {
     // pub static ref IPV4: IpAddr = Ipv4Addr::new(224, 0, 0, 123).into();
     pub static ref LISTEN_ADDRESS: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0x0123).into();
 }
+
+#[allow(dead_code)]
 const LISTEN_PORT: u16 = 3069;
 
 impl NeighborDiscovery {
-    pub(crate) fn new(id: Uuid, bcs_rx: tokio::sync::watch::Receiver<BusControlMsg>) -> Self {
+    pub(crate) async fn new(
+        id: Uuid,
+        bcs_rx: tokio::sync::watch::Receiver<BusControlMsg>,
+        ip_addr: Ipv6Addr,
+        int_index: u32,
+        _name: String,
+    ) -> Self {
         let state = {
             let state: tokio::sync::watch::Ref<'_, BusControlMsg> = bcs_rx.borrow();
 
             match *state {
                 BusControlMsg::Run => NDState::Idle,
-                BusControlMsg::Shutdown => NDState::Shutdown,
+                BusControlMsg::Shutdown => NDState::Down,
             }
         };
-        Self { id, state, bcs_rx }
+        // dbg!(&state, "About to init_socket()");
+        let (socket, port) = Self::init_socket(ip_addr, int_index).await;
+
+        // dbg!("Returned Socket", &socket);
+        let neighbors = HashMap::new();
+        // let interface = 11; // TODO replace this with learned interface
+
+        let mut nd_mult_addr = SocketAddrV6::from_str("[ff02::123]:3069").unwrap();
+        nd_mult_addr.set_scope_id(int_index);
+        let nd_mult_addr = SocketAddr::V6(nd_mult_addr);
+        let mut dr_mult_addr = SocketAddrV6::from_str("[ff02::123]:3069").unwrap();
+        dr_mult_addr.set_scope_id(int_index);
+        let dr_mult_addr = SocketAddr::V6(dr_mult_addr);
+
+        let context = NDContext {
+            socket,
+            all_socket: nd_mult_addr,
+            dr_socket: dr_mult_addr,
+            local_port: port,
+            local_addr: ip_addr,
+        };
+
+        Self {
+            id,
+            state,
+            bcs_rx,
+            ip_addr,
+            neighbors,
+            int_index,
+            dr: None,
+            bdr: None,
+            context,
+        }
+    }
+
+    async fn init_socket(ip_addr: Ipv6Addr, int_index: u32) -> (UdpSocket, u16) {
+        let random_addr: SocketAddr = SocketAddrV6::new(ip_addr, 0, 0, int_index).into();
+        let socket = tokio::net::UdpSocket::bind(random_addr).await.unwrap();
+
+        let sock_addr = socket.local_addr().unwrap();
+        dbg!(&sock_addr);
+        // let IpAddr::V6(ip_addr) = sock_addr.ip() else { panic!() };
+        let port = sock_addr.port();
+        (socket, port)
     }
 
     pub(crate) async fn run(mut self) {
-        self.state = NDState::Idle;
-        let addr = SocketAddr::new(IpAddr::V6(*LISTEN_ADDRESS), LISTEN_PORT);
-        let mult_socket = join_multicast(addr).unwrap();
+        //  let nd_mult_addr = SocketAddr::new(IpAddr::V6(*LISTEN_ADDRESS), LISTEN_PORT);
+
+        let _dr: Option<Uuid> = None;
+        let _bdr: Option<Uuid> = None;
 
         let mut buf = vec![0u8; 9000];
+        let mut buf2 = vec![0u8; 9000];
 
-        let socket = tokio::net::UdpSocket::bind("[::]:0").await.unwrap();
-        socket.join_multicast_v6(&*LISTEN_ADDRESS, 11).unwrap();
+        self.context
+            .socket
+            .join_multicast_v6(&*LISTEN_ADDRESS, self.int_index)
+            .unwrap();
 
-        let sock_addr = socket.local_addr().unwrap();
-        let IpAddr::V6(ip_addr) = sock_addr.ip() else { panic!() };
-
-        let mut neighbor_map = HashMap::new();
+        let mult_socket = join_multicast(self.context.all_socket).unwrap();
 
         let mut hello_timer = time::interval(Duration::from_secs(10));
         hello_timer.set_missed_tick_behavior(MissedTickBehavior::Delay); // 10 second
-                                                                         // let mut  buf: Vec<u8> = Vec::new();
 
         loop {
             select! {
@@ -76,12 +146,14 @@ impl NeighborDiscovery {
                     match *state {
                         BusControlMsg::Run => { continue },
                         BusControlMsg::Shutdown => {
-                            self.state = NDState::Shutdown;
+                            self.state = NDState::Down;
                             break;
                         },
                     }
 
                 },
+
+                // Ok(size) = self.socket.recv(&mut buf) => {},
                 Ok(size) = mult_socket.recv(&mut buf) => {
 
                     let mut cursor = Cursor::new(&mut buf[0..size]);
@@ -91,67 +163,54 @@ impl NeighborDiscovery {
                             eprintln!("Neighbor message decode failure {:?}",e);  //TODO LOG
                             continue} ,
                     };
-                    // let Ok(msg) = NeighborMessage::try_from(&buf[0..size]) else { continue };
-                    if msg.from == self.id { continue };  // short-circuit the messages looped back to myself
-                    match msg.subtype {
-                        NeighborMessageType::Hello { address, neighbors, dr, bdr } => {
-                            let (_,_,_ ) = (neighbors, dr, bdr);
-                            match neighbor_map.get_mut(&msg.from) {
-                                None => {
-                                    println!("Router {} received new Hello from: {}", self.id, msg.from); //TODO LOG
-
-                                    let n = Neighbor {
-                                        last_hello: Instant::now(),
-                                        state: NeighborState::Normal,
-                                        address
-                                    };
-                                neighbor_map.insert(msg.from, n);
-                            },
-                                Some(n) => {
-                                    n.last_hello = Instant::now();
-                                }
-
-
-                        };
-                        },
-                        NeighborMessageType::Shutdown => {
-                            neighbor_map.remove_entry(&msg.from);
-                        }
-                    }
+                    self.handle_message(msg).await;
                 },
-                now = hello_timer.tick() => {
-                        let subtype = NeighborMessageType::Hello{
-                            address: ip_addr,
-                            neighbors: Vec::new(),
-                            dr: None,
-                            bdr: None };
-                        let hello_msg = NeighborMessage { from: self.id, version: 1, subtype };
 
-                        // hello_msg.to_bytes(&mut buf);
-                        let mut writer = Cursor::new(Vec::new());
+                Ok(size) = self.context.socket.recv(&mut buf2) => {
+                    let mut cursor = Cursor::new(&mut buf2[0..size]);
+                    let msg = match NeighborMessage::read(&mut cursor) {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            eprintln!("Neighbor message decode failure {:?}",e);  //TODO LOG
+                            continue} ,
+                    };
+                    self.handle_message(msg).await;
 
-                        hello_msg.write(&mut writer).unwrap();
-                        let addr = SocketAddr::from_str("[ff02::123%11]:3069").unwrap();
+                },
+                _now = hello_timer.tick() => {
+                    match self.state {
+                        NDState::Down => { continue },
+                        NDState::Idle => {
+                            let _ = self.send_hello(&self.context.all_socket).await;  //TODO do something with an error
+                            // dbg!(&self.socket.local_addr());
+                            self.state = NDState::HelloSent;
+                        },
+                        NDState::HelloSent => {
+                            let _ = self.send_hello(&self.context.all_socket).await;  //TODO do something with an error
+                        },
+                        NDState::Adjacency => {},
+                        NDState::DR => {},
+                        NDState::BDR => {},
+                    }
 
 
-                        socket.send_to(writer.get_ref(), addr).await.unwrap();
-                        let mut dead_list = Vec::new();
-                        for (id, n) in neighbor_map.iter() {
-                            let diff = now - n.last_hello;
-                            println!("{:?} ### {id}", diff);
-                            if diff > Duration::from_secs(40) {
-                                println!("Dead timer expired for {id}"); //TODO Make this a log output
-                                dead_list.push(*id);
-                            };
-                        };
-                        for id in dead_list {
-                            neighbor_map.remove(&id);
-                        }
+                        // let mut dead_list = Vec::new();
+                        // for (id, n) in neighbor_map.iter() {
+                        //     let diff = now - n.last_hello;
+                        //     println!("{:?} ### {id}", diff);
+                        //     if diff > Duration::from_secs(40) {
+                        //         println!("Dead timer expired for {id}"); //TODO Make this a log output
+                        //         dead_list.push(*id);
+                        //     };
+                        // };
+                        // for id in dead_list {
+                        //     neighbor_map.remove(&id);
+                        // }
 
                 }
             }
         }
-        if self.state == NDState::Shutdown {
+        if self.state == NDState::Down {
             let shutdown_msg = NeighborMessage {
                 from: self.id,
                 version: VERSION,
@@ -160,8 +219,109 @@ impl NeighborDiscovery {
             let mut writer = Cursor::new(Vec::new());
 
             shutdown_msg.write(&mut writer).unwrap();
-            let _ = socket.send(writer.get_ref()).await;
+            let _ = self.context.socket.send(writer.get_ref()).await;
         }
+    }
+
+
+   
+    async fn handle_message(&mut self, msg: NeighborMessage) {
+        if msg.from == self.id {
+            return;
+        }; // short-circuit the messages looped back to myself
+
+        match msg.subtype {
+            #[allow(unused_variables)]
+            NeighborMessageType::Hello {
+                address,
+                port,
+                priority,
+                neighbors,
+                dr,
+                bdr,
+            } => {
+                let neighbor = self.neighbors.entry(msg.from).or_insert_with(|| Neighbor {
+                    last_hello: Instant::now(),
+                    state: NeighborState::Init,
+                    address,
+                    port,
+                });
+
+                neighbor.handle_event(NeighborEvent::HelloReceived, &self.context)
+            }
+
+            NeighborMessageType::Shutdown => todo!(),
+        }
+    }
+
+    async fn _handle_neighbor_message(&mut self, msg: NeighborMessage) {
+        // let Ok(msg) = NeighborMessage::try_from(&buf[0..size]) else { continue };
+        if msg.from == self.id {
+            return;
+        }; // short-circuit the messages looped back to myself
+
+        match msg.subtype {
+            #[allow(unused_variables)]
+            NeighborMessageType::Hello {
+                address,
+                port,
+                priority,
+                neighbors,
+                dr,
+                bdr,
+            } => {
+                let (_, _, _) = (neighbors, dr, bdr);
+                let neighbor = match self.neighbors.get_mut(&msg.from) {
+                    None => {
+                        println!(
+                            "Interface {} received new Hello from: {}",
+                            self.int_index, msg.from
+                        ); //TODO LOG
+
+                        let n = Neighbor {
+                            last_hello: Instant::now(),
+                            state: NeighborState::Init,
+                            address,
+                            port,
+                        };
+                        self.neighbors.insert(msg.from, n);
+
+                        let neighbor_sockaddr = SocketAddrV6::new(address, port, 0, self.int_index);
+                        let neighbor_sockaddr = SocketAddr::V6(neighbor_sockaddr);
+                        let _ = self.send_hello(&neighbor_sockaddr).await; // TODO do something with an error
+                        self.neighbors.get_mut(&msg.from).unwrap() // Just inserted it so i can unwrap it safely
+                    }
+                    Some(n) => {
+                        n.last_hello = Instant::now();
+                        n
+                    }
+                };
+            }
+            NeighborMessageType::Shutdown => {
+                self.neighbors.remove_entry(&msg.from);
+            }
+        }
+    }
+
+    async fn send_hello(&self, dest: &SocketAddr) -> Result<(), io::Error> {
+        let subtype = NeighborMessageType::Hello {
+            address: self.context.local_addr,
+            port: self.context.local_port,
+            priority: 1, // TODO needs to be configurable
+            neighbors: Vec::new(),
+            dr: None,
+            bdr: None,
+        };
+        let hello_msg = NeighborMessage {
+            from: self.id,
+            version: 1,
+            subtype,
+        };
+
+        let mut writer = Cursor::new(Vec::new());
+        hello_msg.write(&mut writer).unwrap();
+        self.context.socket.send_to(writer.get_ref(), dest).await?;
+        Ok(())
     }
 }
 
@@ -201,27 +361,71 @@ fn join_multicast(addr: SocketAddr) -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
+#[allow(dead_code)]
 enum NeighborState {
-    Normal,
-    DR,
-    BDR,
+    Down,
+    Init,
+    TwoWay,
+    ExStart,
+    Exchange,
+    Full,
+    Loading,
 }
 
+#[allow(dead_code)]
+enum NeighborEvent {
+    HelloReceived,
+    TwoWayReceived,
+    NegotiationDone,
+    ExchangeDone,
+    LoadingDone,
+    AdjOk,
+    InactivityTimer,
+    OneWayReceived,
+}
+
+#[allow(dead_code)]
 struct Neighbor {
     last_hello: Instant,
     state: NeighborState,
     address: Ipv6Addr,
+    port: u16,
 }
 
+impl Neighbor {
+    fn handle_event(&mut self, event: NeighborEvent, _context: &NDContext) {
+        match event {
+            NeighborEvent::HelloReceived => self.last_hello = Instant::now(),
+            NeighborEvent::TwoWayReceived => todo!(),
+            NeighborEvent::NegotiationDone => todo!(),
+            NeighborEvent::ExchangeDone => todo!(),
+            NeighborEvent::LoadingDone => todo!(),
+            NeighborEvent::AdjOk => todo!(),
+            NeighborEvent::InactivityTimer => todo!(),
+            NeighborEvent::OneWayReceived => todo!(),
+        }
+    }
+}
+
+
+#[allow(dead_code)]
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 enum NDState {
     #[default]
-    Shutdown,
+    Down,
     Idle,
-    Hello,
+    HelloSent,
     Adjacency,
+    BDR,
+    DR,
 }
 
+#[allow(dead_code)]
+enum NDEvents {
+    Start,
+    HelloReceived,
+}
+#[allow(dead_code)]
 pub(crate) enum RouterMsg {}
 
 #[binrw]
@@ -236,48 +440,6 @@ struct NeighborMessage {
     version: u8,
     subtype: NeighborMessageType,
 }
-
-// impl NeighborMessage {
-//     fn to_bytes(&self, buf: &mut Vec<u8>) {
-//         buf.clear();
-//         buf.push(MAGIC); // u8
-//         buf.push(VERSION); // u8
-//         buf.extend(self.from.as_bytes()); // 16 bytes
-//         self.subtype.to_bytes(buf);
-//     }
-// }
-
-// impl TryFrom<&[u8]> for NeighborMessage {
-//     type Error = Box<dyn Error>;
-
-//     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-//         let mut bytes = value.iter();
-//         let _magic: &u8 = match bytes.next() {
-//             Some(m) if *m == MAGIC => m,
-//             Some(_) => return Err("Bad magic".into()),
-//             None => return Err("Unexpected EOF".into()),
-//         };
-//         let version = match bytes.next() {
-//             Some(m) if *m == VERSION => *m,
-//             Some(_) => return Err("Bad version".into()),
-//             None => return Err("Unexpected EOF".into()),
-//         };
-//         let Ok(from) = Uuid::from_slice(&bytes.as_slice()[0..16]) else { return Err("Unexpected EOF".into())};
-//         for _ in 0..16 {
-//             bytes.next();
-//         }
-
-//         let subtype = NeighborMessageType::try_from(bytes.as_slice())?;
-
-//         Ok(NeighborMessage {
-//             from,
-//             version,
-//             subtype,
-//         })
-
-//         // Err("Placeholder".into())
-//     }
-// }
 
 #[binrw::parser(reader, endian)]
 fn uuid_parser() -> BinResult<Uuid> {
@@ -294,6 +456,8 @@ enum NeighborMessageType {
         #[bw(map = |a| a.octets())]
         #[br(map = |octets: [u8; 16] | Ipv6Addr::from(octets))]
         address: Ipv6Addr,
+        port: u16,
+        priority: u8,
         #[br(temp)]
         #[bw(calc = if dr.is_none() {0} else {1} )]
         has_dr: u8,
@@ -311,92 +475,11 @@ enum NeighborMessageType {
         #[br(temp)]
         #[bw(try_calc(u16::try_from(neighbors.len())))]
         len: u16,
-        // #[br(count = len)]
-        // #[br(args { count: len.into() })]
-        // #[br(parse_with = vec_uuid_parser)]
         #[br(parse_with = count_with(len as usize, uuid_parser))]
         // #[br(dbg)]
         #[bw(map = |v: &Vec::<Uuid>|  v.iter().fold(Vec::<u8>::new(), |mut v,u| {v.extend(u.as_bytes()); v}))]
-        // #[br(parse_with = count_with(len as usize, |reader,endian,a|uuid_parser(reader, endian, a)))]
-        // #[br(map = |vb: Vec::<[u8; 16]> |   { vb.iter().map(|bytes| Uuid::from_bytes(*bytes)).collect::<Vec::<Uuid>>()})]
         neighbors: Vec<Uuid>,
     },
     #[brw(magic = 2u8)]
     Shutdown,
 }
-
-// impl NeighborMessageType {
-//     fn to_bytes(&self, buf: &mut Vec<u8>) {
-//         // buf already has the common header so don't clear it
-//         match self {
-//             NeighborMessageType::Hello {
-//                 address,
-//                 dr,
-//                 bdr,
-//                 neighbors,
-//             } => {
-//                 buf.push(1); // this type (Hello)
-//                 buf.extend(address.octets()); // 16 octets
-//                 buf.push(if dr.is_none() { 0 } else { 1 });
-//                 buf.push(if bdr.is_none() { 0 } else { 1 });
-//                 dr.iter().for_each(|u| buf.extend(u.as_bytes()));
-//                 bdr.iter().for_each(|u| buf.extend(u.as_bytes()));
-//                 buf.extend((neighbors.len() as u16).to_be_bytes()); // 2 octets
-//                 neighbors.iter().for_each(|u| buf.extend(u.as_bytes()));
-//             }
-//         }
-//     }
-// }
-
-// impl TryFrom<&[u8]> for NeighborMessageType {
-//     type Error = Box<dyn Error>;
-
-//     fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
-//         let mut cursor: usize = 0;
-//         let subtype: u8 = buf[cursor];
-//         cursor += 1;
-
-//         match subtype {
-//             1 => {
-//                 let address: [u8; 16] = buf[0..16].try_into()?;
-//                 cursor += 16;
-//                 let address = Ipv6Addr::from(address);
-//                 let is_dr = buf[16] == 1;
-//                 let is_bdr = buf[17] == 1;
-//                 cursor += 2;
-//                 let dr = if is_dr {
-//                     let a = Uuid::from_slice(&buf[cursor..cursor + 16])?;
-//                     cursor += 16;
-//                     Some(a)
-//                 } else {
-//                     None
-//                 };
-//                 let bdr = if is_dr {
-//                     let a = Uuid::from_slice(&buf[cursor..cursor + 16])?;
-//                     cursor += 16;
-//                     Some(a)
-//                 } else {
-//                     None
-//                 };
-
-//                 let veclen = (buf[cursor] as u16) << 8 + buf[cursor + 1] as u16;
-//                 cursor += 2;
-//                 if buf.len() - cursor < veclen as usize * 16 {
-//                     return Err("Unexpected eOF".into());
-//                 }
-//                 let mut neighbors = Vec::new();
-//                 for _ in 0..veclen {
-//                     let u = Uuid::from_slice(&buf[cursor..cursor + 16])?;
-//                     neighbors.push(u);
-//                 }
-//                 Ok(NeighborMessageType::Hello {
-//                     address,
-//                     neighbors,
-//                     dr,
-//                     bdr,
-//                 })
-//             }
-//             _ => return Err("Bad packet type".into()),
-//         }
-//     }
-// }

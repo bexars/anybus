@@ -11,8 +11,9 @@
 
 use common::random_uuid;
 use erased_serde::Serialize;
-use errors::{ReceiveError};
-use neighbor::NeighborDiscovery;
+use errors::ReceiveError;
+
+
 use serde::de::DeserializeOwned;
 use sorted_vec::partial::SortedVec;
 use std::any::{Any, TypeId};
@@ -26,16 +27,22 @@ use tokio::{
 };
 use uuid::Uuid;
 
+// use crate::router::Router;
+
 mod common;
 pub mod errors;
 pub mod helper;
-mod neighbor;
+// mod neighbor;
+// mod router;
+
+pub use msgbus_macro::bus_uuid;
 
 /// Any message handled by [MsgBus] must implemnet this.
 ///
 ///
-pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static {
+pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static   {
     /// The uuid that should be bound to if it's not overridden during registration
+    
     fn default_uuid(&self) -> Uuid;
 
     /// The as_any function needs to simply return 'self'
@@ -47,15 +54,18 @@ pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static {
     /// }
     /// ```
     fn as_any(self: Box<Self>) -> Box<dyn Any>;
-}
 
+    // fn uuid<T>() -> Uuid
+    // where T: ?Sized;
+}
+#[allow(dead_code)]
 #[derive(Debug)]
 enum BrokerMsg {
-    Register(Uuid, UnboundedSender<ClientMessage>),
+    RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
 }
-
+#[allow(dead_code)]
 #[derive(Debug)]
 enum ClientMessage {
     Message(Uuid, Box<dyn BusRider>),
@@ -68,7 +78,6 @@ enum ClientMessage {
     FailedRegistration(Uuid),
     Shutdown,
 }
-
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnicastEntry {
@@ -88,6 +97,7 @@ impl PartialEq for UnicastEntry {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum Endpoint {
     Unicast(SortedVec<UnicastEntry>),
@@ -117,6 +127,8 @@ pub struct Handle {
 impl Handle {
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [BusListener] for receiving
     /// messages sent to the [Uuid]
+
+
     pub fn register_anycast<T: BusRider + DeserializeOwned>(
         &mut self,
         uuid: Uuid,
@@ -126,7 +138,8 @@ impl Handle {
             rx,
             _pd: PhantomData,
         };
-        let register_msg = BrokerMsg::Register(uuid, tx);
+        
+        let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
         self.tx.send(register_msg)?;
         Ok(bl)
     }
@@ -194,7 +207,7 @@ impl Handle {
                 }
 
                 if had_failure {
-                    self.tx.send(BrokerMsg::DeadLink(u)).unwrap(); // Just die if this fails
+                    _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
                 }
 
                 if !success {
@@ -273,9 +286,9 @@ pub struct BusControlHandle {
 
 impl BusControlHandle {
     /// Passes the shutdown command to the MsgBus system and all local listeners.  Immediately withdraws all advertisements from the network.
-    /// 
+    ///
     /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this MsgBus
-    /// 
+    ///
     pub fn shutdown(&mut self) {
         self.tx.send(BusControlMsg::Shutdown).unwrap_or_default();
     }
@@ -323,10 +336,10 @@ impl<'a> MsgBus {
         let mut should_shutdown = false;
 
         let id = random_uuid();
-        let router = NeighborDiscovery::new(id, bc_rx.clone());
-
-        let _nd_handle = tokio::spawn(router.run());
-
+        // let router = Router::new(id, bc_rx.clone());
+        // dbg!("Created ND Router");
+        // let nd_handle = tokio::spawn(router.run());
+        // dbg!("Started Neighbor discovery", nd_handle);
         loop {
             if *bc_rx.borrow_and_update() == BusControlMsg::Shutdown || should_shutdown {
                 shutdown_routing(map);
@@ -353,7 +366,7 @@ impl<'a> MsgBus {
 
                             todo!()
                         }
-                        BrokerMsg::Register(uuid, tx) => {
+                        BrokerMsg::RegisterAnycast(uuid, tx) => {
                             let entry = UnicastEntry {
                                 cost: 0,
                                 dest: tx.clone()

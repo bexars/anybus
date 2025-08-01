@@ -1,6 +1,5 @@
-use lazy_static::lazy_static;
 use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, SocketAddr, UdpSocket},
     str::FromStr,
     time::Duration,
 };
