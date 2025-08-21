@@ -1,6 +1,6 @@
 use std::{fmt::Display, time::Duration};
 
-use msgbus::helper::ShutdownWithCtrlC;
+// use msgbus::helper::ShutdownWithCtrlC;
 use msgbus::{bus_uuid, Handle, MsgBus};
 use tokio;
 // use msgbus_macro::bus_uuid;
@@ -124,7 +124,7 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
 }
 
 #[cfg(target_family = "unix")]
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     // let (bus, handle) = MsgBus::new();
     let handle = MsgBus::init();
