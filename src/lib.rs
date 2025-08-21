@@ -364,11 +364,7 @@ impl<'a> MsgBus {
     /// used for normal interaction with the system
     ///
     pub fn new() -> (BusControlHandle, Handle) {
-        #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        #[cfg(feature = "dioxus-web")]
-        let (tx, rx) = futures_channel::mpsc::unbounded();
 
         let (bc_tx, bc_rx) = async_watch::channel(BusControlMsg::Run);
 
@@ -380,14 +376,15 @@ impl<'a> MsgBus {
 
         let handle = Handle { tx, rts_rx };
 
-        // let bus = Arc::new(Mutex::new(bus));
-        #[cfg(feature = "tokio")]
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
 
-        #[cfg(feature = "dioxus-web")]
-        dioxus::prelude::spawn_forever(Self::run(map, rx, bc_rx, rts_tx));
-
         (control_handle, handle)
+    }
+
+    /// This runs the MsgBus with no returned BusControlHandle.  Ideal for putting in statics or other places where you don't need to control the bus.
+    pub fn init() -> Handle {
+        let (_, handle) = Self::new();
+        handle
     }
 
     async fn run(
@@ -487,7 +484,7 @@ impl<'a> MsgBus {
 
                 break;
             }
-            #[cfg(feature = "tokio")]
+
             select! {
                 _ = bc_rx.changed() => {
                     match *bc_rx.borrow() {
@@ -501,23 +498,6 @@ impl<'a> MsgBus {
                 },
 
                 msg = rx.recv() => should_shutdown = process_message(msg),
-
-            };
-
-            #[cfg(feature = "dioxus-web")]
-            select! {
-                _ = bc_rx.changed().fuse() => {
-                    match *bc_rx.borrow() {
-                        BusControlMsg::Run => {},  // should never receive this but it's a non-issue
-                        BusControlMsg::Shutdown => {
-                            println!("Received shutdown request");
-                            should_shutdown = true;
-                            // break 'main;
-                        }// TOOD log this
-                    }
-                },
-
-                msg = rx.next() => should_shutdown = process_message(msg),
 
             };
         }

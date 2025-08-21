@@ -126,10 +126,10 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
 #[cfg(target_family = "unix")]
 #[tokio::main]
 async fn main() {
-    let (bus, handle) = MsgBus::new();
-
-    #[cfg(target_family = "unix")]
-    let bus = ShutdownWithCtrlC::from(bus);
+    // let (bus, handle) = MsgBus::new();
+    let handle = MsgBus::init();
+    // #[cfg(target_family = "unix")]
+    // let bus = ShutdownWithCtrlC::from(bus);
 
     let cl = tokio::spawn(ChatListener::run(handle.clone()));
     std::thread::sleep(Duration::from_secs(1));
@@ -138,5 +138,5 @@ async fn main() {
     let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 30));
     let c3 = tokio::spawn(tokio::time::sleep(Duration::from_secs(15)));
     let _blah = tokio::join! { cl, c1, c2, c3 };
-    bus.shutdown();
+    // bus.shutdown();
 }
