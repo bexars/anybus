@@ -9,7 +9,7 @@ edition = "2021"
 syn = { version = "1", features = ["full"] }
 quote = "*"
 proc-macro2 = "*"
-uuid = "1.15.1"
+uuid = "1"
 darling = "0.21.0"
 
 
