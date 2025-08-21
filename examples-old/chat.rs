@@ -1,10 +1,14 @@
 use std::{fmt::Display, time::Duration};
 
+#[cfg(feature = "tokio")]
 use msgbus::helper::ShutdownWithCtrlC;
 use msgbus::BusRider;
-use tokio;
 use uuid::Uuid;
 
+#[cfg(feature="dioxus-web")]
+fn main() {}
+
+#[cfg(feature = "tokio")]
 #[tokio::main]
 async fn main() {
     let (control, mut handle) = msgbus::MsgBus::new();

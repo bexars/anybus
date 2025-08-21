@@ -13,24 +13,30 @@ use common::random_uuid;
 use erased_serde::Serialize;
 use errors::ReceiveError;
 
-
+// use futures::{select, FutureExt, StreamExt};
+// #[cfg(feature = "dioxus-web")]
 use serde::de::DeserializeOwned;
 use sorted_vec::partial::SortedVec;
 use std::any::{Any, TypeId};
 use std::mem::swap;
 use std::{collections::HashMap, error::Error, marker::PhantomData};
-use tokio::sync::oneshot::Receiver;
+
+use tokio::sync::oneshot::Receiver as OneShotReceiver;
 
 use tokio::{
     select,
-    sync::mpsc::{error::SendError, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
+
+// use std::sync::mpsc::{Receiver, Sender};
+
 use uuid::Uuid;
 
 // use crate::router::Router;
 
 mod common;
 pub mod errors;
+#[cfg(target_family = "unix")]
 pub mod helper;
 // mod neighbor;
 // mod router;
@@ -40,19 +46,19 @@ pub use msgbus_macro::bus_uuid;
 /// Any message handled by [MsgBus] must implemnet this.
 ///
 ///
-pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static   {
+pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static {
     /// The uuid that should be bound to if it's not overridden during registration
-    
+
     fn default_uuid(&self) -> Uuid;
 
     /// The as_any function needs to simply return 'self'
-    /// ```
-    /// impl dyn BusRider {
-    ///    fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
-    ///        self
-    ///    }    
-    /// }
-    /// ```
+    // ```
+    // impl dyn BusRider {
+    //    fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+    //        self
+    //    }
+    // }
+    // ```
     fn as_any(self: Box<Self>) -> Box<dyn Any>;
 
     // fn uuid<T>() -> Uuid
@@ -72,7 +78,7 @@ enum ClientMessage {
     Bytes(Uuid, Vec<u8>),
     Rpc {
         to: &'static Uuid,
-        reply_to: Receiver<Box<ClientMessage>>,
+        reply_to: UnboundedReceiver<Box<ClientMessage>>,
         msg: Box<dyn BusRider>,
     },
     FailedRegistration(Uuid),
@@ -97,12 +103,23 @@ impl PartialEq for UnicastEntry {
     }
 }
 
+#[cfg(feature = "tokio")]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+
+pub(crate) enum Endpoint {
+    Unicast(SortedVec<UnicastEntry>),
+    Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
+    // External(tokio::sync::mpsc::Sender<ClientMessage>),
+}
+
+#[cfg(feature = "dioxus-web")]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum Endpoint {
     Unicast(SortedVec<UnicastEntry>),
-    Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
-    External(tokio::sync::mpsc::Sender<ClientMessage>),
+    Broadcast(dioxus::prelude::UnboundedSender<ClientMessage>),
+    // External(tokio::sync::mpsc::Sender<ClientMessage>),
 }
 
 // #[derive(Debug, Clone)]
@@ -128,18 +145,28 @@ impl Handle {
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [BusListener] for receiving
     /// messages sent to the [Uuid]
 
+    // TODO: Cleanup the errors being sent
 
     pub fn register_anycast<T: BusRider + DeserializeOwned>(
         &mut self,
         uuid: Uuid,
     ) -> Result<BusListener<T>, Box<dyn Error>> {
+        #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        #[cfg(feature = "dioxus-web")]
+        let (tx, rx) = futures_channel::mpsc::unbounded();
+
         let bl = BusListener::<T> {
             rx,
             _pd: PhantomData,
         };
-        
+
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
+
+        #[cfg(feature = "dioxus-web")]
+        self.tx.unbounded_send(register_msg)?;
+
+        #[cfg(feature = "tokio")]
         self.tx.send(register_msg)?;
         Ok(bl)
     }
@@ -169,7 +196,7 @@ impl Handle {
 
     /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
     /// The system will deliver regardless of end type
-    pub fn send<T: BusRider>(&self, payload: T) -> Result<(), errors::MsgBusError> {
+    pub fn send<T: BusRider>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
         let u = payload.default_uuid();
         let payload = Box::new(payload);
         let mut msg = Some(ClientMessage::Message(u, payload));
@@ -186,7 +213,14 @@ impl Handle {
                             let mut m = None;
                             swap(&mut m, &mut msg);
                             let m = m.expect("Should never panic here. Problem swapping data");
-                            match entry.dest.send(m) {
+
+                            #[cfg(feature = "tokio")]
+                            let send_result = entry.dest.send(m);
+
+                            #[cfg(feature = "dioxus-web")]
+                            let send_result = entry.dest.unbounded_send(m);
+
+                            match send_result {
                                 Ok(_) => {
                                     success = true;
                                     if !had_failure {
@@ -194,28 +228,44 @@ impl Handle {
                                     }
                                     break;
                                 }
-                                Err(SendError(m)) => {
+                                // #[cfg(feature = "tokio")]
+                                // Err(SendError(m)) => {
+                                //     had_failure = true;
+                                //     let mut m = Some(m);
+                                //     swap(&mut m, &mut msg)
+                                // }
+                                // #[cfg(feature = "dioxus-web")]
+                                Err(e) => {
                                     had_failure = true;
-                                    let mut m = Some(m);
+                                    #[cfg(feature = "dioxus-web")]
+                                    let mut m = Some(e.into_inner());
+                                    #[cfg(feature = "tokio")]
+                                    let mut m = Some(e.0);
+
                                     swap(&mut m, &mut msg)
                                 }
                             }
                         }
                     }
                     Endpoint::Broadcast(_) => todo!(),
-                    Endpoint::External(_) => todo!(),
+                    // Endpoint::External(_) => todo!(),
                 }
 
                 if had_failure {
-                    _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
+                    #[cfg(feature = "tokio")]
+                    self.tx.send(BrokerMsg::DeadLink(u));
+                    #[cfg(feature = "dioxus-web")]
+                    self.tx.unbounded_send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
                 }
 
                 if !success {
-                    let Some(ClientMessage::Message(_,payload)) = msg else { panic!() };
-                    return Err(errors::MsgBusError::SendError(payload));
+                    let Some(ClientMessage::Message(_, payload)) = msg else {
+                        panic!()
+                    };
+                    return Err(errors::MsgBusHandleError::SendError(payload));
                 }
             }
-            None => return Err(errors::MsgBusError::NoRoute),
+            None => return Err(errors::MsgBusHandleError::NoRoute),
         };
 
         // TODO lookup in watched hashmap
@@ -237,7 +287,11 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     /// If this was created from a failed registration, the first message will be [RegistrationFailed](errors::ReceiveError::RegistrationFailed)
     pub async fn recv(&mut self) -> Result<T, ReceiveError> {
         loop {
+            #[cfg(feature = "tokio")]
             let new_msg = self.rx.recv().await;
+            #[cfg(feature = "dioxus-web")]
+            let new_msg = self.rx.next().await;
+
             match new_msg {
                 None => {
                     return Err(ReceiveError::ConnectionClosed);
@@ -281,7 +335,8 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
 /// Handle for programatically shutting down the system.  Can be wrapped with [helper::ShutdownWithCtrlC] to catch user termination
 /// gracefully
 pub struct BusControlHandle {
-    pub(crate) tx: tokio::sync::watch::Sender<BusControlMsg>,
+    // #[cfg(feature = "tokio")]
+    pub(crate) tx: async_watch::Sender<BusControlMsg>,
 }
 
 impl BusControlHandle {
@@ -295,8 +350,8 @@ impl BusControlHandle {
 }
 
 type Routes = HashMap<Uuid, Endpoint>;
-type RoutesWatchTx = tokio::sync::watch::Sender<Routes>;
-type RoutesWatchRx = tokio::sync::watch::Receiver<Routes>;
+type RoutesWatchTx = async_watch::Sender<Routes>;
+type RoutesWatchRx = async_watch::Receiver<Routes>;
 
 /// The main entry point into the MsgBus system.
 pub struct MsgBus {
@@ -309,28 +364,38 @@ impl<'a> MsgBus {
     /// used for normal interaction with the system
     ///
     pub fn new() -> (BusControlHandle, Handle) {
+        #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let (bc_tx, bc_rx) = tokio::sync::watch::channel(BusControlMsg::Run);
+        #[cfg(feature = "dioxus-web")]
+        let (tx, rx) = futures_channel::mpsc::unbounded();
+
+        let (bc_tx, bc_rx) = async_watch::channel(BusControlMsg::Run);
 
         let map = HashMap::new();
 
-        let (rts_tx, rts_rx) = tokio::sync::watch::channel(map.clone());
+        let (rts_tx, rts_rx) = async_watch::channel(map.clone());
 
         let control_handle = BusControlHandle { tx: bc_tx };
 
         let handle = Handle { tx, rts_rx };
 
         // let bus = Arc::new(Mutex::new(bus));
-
+        #[cfg(feature = "tokio")]
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
+
+        #[cfg(feature = "dioxus-web")]
+        dioxus::prelude::spawn_forever(Self::run(map, rx, bc_rx, rts_tx));
+
         (control_handle, handle)
     }
 
     async fn run(
         mut map: Routes,
         mut rx: UnboundedReceiver<BrokerMsg>,
-        mut bc_rx: tokio::sync::watch::Receiver<BusControlMsg>,
+        // #[cfg(feature = "tokio")] mut bc_rx: tokio::sync::watch::Receiver<BusControlMsg>,
+        mut bc_rx: async_watch::Receiver<BusControlMsg>,
+
         rts_tx: RoutesWatchTx,
     ) {
         let mut should_shutdown = false;
@@ -340,13 +405,89 @@ impl<'a> MsgBus {
         // dbg!("Created ND Router");
         // let nd_handle = tokio::spawn(router.run());
         // dbg!("Started Neighbor discovery", nd_handle);
+
+        let mut process_message = |msg: Option<BrokerMsg>| -> bool {
+            let Some(msg) = msg else { return true };
+            match msg {
+                BrokerMsg::Subscribe(_uuid, _tx) => {
+                    todo!()
+                }
+                BrokerMsg::RegisterAnycast(uuid, tx) => {
+                    let entry = UnicastEntry {
+                        cost: 0,
+                        dest: tx.clone(),
+                    };
+                    // TODO Make the Routes have Cow elements for ease of cloning
+                    // let mut new_map = (*map).clone();
+                    let endpoint = map.get_mut(&uuid);
+                    match endpoint {
+                        Some(Endpoint::Unicast(v)) => {
+                            v.insert(entry);
+                        }
+                        Some(Endpoint::Broadcast(_)) => {
+                            let msg = ClientMessage::FailedRegistration(uuid);
+                            #[cfg(feature = "tokio")]
+                            let _ = tx.send(msg);
+                            #[cfg(feature = "dioxus-web")]
+                            let _ = tx.unbounded_send(msg);
+                            return false;
+                        }
+                        // Some(Endpoint::External(_)) => {}
+                        None => {
+                            let mut v = SortedVec::new();
+                            v.insert(entry);
+                            let ep = Endpoint::Unicast(v);
+                            map.insert(uuid, ep);
+                        }
+                    };
+                    // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
+                    // endpoints.insert(idx, entry);
+                    // map = Arc::new(new_map);
+                    if rts_tx.send(map.clone()).is_err() {
+                        return true;
+                    }; //  no handles are left so shut it down  TODO log the error
+
+                    // TODO announce registration to peers
+                }
+                BrokerMsg::DeadLink(uuid) => {
+                    // let mut new_map = (*map).clone();
+                    let Some(endpoint) = map.get_mut(&uuid) else {
+                        return false;
+                    };
+                    match endpoint {
+                        Endpoint::Unicast(v) => {
+                            let size = v.len();
+                            v.retain(|ep| !ep.dest.is_closed());
+                            if size != v.len() {
+                                // map = Arc::new(new_map);
+                                if rts_tx.send(map.clone()).is_err() {
+                                    return true;
+                                }
+                            }
+                        }
+                        Endpoint::Broadcast(_) => todo!(),
+                        // Endpoint::External(_) => { todo!() }
+                    };
+                    // let size = endpoints.len();
+                    // endpoints.retain(|ep| !ep.dest.is_closed());
+                    // if size != endpoints.len() {
+                    //     let map = Arc::new(new_map);
+                    //     if rts_tx.send(map).is_err() {
+                    //         should_shutdown = true;
+                    //     }
+                    // }
+                } // _ => { todo!() },
+            }
+            false
+        };
+
         loop {
-            if *bc_rx.borrow_and_update() == BusControlMsg::Shutdown || should_shutdown {
+            if *bc_rx.borrow() == BusControlMsg::Shutdown || should_shutdown {
                 shutdown_routing(map);
 
                 break;
             }
-
+            #[cfg(feature = "tokio")]
             select! {
                 _ = bc_rx.changed() => {
                     match *bc_rx.borrow() {
@@ -359,76 +500,24 @@ impl<'a> MsgBus {
                     }
                 },
 
-                msg = rx.recv() => {
-                    let Some(msg) = msg else { break };
-                    match msg {
-                        BrokerMsg::Subscribe(_uuid, _tx) => {
+                msg = rx.recv() => should_shutdown = process_message(msg),
 
-                            todo!()
-                        }
-                        BrokerMsg::RegisterAnycast(uuid, tx) => {
-                            let entry = UnicastEntry {
-                                cost: 0,
-                                dest: tx.clone()
-                            };
-                            // TODO Make the Routes have Cow elements for ease of cloning
-                            // let mut new_map = (*map).clone();
-                            let endpoint = map.get_mut(&uuid);
-                            match endpoint {
-                                Some(Endpoint::Unicast(v)) => { v.insert(entry); },
-                                Some(Endpoint::Broadcast(_)) => {
-                                    let msg = ClientMessage::FailedRegistration(uuid);
-                                    let _ = tx.send(msg);
-                                    continue
-                                },
-                                Some(Endpoint::External(_)) => {},
-                                None => {
-                                    let mut v = SortedVec::new();
-                                    v.insert(entry);
-                                    let ep = Endpoint::Unicast(v);
-                                    map.insert(uuid, ep);
-                                } ,
+            };
 
-                            };
-                            // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
-                            // endpoints.insert(idx, entry);
-                            // map = Arc::new(new_map);
-                            if rts_tx.send(map.clone()).is_err() {
-                                should_shutdown = true;
-                            }  //  no handles are left so shut it down  TODO log the error
-
-                            // TODO announce registration to peers
-                        },
-                        BrokerMsg::DeadLink(uuid) => {
-                            // let mut new_map = (*map).clone();
-                            let Some(endpoint) = map.get_mut(&uuid) else { continue };
-                            match endpoint {
-                                Endpoint::Unicast(v) => {
-                                    let size = v.len();
-                                    v.retain(|ep| !ep.dest.is_closed());
-                                    if size != v.len() {
-                                        // map = Arc::new(new_map);
-                                        if rts_tx.send(map.clone()).is_err() {
-                                            should_shutdown = true;
-                                        }
-                                    }
-                                },
-                                Endpoint::Broadcast(_) => todo!(),
-                                Endpoint::External(_) => { todo!() }
-                            };
-                            // let size = endpoints.len();
-                            // endpoints.retain(|ep| !ep.dest.is_closed());
-                            // if size != endpoints.len() {
-                            //     let map = Arc::new(new_map);
-                            //     if rts_tx.send(map).is_err() {
-                            //         should_shutdown = true;
-                            //     }
-                            // }
-
-                        }
-                        // _ => { todo!() },
+            #[cfg(feature = "dioxus-web")]
+            select! {
+                _ = bc_rx.changed().fuse() => {
+                    match *bc_rx.borrow() {
+                        BusControlMsg::Run => {},  // should never receive this but it's a non-issue
+                        BusControlMsg::Shutdown => {
+                            println!("Received shutdown request");
+                            should_shutdown = true;
+                            // break 'main;
+                        }// TOOD log this
                     }
                 },
+
+                msg = rx.next() => should_shutdown = process_message(msg),
 
             };
         }
@@ -440,7 +529,12 @@ fn shutdown_routing(map: Routes) {
         match entry {
             Endpoint::Unicast(v) => {
                 for ue in v.iter() {
-                    match ue.dest.send(ClientMessage::Shutdown) {
+                    #[cfg(feature = "tokio")]
+                    let res = ue.dest.send(ClientMessage::Shutdown);
+                    #[cfg(feature = "dioxus-web")]
+                    let res = ue.dest.unbounded_send(ClientMessage::Shutdown);
+
+                    match res {
                         Ok(_) => {
                             // println!("Sent shutdown to {id}")
                             // TODO LOG
@@ -450,7 +544,7 @@ fn shutdown_routing(map: Routes) {
                 }
             }
             Endpoint::Broadcast(_) => todo!(),
-            Endpoint::External(_) => todo!(),
+            // Endpoint::External(_) => todo!(),
         }
     }
 }

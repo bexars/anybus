@@ -15,7 +15,9 @@ use tokio::select;
 async fn main() {
     // let addr = SocketAddr::new(*LISTEN_ADDRESS, LISTEN_PORT);
     let sock_addr = SocketAddr::from_str("[ff02::123%11]:3069").unwrap();
-    let IpAddr::V6(ip_addr) = sock_addr.ip() else { panic!() };
+    let IpAddr::V6(ip_addr) = sock_addr.ip() else {
+        panic!()
+    };
 
     let socket = tokio::net::UdpSocket::bind(sock_addr).await.unwrap();
     socket.join_multicast_v6(&ip_addr, 11).unwrap();

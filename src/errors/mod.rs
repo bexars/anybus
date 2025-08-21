@@ -21,7 +21,7 @@ pub enum ReceiveError {
 
 /// Errors from various parts of MsgBus
 #[derive(Error, Debug)]
-pub enum MsgBusError {
+pub enum MsgBusHandleError {
     /// Send failed for unknown reason.  Original message is returned in the error
     #[error("Unable to send.  The passed Message is returned within this error")]
     SendError(Box<dyn BusRider>),
