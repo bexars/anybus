@@ -9,11 +9,11 @@
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
 
-use common::random_uuid;
+// use common::random_uuid;
 use erased_serde::Serialize;
 use errors::ReceiveError;
 
-// use futures::{select, FutureExt, StreamExt};
+use futures::{select, FutureExt, StreamExt};
 // #[cfg(feature = "dioxus-web")]
 use serde::de::DeserializeOwned;
 use sorted_vec::partial::SortedVec;
@@ -21,10 +21,14 @@ use std::any::{Any, TypeId};
 use std::mem::swap;
 use std::{collections::HashMap, error::Error, marker::PhantomData};
 
-use tokio::sync::oneshot::Receiver as OneShotReceiver;
+// use tokio::sync::oneshot::Receiver as OneShotReceiver;
 
+#[cfg(feature = "dioxus")]
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+
+#[cfg(feature = "tokio")]
 use tokio::{
-    select,
+    // select,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
@@ -102,7 +106,7 @@ impl PartialEq for UnicastEntry {
     }
 }
 
-#[cfg(feature = "tokio")]
+// #[cfg(feature = "tokio")]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 
@@ -112,14 +116,14 @@ pub(crate) enum Endpoint {
     // External(tokio::sync::mpsc::Sender<ClientMessage>),
 }
 
-#[cfg(feature = "dioxus-web")]
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) enum Endpoint {
-    Unicast(SortedVec<UnicastEntry>),
-    Broadcast(dioxus::prelude::UnboundedSender<ClientMessage>),
-    // External(tokio::sync::mpsc::Sender<ClientMessage>),
-}
+// #[cfg(feature = "dioxus")]
+// #[allow(dead_code)]
+// #[derive(Debug, Clone)]
+// pub(crate) enum Endpoint {
+//     Unicast(SortedVec<UnicastEntry>),
+//     Broadcast(dioxus::prelude::UnboundedSender<ClientMessage>),
+//     // External(tokio::sync::mpsc::Sender<ClientMessage>),
+// }
 
 // #[derive(Debug, Clone)]
 // pub(crate) enum NextHop {
@@ -152,7 +156,7 @@ impl Handle {
     ) -> Result<BusListener<T>, Box<dyn Error>> {
         #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        #[cfg(feature = "dioxus-web")]
+        #[cfg(feature = "dioxus")]
         let (tx, rx) = futures_channel::mpsc::unbounded();
 
         let bl = BusListener::<T> {
@@ -162,11 +166,14 @@ impl Handle {
 
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
 
-        #[cfg(feature = "dioxus-web")]
+        #[cfg(feature = "dioxus")]
         self.tx.unbounded_send(register_msg)?;
 
         #[cfg(feature = "tokio")]
         self.tx.send(register_msg)?;
+
+        #[cfg(feature = "tokio")]
+        info!("Send register_msg");
         Ok(bl)
     }
 
@@ -199,10 +206,14 @@ impl Handle {
         let u = payload.default_uuid();
         let payload = Box::new(payload);
         let mut msg = Some(ClientMessage::Message(u, payload));
+        #[cfg(feature = "dioxus")]
+        dioxus::logger::tracing::info!("Received msg in send(): {:?}", msg);
         match self.rts_rx.borrow().get(&u) {
             Some(endpoint) => {
                 let mut success = false;
                 let mut had_failure = false;
+                #[cfg(feature = "dioxus")]
+                dioxus::logger::tracing::info!("Found endpoint: {:?}", endpoint);
                 // TODO Turn this into a scan iterator or just about anything better
                 match endpoint {
                     Endpoint::Unicast(v) => {
@@ -213,10 +224,12 @@ impl Handle {
                             swap(&mut m, &mut msg);
                             let m = m.expect("Should never panic here. Problem swapping data");
 
+                            #[cfg(feature = "dioxus")]
+                            dioxus::logger::tracing::info!("About to send: {:?}", m);
                             #[cfg(feature = "tokio")]
                             let send_result = entry.dest.send(m);
 
-                            #[cfg(feature = "dioxus-web")]
+                            #[cfg(feature = "dioxus")]
                             let send_result = entry.dest.unbounded_send(m);
 
                             match send_result {
@@ -233,10 +246,10 @@ impl Handle {
                                 //     let mut m = Some(m);
                                 //     swap(&mut m, &mut msg)
                                 // }
-                                // #[cfg(feature = "dioxus-web")]
+                                // #[cfg(feature = "dioxus")]
                                 Err(e) => {
                                     had_failure = true;
-                                    #[cfg(feature = "dioxus-web")]
+                                    #[cfg(feature = "dioxus")]
                                     let mut m = Some(e.into_inner());
                                     #[cfg(feature = "tokio")]
                                     let mut m = Some(e.0);
@@ -253,7 +266,7 @@ impl Handle {
                 if had_failure {
                     #[cfg(feature = "tokio")]
                     self.tx.send(BrokerMsg::DeadLink(u));
-                    #[cfg(feature = "dioxus-web")]
+                    #[cfg(feature = "dioxus")]
                     self.tx.unbounded_send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
                 }
 
@@ -273,6 +286,7 @@ impl Handle {
     }
 }
 
+#[derive(Debug)]
 /// Helper struct returned by [Handle::register_anycast()]
 pub struct BusListener<T: BusRider> {
     rx: UnboundedReceiver<ClientMessage>,
@@ -286,11 +300,15 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     /// If this was created from a failed registration, the first message will be [RegistrationFailed](errors::ReceiveError::RegistrationFailed)
     pub async fn recv(&mut self) -> Result<T, ReceiveError> {
         loop {
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("In recv loop: {:?}", self);
+
             #[cfg(feature = "tokio")]
             let new_msg = self.rx.recv().await;
-            #[cfg(feature = "dioxus-web")]
+            #[cfg(feature = "dioxus")]
             let new_msg = self.rx.next().await;
-
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
             match new_msg {
                 None => {
                     return Err(ReceiveError::ConnectionClosed);
@@ -363,7 +381,10 @@ impl<'a> MsgBus {
     /// used for normal interaction with the system
     ///
     pub fn new() -> (BusControlHandle, Handle) {
+        #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        #[cfg(feature = "dioxus")]
+        let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let (bc_tx, bc_rx) = async_watch::channel(BusControlMsg::Run);
 
@@ -375,6 +396,9 @@ impl<'a> MsgBus {
 
         let handle = Handle { tx, rts_rx };
 
+        #[cfg(feature = "dioxus")]
+        dioxus::prelude::spawn(Self::run(map, rx, bc_rx, rts_tx));
+        #[cfg(feature = "tokio")]
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
 
         (control_handle, handle)
@@ -396,13 +420,16 @@ impl<'a> MsgBus {
     ) {
         let mut should_shutdown = false;
 
-        let id = random_uuid();
+        // let id = random_uuid();
         // let router = Router::new(id, bc_rx.clone());
         // dbg!("Created ND Router");
         // let nd_handle = tokio::spawn(router.run());
         // dbg!("Started Neighbor discovery", nd_handle);
 
         let mut process_message = |msg: Option<BrokerMsg>| -> bool {
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("Processing msg: {:?}", msg);
+
             let Some(msg) = msg else { return true };
             match msg {
                 BrokerMsg::Subscribe(_uuid, _tx) => {
@@ -424,7 +451,7 @@ impl<'a> MsgBus {
                             let msg = ClientMessage::FailedRegistration(uuid);
                             #[cfg(feature = "tokio")]
                             let _ = tx.send(msg);
-                            #[cfg(feature = "dioxus-web")]
+                            #[cfg(feature = "dioxus")]
                             let _ = tx.unbounded_send(msg);
                             return false;
                         }
@@ -439,10 +466,13 @@ impl<'a> MsgBus {
                     // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
                     // endpoints.insert(idx, entry);
                     // map = Arc::new(new_map);
+                    #[cfg(feature = "dioxus")]
+                    dioxus::logger::tracing::info!("Sending updated map {:?}", map);
                     if rts_tx.send(map.clone()).is_err() {
                         return true;
                     }; //  no handles are left so shut it down  TODO log the error
-
+                    #[cfg(feature = "dioxus")]
+                    dioxus::logger::tracing::info!("Map Sent");
                     // TODO announce registration to peers
                 }
                 BrokerMsg::DeadLink(uuid) => {
@@ -478,6 +508,8 @@ impl<'a> MsgBus {
         };
 
         loop {
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("Entering processing loop");
             if *bc_rx.borrow() == BusControlMsg::Shutdown || should_shutdown {
                 shutdown_routing(map);
 
@@ -485,20 +517,27 @@ impl<'a> MsgBus {
             }
 
             select! {
-                _ = bc_rx.changed() => {
-                    match *bc_rx.borrow() {
-                        BusControlMsg::Run => {},  // should never receive this but it's a non-issue
-                        BusControlMsg::Shutdown => {
-                            println!("Received shutdown request");
-                            should_shutdown = true;
-                            // break 'main;
-                        }// TOOD log this
-                    }
-                },
-
-                msg = rx.recv() => should_shutdown = process_message(msg),
+            // select! {
+                // change_value = bc_rx.changed().fuse() => {
+                //     #[cfg(feature = "dioxus")]
+                //     dioxus::logger::tracing::info!("bc_rx.changed()");
+                //     match *bc_rx.borrow() {
+                //         BusControlMsg::Run => {},  // should never receive this but it's a non-issue
+                //         BusControlMsg::Shutdown => {
+                //             println!("Received shutdown request");
+                //             should_shutdown = true;
+                //             // break 'main;
+                //         }// TOOD log this
+                //     }
+                // },
+                // #[cfg(feature = "dioxus")]
+                msg = rx.next().fuse() => should_shutdown = process_message(msg),
+                // #[cfg(feature = "tokio")]
+                // msg = rx.recv().fuse() => should_shutdown = process_message(msg),
 
             };
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("End of processing loop");
         }
     }
 }
@@ -510,7 +549,7 @@ fn shutdown_routing(map: Routes) {
                 for ue in v.iter() {
                     #[cfg(feature = "tokio")]
                     let res = ue.dest.send(ClientMessage::Shutdown);
-                    #[cfg(feature = "dioxus-web")]
+                    #[cfg(feature = "dioxus")]
                     let res = ue.dest.unbounded_send(ClientMessage::Shutdown);
 
                     match res {
