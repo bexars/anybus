@@ -31,6 +31,12 @@ impl<E> From<futures::channel::mpsc::TrySendError<E>> for ReceiveError {
     }
 }
 
+impl<E> From<tokio::sync::mpsc::error::SendError<E>> for ReceiveError {
+    fn from(_value: tokio::sync::mpsc::error::SendError<E>) -> Self {
+        ReceiveError::ConnectionClosed
+    }
+}
+
 /// Errors from various parts of MsgBus
 #[derive(Error, Debug)]
 pub enum MsgBusHandleError {

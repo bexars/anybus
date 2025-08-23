@@ -14,7 +14,7 @@
 use erased_serde::Serialize;
 use errors::ReceiveError;
 
-use futures::{select, FutureExt, StreamExt};
+// use futures::{FutureExt, StreamExt};
 use itertools::{FoldWhile, Itertools};
 // #[cfg(feature = "dioxus-web")]
 use serde::de::DeserializeOwned;
@@ -25,12 +25,13 @@ use std::{collections::HashMap, error::Error, marker::PhantomData};
 
 // use tokio::sync::oneshot::Receiver as OneShotReceiver;
 
-#[cfg(feature = "dioxus")]
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+// #[cfg(feature = "dioxus")]
+// use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 
-#[cfg(feature = "tokio")]
+// #[cfg(feature = "tokio")]
 use tokio::{
-    // select,
+    // stream:: StreamExt,
+    select,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 
@@ -208,10 +209,10 @@ impl Handle {
         // uuid: Uuid,
     ) -> Result<BusListener<T>, ReceiveError> {
         let uuid = T::MSGBUS_UUID;
-        #[cfg(feature = "tokio")]
+        // #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        #[cfg(feature = "dioxus")]
-        let (tx, rx) = futures_channel::mpsc::unbounded();
+        // #[cfg(feature = "dioxus")]
+        // let (tx, rx) = futures_channel::mpsc::unbounded();
 
         let mut bl = BusListener::<T> {
             rx,
@@ -221,10 +222,10 @@ impl Handle {
 
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
 
-        #[cfg(feature = "dioxus")]
-        self.tx.unbounded_send(register_msg)?;
+        // #[cfg(feature = "dioxus")]
+        // self.tx.unbounded_send(register_msg)?;
 
-        #[cfg(feature = "tokio")]
+        // #[cfg(feature = "tokio")]
         self.tx.send(register_msg)?;
 
         #[cfg(feature = "tokio")]
@@ -263,13 +264,10 @@ impl Handle {
     /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
     /// The system will deliver regardless of end type
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
-        // let u = payload.default_uuid();
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
         let mut msg = Some(ClientMessage::Message(u, payload));
-        // let mut msg2 = msg.clone().unwrap();
-        #[cfg(feature = "dioxus")]
-        dioxus::logger::tracing::info!("Received msg in send(): {:?}", msg);
+
         match self.rts_rx.borrow().get(&u) {
             Some(endpoint) => {
                 let mut success = false;
@@ -328,14 +326,14 @@ impl Handle {
                                     swap(&mut m, &mut msg);
                                     let m = m.unwrap();
 
-                                    let res = tx.unbounded_send(m);
+                                    let res = tx.send(m);
                                     match res {
                                         Ok(_) => {
                                             success = true;
                                             FoldWhile::Done(prev)
                                         }
                                         Err(e) => {
-                                            let m = e.into_inner();
+                                            let m = e.0;
                                             let mut m = Some(m);
                                             swap(&mut m, &mut msg);
                                             prev.push(tx.clone());
@@ -355,10 +353,10 @@ impl Handle {
                 }
 
                 if had_failure {
-                    #[cfg(feature = "tokio")]
-                    self.tx.send(BrokerMsg::DeadLink(u));
-                    #[cfg(feature = "dioxus")]
-                    let _ = self.tx.unbounded_send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
+                    // #[cfg(feature = "tokio")]
+                    // self.tx.send(BrokerMsg::DeadLink(u));
+                    // #[cfg(feature = "dioxus")]
+                    let _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
                 }
 
                 if !success {
@@ -400,15 +398,15 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     /// If this was created from a failed registration, the first message will be [RegistrationFailed](errors::ReceiveError::RegistrationFailed)
     pub async fn recv(&mut self) -> Result<T, ReceiveError> {
         loop {
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("In recv loop: {:?}", self);
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("In recv loop: {:?}", self);
 
-            #[cfg(feature = "tokio")]
+            // #[cfg(feature = "tokio")]
             let new_msg = self.rx.recv().await;
-            #[cfg(feature = "dioxus")]
-            let new_msg = self.rx.next().await;
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
+            // #[cfg(feature = "dioxus")]
+            // let new_msg = self.rx.next().await;
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
             match new_msg {
                 None => {
                     return Err(ReceiveError::ConnectionClosed);
@@ -451,15 +449,15 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     /// Similar to recv() but with a enum denoting a message or a RPC request
     pub async fn recv_rpc(&mut self) -> Result<T, ReceiveError> {
         loop {
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("In recv loop: {:?}", self);
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("In recv loop: {:?}", self);
 
-            #[cfg(feature = "tokio")]
+            // #[cfg(feature = "tokio")]
             let new_msg = self.rx.recv().await;
-            #[cfg(feature = "dioxus")]
-            let new_msg = self.rx.next().await;
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
+            // #[cfg(feature = "dioxus")]
+            // let new_msg = self.rx.next().await;
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
             match new_msg {
                 None => {
                     return Err(ReceiveError::ConnectionClosed);
@@ -504,7 +502,7 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
         match self.registration_status {
             RegistrationStatus::Registered => true,
             RegistrationStatus::Failed => false,
-            RegistrationStatus::Pending => match self.rx.next().await {
+            RegistrationStatus::Pending => match self.rx.recv().await {
                 Some(ClientMessage::SuccessfulRegistration(_)) => {
                     self.registration_status = RegistrationStatus::Registered;
                     true
@@ -551,10 +549,10 @@ impl MsgBus {
     ///
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (BusControlHandle, Handle) {
-        #[cfg(feature = "tokio")]
+        // #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        #[cfg(feature = "dioxus")]
-        let (tx, rx) = futures::channel::mpsc::unbounded();
+        // #[cfg(feature = "dioxus")]
+        // let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let (bc_tx, bc_rx) = async_watch::channel(BusControlMsg::Run);
 
@@ -598,8 +596,8 @@ impl MsgBus {
         // dbg!("Started Neighbor discovery", nd_handle);
 
         let mut process_message = |msg: Option<BrokerMsg>| -> bool {
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("Processing msg: {:?}", msg);
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("Processing msg: {:?}", msg);
 
             let Some(msg) = msg else { return true };
             match msg {
@@ -616,10 +614,10 @@ impl MsgBus {
                         // }
                         Some(Nexthop::Broadcast(_)) => {
                             let msg = ClientMessage::FailedRegistration(uuid);
-                            #[cfg(feature = "tokio")]
+                            // #[cfg(feature = "tokio")]
                             let _ = tx.send(msg);
-                            #[cfg(feature = "dioxus")]
-                            let _ = tx.unbounded_send(msg);
+                            // #[cfg(feature = "dioxus")]
+                            // let _ = tx.unbounded_send(msg);
                             return false;
                         }
                         Some(Nexthop::Anycast(v)) => {
@@ -652,7 +650,7 @@ impl MsgBus {
                        // #[cfg(feature = "dioxus")]
                        // dioxus::logger::tracing::info!("Map Sent");
                        // TODO announce registration to peers
-                    let _ = tx.unbounded_send(ClientMessage::SuccessfulRegistration(uuid));
+                    let _ = tx.send(ClientMessage::SuccessfulRegistration(uuid));
                 }
                 BrokerMsg::DeadLink(uuid) => {
                     // let mut new_map = (*map).clone();
@@ -699,8 +697,8 @@ impl MsgBus {
         };
 
         loop {
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("Entering processing loop");
+            // #[cfg(feature = "dioxus")]
+            // dioxus::logger::tracing::info!("Entering processing loop");
             if *bc_rx.borrow() == BusControlMsg::Shutdown || should_shutdown {
                 shutdown_routing(map);
 
@@ -725,13 +723,11 @@ impl MsgBus {
                 //AWAY
                 //
                 // #[cfg(feature = "dioxus")]
-                msg = rx.next().fuse() => should_shutdown = process_message(msg),
+                msg = rx.recv() => should_shutdown = process_message(msg),
                 // #[cfg(feature = "tokio")]
                 // msg = rx.recv().fuse() => should_shutdown = process_message(msg),
 
             };
-            #[cfg(feature = "dioxus")]
-            dioxus::logger::tracing::info!("End of processing loop");
         }
     }
 }
@@ -759,7 +755,7 @@ fn shutdown_routing(map: Routes) {
                 for entry in sorted_vec.iter() {
                     match &entry.dest_type {
                         AnycastDestType::Local(tx) => {
-                            let _ = tx.unbounded_send(ClientMessage::Shutdown);
+                            let _ = tx.send(ClientMessage::Shutdown);
                         }
                         AnycastDestType::Remote(_uuid) => {} //TODO inform neighbor,
                     }
