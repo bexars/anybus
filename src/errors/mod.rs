@@ -19,6 +19,18 @@ pub enum ReceiveError {
     Shutdown,
 }
 
+impl From<futures::channel::mpsc::SendError> for ReceiveError {
+    fn from(_: futures::channel::mpsc::SendError) -> Self {
+        ReceiveError::ConnectionClosed
+    }
+}
+
+impl<E> From<futures::channel::mpsc::TrySendError<E>> for ReceiveError {
+    fn from(_: futures::channel::mpsc::TrySendError<E>) -> Self {
+        ReceiveError::ConnectionClosed
+    }
+}
+
 /// Errors from various parts of MsgBus
 #[derive(Error, Debug)]
 pub enum MsgBusHandleError {

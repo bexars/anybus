@@ -1,73 +1,66 @@
- use std::str::FromStr;
+use std::str::FromStr;
 
-use syn::{parse_macro_input, ItemEnum};
- use quote::quote; 
 use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput, ItemEnum};
 use uuid::Uuid;
-
-
 
 pub(crate) fn bus_uuid_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut orig = item.clone();
+
     let uuid = attr.to_string();
     let uuid = uuid.trim_matches('"');
-
-    // println!("uuid: {uuid}");
     let uuid = Uuid::from_str(uuid).expect("Error decoding UUID");
-    let input = parse_macro_input!(item as ItemEnum);
-    
-    let ItemEnum {
 
-        // The visibility specifier of this function
-        vis,
- 
-        // Other attributes applied to this function
-        attrs,
-        enum_token,
-        ident,
-        generics,
-        brace_token,
-        variants,
-    } = input;
+    let ast: DeriveInput = syn::parse(item).unwrap();
+
+    let DeriveInput { vis, ident, .. } = ast;
+
+    // let input = parse_macro_input!(item as ItemEnum);
+
+    // let ItemEnum {
+    //     // The visibility specifier of this function
+    //     vis,
+
+    //     // Other attributes applied to this function
+    //     attrs,
+    //     enum_token,
+    //     ident,
+    //     generics,
+    //     brace_token,
+    //     variants,
+    // } = input;
 
     let uuid_u128_str = uuid.as_u128();
 
     let addon: TokenStream = quote!(
 
-        impl msgbus::BusRider for #ident {
-            fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
-                    self
-            }
-            fn default_uuid(&self) -> Uuid {
-                #ident::get_uuid()
-            }
+        impl msgbus::BusRiderWithUuid for #ident {
+            const MSGBUS_UUID: uuid::Uuid = uuid::Uuid::from_u128(#uuid_u128_str);
         }
 
-        impl #ident {
-
-            const fn get_uuid() -> Uuid {
-                Uuid::from_u128(#uuid_u128_str)
-            }
-        }
-    ).into();
+    )
+    .into();
 
     orig.extend(addon);
     orig
 }
 
+// Old definition
+// const UUID: Uuid = Uuid::from_u128(#uuid_u128_str);
+// fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+//         self
+// }
+// fn default_uuid(&self) -> Uuid {
+//     #ident::get_uuid()
+// }
+// }
 
-
-
-
-
-
-
-
-
-
-
-
-
+// impl #ident {
+// const fn get_uuid() -> Uuid {
+//     uuid::Uuid::from_u128(#uuid_u128_str)
+// }
+// }
 
 // pub fn old_bus_uuid(attr: TokenStream, mut item: TokenStream) -> TokenStream {
 //     let text = r#"

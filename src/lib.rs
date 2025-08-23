@@ -9,15 +9,19 @@
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
 
+// use dioxus::Ok;
 // use common::random_uuid;
 use erased_serde::Serialize;
 use errors::ReceiveError;
 
 use futures::{select, FutureExt, StreamExt};
+use itertools::{FoldWhile, Itertools};
 // #[cfg(feature = "dioxus-web")]
 use serde::de::DeserializeOwned;
+use serde_cbor::de;
 use sorted_vec::partial::SortedVec;
 use std::any::{Any, TypeId};
+use std::default;
 use std::mem::swap;
 use std::{collections::HashMap, error::Error, marker::PhantomData};
 
@@ -46,15 +50,14 @@ pub mod errors;
 // mod router;
 pub use msgbus_macro::bus_uuid;
 
-/// Any message handled by [MsgBus] must implemnet this.
+/// Any message handled by [MsgBus] must have these properties
 ///
 ///
-pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static {
-    /// The uuid that should be bound to if it's not overridden during registration
+pub trait BusRider: Any + Serialize + Send + Sync + std::fmt::Debug + 'static {
+    // The uuid that should be bound to if it's not overridden during registration
+    // fn default_uuid(&self) -> Uuid;
 
-    fn default_uuid(&self) -> Uuid;
-
-    /// The as_any function needs to simply return 'self'
+    // The as_any function needs to simply return 'self'
     // ```
     // impl dyn BusRider {
     //    fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
@@ -62,11 +65,25 @@ pub trait BusRider: Serialize + Send + Sync + std::fmt::Debug + 'static {
     //    }
     // }
     // ```
-    fn as_any(self: Box<Self>) -> Box<dyn Any>;
-
-    // fn uuid<T>() -> Uuid
-    // where T: ?Sized;
+    // fn as_any(self: Box<Self>) -> Box<dyn Any>;
 }
+
+/// Blanket implementation for any type that has the correct traits
+///
+impl<T: Any + Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
+
+/// Trait for ease of sending over the bus without the client needing to know the UUID of the default receiver
+pub trait BusRiderWithUuid: BusRider {
+    /// The default Uuid that will be used if not overridden during registration
+    const MSGBUS_UUID: Uuid;
+}
+
+/// Trait for denoting the type of a returned RPC response
+pub trait BusRiderRpc: BusRider {
+    /// The type of the response that will be returned by the RPC call
+    type Response;
+}
+
 #[allow(dead_code)]
 #[derive(Debug)]
 enum BrokerMsg {
@@ -85,22 +102,58 @@ enum ClientMessage {
         msg: Box<dyn BusRider>,
     },
     FailedRegistration(Uuid),
+    SuccessfulRegistration(Uuid),
     Shutdown,
 }
 
+enum UnicastType {
+    Datagram,
+    Rpc,
+    RpcResponse,
+}
+
 #[derive(Debug, Clone)]
-pub(crate) struct UnicastEntry {
+pub(crate) struct AnycastEntry {
     cost: u16,
     dest: UnboundedSender<ClientMessage>,
 }
 
-impl PartialOrd for UnicastEntry {
+impl PartialOrd for AnycastEntry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.cost.partial_cmp(&other.cost)
     }
 }
 
-impl PartialEq for UnicastEntry {
+impl PartialEq for AnycastEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cost == other.cost
+    }
+}
+
+pub(crate) struct Node {
+    id: Uuid,
+    //TODO store how to get to this node
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum AnycastDestType {
+    Local(UnboundedSender<ClientMessage>),
+    Remote(Uuid),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnycastDest {
+    cost: u16,
+    dest_type: AnycastDestType,
+}
+
+impl PartialOrd for AnycastDest {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.cost.partial_cmp(&other.cost)
+    }
+}
+
+impl PartialEq for AnycastDest {
     fn eq(&self, other: &Self) -> bool {
         self.cost == other.cost
     }
@@ -110,8 +163,9 @@ impl PartialEq for UnicastEntry {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 
-pub(crate) enum Endpoint {
-    Unicast(SortedVec<UnicastEntry>),
+pub(crate) enum Nexthop {
+    // AnycastOld(SortedVec<AnycastEntry>),
+    Anycast(SortedVec<AnycastDest>),
     Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
     // External(tokio::sync::mpsc::Sender<ClientMessage>),
 }
@@ -150,18 +204,20 @@ impl Handle {
 
     // TODO: Cleanup the errors being sent
 
-    pub fn register_anycast<T: BusRider + DeserializeOwned>(
+    pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
-        uuid: Uuid,
-    ) -> Result<BusListener<T>, Box<dyn Error>> {
+        // uuid: Uuid,
+    ) -> Result<BusListener<T>, ReceiveError> {
+        let uuid = T::MSGBUS_UUID;
         #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         #[cfg(feature = "dioxus")]
         let (tx, rx) = futures_channel::mpsc::unbounded();
 
-        let bl = BusListener::<T> {
+        let mut bl = BusListener::<T> {
             rx,
             _pd: PhantomData,
+            registration_status: Default::default(),
         };
 
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
@@ -174,7 +230,12 @@ impl Handle {
 
         #[cfg(feature = "tokio")]
         info!("Send register_msg");
-        Ok(bl)
+
+        if bl.is_registered().await {
+            Ok(bl)
+        } else {
+            Err(ReceiveError::RegistrationFailed)
+        }
     }
 
     /// Placeholder - Not Implemented
@@ -202,64 +263,95 @@ impl Handle {
 
     /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
     /// The system will deliver regardless of end type
-    pub fn send<T: BusRider>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
-        let u = payload.default_uuid();
+    pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
+        // let u = payload.default_uuid();
+        let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
         let mut msg = Some(ClientMessage::Message(u, payload));
+        // let mut msg2 = msg.clone().unwrap();
         #[cfg(feature = "dioxus")]
         dioxus::logger::tracing::info!("Received msg in send(): {:?}", msg);
         match self.rts_rx.borrow().get(&u) {
             Some(endpoint) => {
                 let mut success = false;
                 let mut had_failure = false;
-                #[cfg(feature = "dioxus")]
-                dioxus::logger::tracing::info!("Found endpoint: {:?}", endpoint);
+
                 // TODO Turn this into a scan iterator or just about anything better
                 match endpoint {
-                    Endpoint::Unicast(v) => {
-                        // this is all convoluted to retrieve the original msg and send it to the next possible destination
+                    // Nexthop::AnycastOld(v) => {
+                    //     // this is all convoluted to retrieve the original msg and send it to the next possible destination
+                    //     for entry in v.iter() {
+                    //         let mut m = None;
+                    //         swap(&mut m, &mut msg);
+                    //         let m = m.expect("Should never panic here. Problem swapping data");
 
-                        for entry in v.iter() {
-                            let mut m = None;
-                            swap(&mut m, &mut msg);
-                            let m = m.expect("Should never panic here. Problem swapping data");
+                    //         #[cfg(feature = "tokio")]
+                    //         let send_result = entry.dest.send(m);
 
-                            #[cfg(feature = "dioxus")]
-                            dioxus::logger::tracing::info!("About to send: {:?}", m);
-                            #[cfg(feature = "tokio")]
-                            let send_result = entry.dest.send(m);
+                    //         #[cfg(feature = "dioxus")]
+                    //         let send_result = entry.dest.unbounded_send(m);
 
-                            #[cfg(feature = "dioxus")]
-                            let send_result = entry.dest.unbounded_send(m);
+                    //         match send_result {
+                    //             Ok(_) => {
+                    //                 success = true;
+                    //                 if !had_failure {
+                    //                     return Ok(());
+                    //                 }
+                    //                 //TODO Something isn't right here.  Why !had_failure?
+                    //                 break;
+                    //             }
+                    //             // #[cfg(feature = "tokio")]
+                    //             // Err(SendError(m)) => {
+                    //             //     had_failure = true;
+                    //             //     let mut m = Some(m);
+                    //             //     swap(&mut m, &mut msg)
+                    //             // }
+                    //             // #[cfg(feature = "dioxus")]
+                    //             Err(e) => {
+                    //                 had_failure = true;
+                    //                 #[cfg(feature = "dioxus")]
+                    //                 let mut m = Some(e.into_inner());
+                    //                 #[cfg(feature = "tokio")]
+                    //                 let mut m = Some(e.0);
 
-                            match send_result {
-                                Ok(_) => {
-                                    success = true;
-                                    if !had_failure {
-                                        return Ok(());
+                    //                 swap(&mut m, &mut msg)
+                    //             }
+                    //         }
+                    //     }
+                    // }
+                    Nexthop::Anycast(dests) => {
+                        //TODO call deadlink on these
+                        let errors = dests
+                            .iter()
+                            .fold_while(Vec::new(), |mut prev, dest| match &dest.dest_type {
+                                AnycastDestType::Local(tx) => {
+                                    let mut m = None;
+                                    swap(&mut m, &mut msg);
+                                    let m = m.unwrap();
+
+                                    let res = tx.unbounded_send(m);
+                                    match res {
+                                        Ok(_) => {
+                                            success = true;
+                                            FoldWhile::Done(prev)
+                                        }
+                                        Err(e) => {
+                                            let m = e.into_inner();
+                                            let mut m = Some(m);
+                                            swap(&mut m, &mut msg);
+                                            prev.push(tx.clone());
+                                            itertools::FoldWhile::Continue(prev)
+                                        }
                                     }
-                                    break;
                                 }
-                                // #[cfg(feature = "tokio")]
-                                // Err(SendError(m)) => {
-                                //     had_failure = true;
-                                //     let mut m = Some(m);
-                                //     swap(&mut m, &mut msg)
-                                // }
-                                // #[cfg(feature = "dioxus")]
-                                Err(e) => {
-                                    had_failure = true;
-                                    #[cfg(feature = "dioxus")]
-                                    let mut m = Some(e.into_inner());
-                                    #[cfg(feature = "tokio")]
-                                    let mut m = Some(e.0);
-
-                                    swap(&mut m, &mut msg)
-                                }
-                            }
-                        }
+                                AnycastDestType::Remote(uuid) => todo!(),
+                            })
+                            .into_inner();
+                        if (errors.len() > 0) {
+                            had_failure = true;
+                        };
                     }
-                    Endpoint::Broadcast(_) => todo!(),
+                    Nexthop::Broadcast(_) => todo!(),
                     // Endpoint::External(_) => todo!(),
                 }
 
@@ -267,7 +359,7 @@ impl Handle {
                     #[cfg(feature = "tokio")]
                     self.tx.send(BrokerMsg::DeadLink(u));
                     #[cfg(feature = "dioxus")]
-                    self.tx.unbounded_send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
+                    let _ = self.tx.unbounded_send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
                 }
 
                 if !success {
@@ -286,10 +378,19 @@ impl Handle {
     }
 }
 
+#[derive(Debug, Default)]
+enum RegistrationStatus {
+    #[default]
+    Pending,
+    Registered,
+    Failed,
+}
+
 #[derive(Debug)]
 /// Helper struct returned by [Handle::register_anycast()]
 pub struct BusListener<T: BusRider> {
     rx: UnboundedReceiver<ClientMessage>,
+    registration_status: RegistrationStatus,
     _pd: PhantomData<T>,
 }
 
@@ -316,9 +417,9 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                 Some(msg) => {
                     match msg {
                         ClientMessage::Message(_id, payload) => {
-                            let payload = payload.as_any();
+                            // let payload = payload.as_any();
                             if TypeId::of::<T>() == (*payload).type_id() {
-                                let payload: Box<T> = payload.downcast().unwrap();
+                                let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
                                 // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
                                 return Ok(*payload);
                             } else {
@@ -336,15 +437,84 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                         } => todo!(),
                         ClientMessage::FailedRegistration(_uuid) => {
                             return Err(ReceiveError::RegistrationFailed)
-                        } // BrokerMsg::Register(_, _) => panic!("Should never receive Register from the broker"), // Shouldn't receive these so we'll just ignore it
-                        // TODO Log the bad register request
+                        }
                         ClientMessage::Shutdown => {
                             println!("Shutdown in BusListener");
                             return Err(ReceiveError::Shutdown);
                         }
+                        ClientMessage::SuccessfulRegistration(_uuid) => todo!(),
                     }
                 }
             };
+        }
+    }
+
+    /// Similar to recv() but with a enum denoting a message or a RPC request
+    pub async fn recv_rpc(&mut self) -> Result<T, ReceiveError> {
+        loop {
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("In recv loop: {:?}", self);
+
+            #[cfg(feature = "tokio")]
+            let new_msg = self.rx.recv().await;
+            #[cfg(feature = "dioxus")]
+            let new_msg = self.rx.next().await;
+            #[cfg(feature = "dioxus")]
+            dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
+            match new_msg {
+                None => {
+                    return Err(ReceiveError::ConnectionClosed);
+                }
+                Some(msg) => {
+                    match msg {
+                        ClientMessage::Message(_id, payload) => {
+                            let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                            if TypeId::of::<T>() == (*payload).type_id() {
+                                let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                                // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
+                                return Ok(*payload);
+                            } else {
+                                continue;
+                            }
+                        }
+                        ClientMessage::Bytes(_id, bytes) => match serde_cbor::from_slice(&bytes) {
+                            Ok(payload) => return Ok(payload),
+                            Err(_) => continue,
+                        },
+                        ClientMessage::Rpc {
+                            to: _,
+                            reply_to: _,
+                            msg: _,
+                        } => todo!(),
+                        ClientMessage::FailedRegistration(_uuid) => {
+                            return Err(ReceiveError::RegistrationFailed)
+                        }
+                        ClientMessage::Shutdown => {
+                            println!("Shutdown in BusListener");
+                            return Err(ReceiveError::Shutdown);
+                        }
+                        ClientMessage::SuccessfulRegistration(_uuid) => todo!(),
+                    }
+                }
+            };
+        }
+    }
+
+    /// Check if the client is registered with the bus.
+    pub async fn is_registered(&mut self) -> bool {
+        match self.registration_status {
+            RegistrationStatus::Registered => true,
+            RegistrationStatus::Failed => false,
+            RegistrationStatus::Pending => match self.rx.next().await {
+                Some(ClientMessage::SuccessfulRegistration(_)) => {
+                    self.registration_status = RegistrationStatus::Registered;
+                    true
+                }
+                _ => {
+                    self.registration_status = RegistrationStatus::Failed;
+                    false
+                }
+            },
         }
     }
 }
@@ -366,7 +536,7 @@ impl BusControlHandle {
     }
 }
 
-type Routes = HashMap<Uuid, Endpoint>;
+type Routes = HashMap<Uuid, Nexthop>;
 type RoutesWatchTx = async_watch::Sender<Routes>;
 type RoutesWatchRx = async_watch::Receiver<Routes>;
 
@@ -436,7 +606,7 @@ impl<'a> MsgBus {
                     todo!()
                 }
                 BrokerMsg::RegisterAnycast(uuid, tx) => {
-                    let entry = UnicastEntry {
+                    let entry = AnycastEntry {
                         cost: 0,
                         dest: tx.clone(),
                     };
@@ -444,10 +614,10 @@ impl<'a> MsgBus {
                     // let mut new_map = (*map).clone();
                     let endpoint = map.get_mut(&uuid);
                     match endpoint {
-                        Some(Endpoint::Unicast(v)) => {
-                            v.insert(entry);
-                        }
-                        Some(Endpoint::Broadcast(_)) => {
+                        // Some(Nexthop::AnycastOld(v)) => {
+                        //     v.insert(entry);
+                        // }
+                        Some(Nexthop::Broadcast(_)) => {
                             let msg = ClientMessage::FailedRegistration(uuid);
                             #[cfg(feature = "tokio")]
                             let _ = tx.send(msg);
@@ -455,35 +625,61 @@ impl<'a> MsgBus {
                             let _ = tx.unbounded_send(msg);
                             return false;
                         }
+                        Some(Nexthop::Anycast(v)) => {
+                            let dest = AnycastDest {
+                                cost: 0,
+                                dest_type: AnycastDestType::Local(tx.clone()),
+                            };
+                            v.insert(dest);
+                        }
                         // Some(Endpoint::External(_)) => {}
                         None => {
+                            let dest = AnycastDest {
+                                cost: 0,
+                                dest_type: AnycastDestType::Local(tx.clone()),
+                            };
                             let mut v = SortedVec::new();
-                            v.insert(entry);
-                            let ep = Endpoint::Unicast(v);
+                            v.insert(dest);
+                            let ep = Nexthop::Anycast(v);
                             map.insert(uuid, ep);
                         }
                     };
                     // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
                     // endpoints.insert(idx, entry);
                     // map = Arc::new(new_map);
-                    #[cfg(feature = "dioxus")]
-                    dioxus::logger::tracing::info!("Sending updated map {:?}", map);
+                    // #[cfg(feature = "dioxus")]
+                    // dioxus::logger::tracing::info!("Sending updated map {:?}", map);
                     if rts_tx.send(map.clone()).is_err() {
                         return true;
                     }; //  no handles are left so shut it down  TODO log the error
-                    #[cfg(feature = "dioxus")]
-                    dioxus::logger::tracing::info!("Map Sent");
-                    // TODO announce registration to peers
+                       // #[cfg(feature = "dioxus")]
+                       // dioxus::logger::tracing::info!("Map Sent");
+                       // TODO announce registration to peers
+                    let _ = tx.unbounded_send(ClientMessage::SuccessfulRegistration(uuid));
                 }
                 BrokerMsg::DeadLink(uuid) => {
                     // let mut new_map = (*map).clone();
-                    let Some(endpoint) = map.get_mut(&uuid) else {
+                    let Some(nexthop) = map.get_mut(&uuid) else {
                         return false;
                     };
-                    match endpoint {
-                        Endpoint::Unicast(v) => {
+                    match nexthop {
+                        // Nexthop::AnycastOld(v) => {
+                        //     let size = v.len();
+                        //     v.retain(|ep| !ep.dest.is_closed());
+                        //     if size != v.len() {
+                        //         // map = Arc::new(new_map);
+                        //         if rts_tx.send(map.clone()).is_err() {
+                        //             return true;
+                        //         }
+                        //     }
+                        // }
+                        Nexthop::Broadcast(_) => todo!(),
+                        Nexthop::Anycast(v) => {
                             let size = v.len();
-                            v.retain(|ep| !ep.dest.is_closed());
+                            v.retain(|dest| match &dest.dest_type {
+                                AnycastDestType::Remote(_) => true,
+                                AnycastDestType::Local(tx) => !tx.is_closed(),
+                            });
                             if size != v.len() {
                                 // map = Arc::new(new_map);
                                 if rts_tx.send(map.clone()).is_err() {
@@ -491,8 +687,6 @@ impl<'a> MsgBus {
                                 }
                             }
                         }
-                        Endpoint::Broadcast(_) => todo!(),
-                        // Endpoint::External(_) => { todo!() }
                     };
                     // let size = endpoints.len();
                     // endpoints.retain(|ep| !ep.dest.is_closed());
@@ -517,7 +711,8 @@ impl<'a> MsgBus {
             }
 
             select! {
-            // select! {
+                //KEEP
+                // select! {
                 // change_value = bc_rx.changed().fuse() => {
                 //     #[cfg(feature = "dioxus")]
                 //     dioxus::logger::tracing::info!("bc_rx.changed()");
@@ -530,6 +725,8 @@ impl<'a> MsgBus {
                 //         }// TOOD log this
                 //     }
                 // },
+                //AWAY
+                //
                 // #[cfg(feature = "dioxus")]
                 msg = rx.next().fuse() => should_shutdown = process_message(msg),
                 // #[cfg(feature = "tokio")]
@@ -545,24 +742,32 @@ impl<'a> MsgBus {
 fn shutdown_routing(map: Routes) {
     for (id, entry) in map.iter() {
         match entry {
-            Endpoint::Unicast(v) => {
-                for ue in v.iter() {
-                    #[cfg(feature = "tokio")]
-                    let res = ue.dest.send(ClientMessage::Shutdown);
-                    #[cfg(feature = "dioxus")]
-                    let res = ue.dest.unbounded_send(ClientMessage::Shutdown);
+            // Nexthop::AnycastOld(v) => {
+            //     for entry in v.iter() {
+            //         #[cfg(feature = "tokio")]
+            //         let res = entry.dest.send(ClientMessage::Shutdown);
+            //         #[cfg(feature = "dioxus")]
+            //         let res = entry.dest.unbounded_send(ClientMessage::Shutdown);
 
-                    match res {
-                        Ok(_) => {
-                            // println!("Sent shutdown to {id}")
-                            // TODO LOG
+            //         match res {
+            //             Ok(_) => {
+            //                 // TODO LOG
+            //             }
+            //             Err(e) => println!("Send error in shutdown_routing {id} {:?}", e), //TODO LOG
+            //         };
+            //     }
+            // }
+            Nexthop::Broadcast(_) => todo!(),
+            Nexthop::Anycast(sorted_vec) => {
+                for entry in sorted_vec.iter() {
+                    match &entry.dest_type {
+                        AnycastDestType::Local(tx) => {
+                            let _ = tx.unbounded_send(ClientMessage::Shutdown);
                         }
-                        Err(e) => println!("Send error in shutdown_routing {id} {:?}", e), //TODO LOG
-                    };
+                        AnycastDestType::Remote(_uuid) => {} //TODO inform neighbor,
+                    }
                 }
             }
-            Endpoint::Broadcast(_) => todo!(),
-            // Endpoint::External(_) => todo!(),
         }
     }
 }
