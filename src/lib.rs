@@ -14,6 +14,7 @@
 use erased_serde::Serialize;
 pub use errors::ReceiveError;
 mod bus_control_listener;
+pub use bus_control_listener::BusListener;
 mod handle;
 mod messages;
 pub use handle::Handle;
