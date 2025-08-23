@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, ItemEnum};
+use syn::DeriveInput;
 use uuid::Uuid;
 
 pub(crate) fn bus_uuid_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -14,7 +14,7 @@ pub(crate) fn bus_uuid_impl(attr: TokenStream, item: TokenStream) -> TokenStream
 
     let ast: DeriveInput = syn::parse(item).unwrap();
 
-    let DeriveInput { vis, ident, .. } = ast;
+    let DeriveInput { ident, .. } = ast;
 
     // let input = parse_macro_input!(item as ItemEnum);
 

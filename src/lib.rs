@@ -18,10 +18,8 @@ use futures::{select, FutureExt, StreamExt};
 use itertools::{FoldWhile, Itertools};
 // #[cfg(feature = "dioxus-web")]
 use serde::de::DeserializeOwned;
-use serde_cbor::de;
 use sorted_vec::partial::SortedVec;
 use std::any::{Any, TypeId};
-use std::default;
 use std::mem::swap;
 use std::{collections::HashMap, error::Error, marker::PhantomData};
 
@@ -106,36 +104,39 @@ enum ClientMessage {
     Shutdown,
 }
 
+#[allow(dead_code)] //TODO
 enum UnicastType {
     Datagram,
     Rpc,
     RpcResponse,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct AnycastEntry {
-    cost: u16,
-    dest: UnboundedSender<ClientMessage>,
-}
+// #[derive(Debug, Clone)]
+// pub(crate) struct AnycastEntry {
+//     cost: u16,
+//     dest: UnboundedSender<ClientMessage>,
+// }
 
-impl PartialOrd for AnycastEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.cost.partial_cmp(&other.cost)
-    }
-}
+// impl PartialOrd for AnycastEntry {
+//     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+//         self.cost.partial_cmp(&other.cost)
+//     }
+// }
 
-impl PartialEq for AnycastEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.cost == other.cost
-    }
-}
+// impl PartialEq for AnycastEntry {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.cost == other.cost
+//     }
+// }
 
+#[allow(dead_code)] //TODO
 pub(crate) struct Node {
     id: Uuid,
     //TODO store how to get to this node
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] //TODO
 pub(crate) enum AnycastDestType {
     Local(UnboundedSender<ClientMessage>),
     Remote(Uuid),
@@ -201,9 +202,7 @@ pub struct Handle {
 impl Handle {
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [BusListener] for receiving
     /// messages sent to the [Uuid]
-
     // TODO: Cleanup the errors being sent
-
     pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
         // uuid: Uuid,
@@ -344,10 +343,10 @@ impl Handle {
                                         }
                                     }
                                 }
-                                AnycastDestType::Remote(uuid) => todo!(),
+                                AnycastDestType::Remote(_uuid) => todo!(),
                             })
                             .into_inner();
-                        if (errors.len() > 0) {
+                        if !errors.is_empty() {
                             had_failure = true;
                         };
                     }
@@ -546,10 +545,11 @@ pub struct MsgBus {
     // buscontrol_rx: tokio::sync::watch::Receiver<BusControlMsg>
 }
 
-impl<'a> MsgBus {
+impl MsgBus {
     /// This starts and runs the MsgBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
     /// used for normal interaction with the system
     ///
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (BusControlHandle, Handle) {
         #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -584,7 +584,8 @@ impl<'a> MsgBus {
         mut map: Routes,
         mut rx: UnboundedReceiver<BrokerMsg>,
         // #[cfg(feature = "tokio")] mut bc_rx: tokio::sync::watch::Receiver<BusControlMsg>,
-        mut bc_rx: async_watch::Receiver<BusControlMsg>,
+        #[allow(unused)] //TODO  Need to reimplement this with tokio only
+        bc_rx: async_watch::Receiver<BusControlMsg>,
 
         rts_tx: RoutesWatchTx,
     ) {
@@ -606,10 +607,6 @@ impl<'a> MsgBus {
                     todo!()
                 }
                 BrokerMsg::RegisterAnycast(uuid, tx) => {
-                    let entry = AnycastEntry {
-                        cost: 0,
-                        dest: tx.clone(),
-                    };
                     // TODO Make the Routes have Cow elements for ease of cloning
                     // let mut new_map = (*map).clone();
                     let endpoint = map.get_mut(&uuid);
@@ -740,7 +737,7 @@ impl<'a> MsgBus {
 }
 
 fn shutdown_routing(map: Routes) {
-    for (id, entry) in map.iter() {
+    for (_id, entry) in map.iter() {
         match entry {
             // Nexthop::AnycastOld(v) => {
             //     for entry in v.iter() {
