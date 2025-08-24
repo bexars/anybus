@@ -139,7 +139,7 @@ pub(crate) enum BusControlMsg {
 }
 
 #[derive(Debug, Default, Clone)]
-pub enum RegistrationStatus {
+pub(crate) enum RegistrationStatus {
     #[default]
     Pending,
     Registered,
@@ -209,13 +209,7 @@ impl MsgBus {
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
 
         control_handle
-    }
-
-    /// This runs the MsgBus with no returned BusControlHandle.  Ideal for putting in statics or other places where you don't need to control the bus.
-    // pub fn init() -> Handle {
-    //     let (_, handle) = Self::new();
-    //     handle
-    // }
+    }   
 
     async fn run(
         mut map: Routes,
@@ -415,7 +409,7 @@ fn shutdown_routing(map: Routes) {
                 DestinationType::Local(unbounded_sender) => {
                     let _ = unbounded_sender.send(ClientMessage::Shutdown);
                 }
-                DestinationType::Remote(node) => {}
+                DestinationType::Remote(_node) => {}
             },
         }
     }

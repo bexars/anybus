@@ -124,7 +124,7 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     }
 
     /// Check if the client is registered with the bus.
-    pub async fn wait_for_registration(&mut self) -> RegistrationStatus {
+    pub(crate) async fn wait_for_registration(&mut self) -> RegistrationStatus {
         match &self.registration_status {
             RegistrationStatus::Registered => {}
             RegistrationStatus::Failed(_msg) => {}
