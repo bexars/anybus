@@ -7,6 +7,7 @@ use crate::BusRider;
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
     RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
+    RegisterUnicast(Uuid, UnboundedSender<ClientMessage>),
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
 }

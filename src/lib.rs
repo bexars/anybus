@@ -19,11 +19,10 @@ mod handle;
 mod messages;
 pub use handle::Handle;
 
-// #[cfg(feature = "dioxus-web")]
-// use serde::de::DeserializeOwned;
 use sorted_vec::partial::SortedVec;
 use std::any::Any;
 use std::collections::HashMap;
+use tracing::error;
 
 // use tokio::sync::oneshot::Receiver as OneShotReceiver;
 
@@ -34,7 +33,10 @@ use std::collections::HashMap;
 use tokio::{
     // stream:: StreamExt,
     select,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        watch::{self, Receiver},
+    },
 };
 
 // use std::sync::mpsc::{Receiver, Sender};
@@ -71,13 +73,9 @@ pub trait BusRiderRpc: BusRider {
     type Response;
 }
 
-#[allow(dead_code)] //TODO
-enum UnicastType {
-    Datagram,
-    Rpc,
-    RpcResponse,
-}
-
+/// Reference to a foreign instance of [MsgBus]
+/// * Could be in the same process, just a different MsgBus instance
+#[derive(Debug, Clone)]
 #[allow(dead_code)] //TODO
 pub(crate) struct Node {
     id: Uuid,
@@ -86,15 +84,30 @@ pub(crate) struct Node {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)] //TODO
-pub(crate) enum AnycastDestType {
+enum UnicastType {
+    Datagram,
+    Rpc,
+    RpcResponse,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DestinationType {
     Local(UnboundedSender<ClientMessage>),
-    Remote(Uuid),
+    #[allow(dead_code)] //TODO
+    Remote(Node),
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] //TODO
+struct UnicastDest {
+    unicast_type: UnicastType,
+    dest_type: DestinationType,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct AnycastDest {
     cost: u16,
-    dest_type: AnycastDestType,
+    dest_type: DestinationType,
 }
 
 impl PartialOrd for AnycastDest {
@@ -109,31 +122,15 @@ impl PartialEq for AnycastDest {
     }
 }
 
-// #[cfg(feature = "tokio")]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-
 pub(crate) enum Nexthop {
     // AnycastOld(SortedVec<AnycastEntry>),
     Anycast(SortedVec<AnycastDest>),
     Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
+    Unicast(UnicastType),
     // External(tokio::sync::mpsc::Sender<ClientMessage>),
 }
-
-// #[cfg(feature = "dioxus")]
-// #[allow(dead_code)]
-// #[derive(Debug, Clone)]
-// pub(crate) enum Endpoint {
-//     Unicast(SortedVec<UnicastEntry>),
-//     Broadcast(dioxus::prelude::UnboundedSender<ClientMessage>),
-//     // External(tokio::sync::mpsc::Sender<ClientMessage>),
-// }
-
-// #[derive(Debug, Clone)]
-// pub(crate) enum NextHop {
-//     Local(UnboundedSender<ClientMessage>),
-//     External(Uuid),
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BusControlMsg {
@@ -153,7 +150,8 @@ enum RegistrationStatus {
 /// gracefully
 pub struct BusControlHandle {
     // #[cfg(feature = "tokio")]
-    pub(crate) tx: async_watch::Sender<BusControlMsg>,
+    pub(crate) tx: watch::Sender<BusControlMsg>,
+    pub(crate) handle: Handle,
 }
 
 impl BusControlHandle {
@@ -164,11 +162,18 @@ impl BusControlHandle {
     pub fn shutdown(&mut self) {
         self.tx.send(BusControlMsg::Shutdown).unwrap_or_default();
     }
+
+    /// Returns a Handle for clients to interact with the MsgBus system.
+    /// Expected to be cloned and sent to other parts of your program
+    ///
+    pub fn handle(&self) -> &Handle {
+        &self.handle
+    }
 }
 
 type Routes = HashMap<Uuid, Nexthop>;
-type RoutesWatchTx = async_watch::Sender<Routes>;
-type RoutesWatchRx = async_watch::Receiver<Routes>;
+type RoutesWatchTx = watch::Sender<Routes>;
+type RoutesWatchRx = watch::Receiver<Routes>;
 
 /// The main entry point into the MsgBus system.
 pub struct MsgBus {
@@ -181,42 +186,43 @@ impl MsgBus {
     /// used for normal interaction with the system
     ///
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> (BusControlHandle, Handle) {
+    pub fn new() -> BusControlHandle {
         // #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         // #[cfg(feature = "dioxus")]
         // let (tx, rx) = futures::channel::mpsc::unbounded();
 
-        let (bc_tx, bc_rx) = async_watch::channel(BusControlMsg::Run);
+        let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
 
         let map = HashMap::new();
 
-        let (rts_tx, rts_rx) = async_watch::channel(map.clone());
-
-        let control_handle = BusControlHandle { tx: bc_tx };
-
+        let (rts_tx, rts_rx) = watch::channel(map.clone());
         let handle = Handle { tx, rts_rx };
+        let control_handle = BusControlHandle {
+            tx: bc_tx,
+            handle: handle.clone(),
+        };
 
         #[cfg(feature = "dioxus")]
         dioxus::prelude::spawn(Self::run(map, rx, bc_rx, rts_tx));
         #[cfg(feature = "tokio")]
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
 
-        (control_handle, handle)
+        control_handle
     }
 
     /// This runs the MsgBus with no returned BusControlHandle.  Ideal for putting in statics or other places where you don't need to control the bus.
-    pub fn init() -> Handle {
-        let (_, handle) = Self::new();
-        handle
-    }
+    // pub fn init() -> Handle {
+    //     let (_, handle) = Self::new();
+    //     handle
+    // }
 
     async fn run(
         mut map: Routes,
         mut rx: UnboundedReceiver<BrokerMsg>,
         // #[cfg(feature = "tokio")] mut bc_rx: tokio::sync::watch::Receiver<BusControlMsg>,
         #[allow(unused)] //TODO  Need to reimplement this with tokio only
-        bc_rx: async_watch::Receiver<BusControlMsg>,
+        mut bc_rx: Receiver<BusControlMsg>,
 
         rts_tx: RoutesWatchTx,
     ) {
@@ -228,107 +234,6 @@ impl MsgBus {
         // let nd_handle = tokio::spawn(router.run());
         // dbg!("Started Neighbor discovery", nd_handle);
 
-        let mut process_message = |msg: Option<BrokerMsg>| -> bool {
-            // #[cfg(feature = "dioxus")]
-            // dioxus::logger::tracing::info!("Processing msg: {:?}", msg);
-
-            let Some(msg) = msg else { return true };
-            match msg {
-                BrokerMsg::Subscribe(_uuid, _tx) => {
-                    todo!()
-                }
-                BrokerMsg::RegisterAnycast(uuid, tx) => {
-                    // TODO Make the Routes have Cow elements for ease of cloning
-                    // let mut new_map = (*map).clone();
-                    let endpoint = map.get_mut(&uuid);
-                    match endpoint {
-                        // Some(Nexthop::AnycastOld(v)) => {
-                        //     v.insert(entry);
-                        // }
-                        Some(Nexthop::Broadcast(_)) => {
-                            let msg = ClientMessage::FailedRegistration(uuid);
-                            // #[cfg(feature = "tokio")]
-                            let _ = tx.send(msg);
-                            // #[cfg(feature = "dioxus")]
-                            // let _ = tx.unbounded_send(msg);
-                            return false;
-                        }
-                        Some(Nexthop::Anycast(v)) => {
-                            let dest = AnycastDest {
-                                cost: 0,
-                                dest_type: AnycastDestType::Local(tx.clone()),
-                            };
-                            v.insert(dest);
-                        }
-                        // Some(Endpoint::External(_)) => {}
-                        None => {
-                            let dest = AnycastDest {
-                                cost: 0,
-                                dest_type: AnycastDestType::Local(tx.clone()),
-                            };
-                            let mut v = SortedVec::new();
-                            v.insert(dest);
-                            let ep = Nexthop::Anycast(v);
-                            map.insert(uuid, ep);
-                        }
-                    };
-                    // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
-                    // endpoints.insert(idx, entry);
-                    // map = Arc::new(new_map);
-                    // #[cfg(feature = "dioxus")]
-                    // dioxus::logger::tracing::info!("Sending updated map {:?}", map);
-                    if rts_tx.send(map.clone()).is_err() {
-                        return true;
-                    }; //  no handles are left so shut it down  TODO log the error
-                       // #[cfg(feature = "dioxus")]
-                       // dioxus::logger::tracing::info!("Map Sent");
-                       // TODO announce registration to peers
-                    let _ = tx.send(ClientMessage::SuccessfulRegistration(uuid));
-                }
-                BrokerMsg::DeadLink(uuid) => {
-                    // let mut new_map = (*map).clone();
-                    let Some(nexthop) = map.get_mut(&uuid) else {
-                        return false;
-                    };
-                    match nexthop {
-                        // Nexthop::AnycastOld(v) => {
-                        //     let size = v.len();
-                        //     v.retain(|ep| !ep.dest.is_closed());
-                        //     if size != v.len() {
-                        //         // map = Arc::new(new_map);
-                        //         if rts_tx.send(map.clone()).is_err() {
-                        //             return true;
-                        //         }
-                        //     }
-                        // }
-                        Nexthop::Broadcast(_) => todo!(),
-                        Nexthop::Anycast(v) => {
-                            let size = v.len();
-                            v.retain(|dest| match &dest.dest_type {
-                                AnycastDestType::Remote(_) => true,
-                                AnycastDestType::Local(tx) => !tx.is_closed(),
-                            });
-                            if size != v.len() {
-                                // map = Arc::new(new_map);
-                                if rts_tx.send(map.clone()).is_err() {
-                                    return true;
-                                }
-                            }
-                        }
-                    };
-                    // let size = endpoints.len();
-                    // endpoints.retain(|ep| !ep.dest.is_closed());
-                    // if size != endpoints.len() {
-                    //     let map = Arc::new(new_map);
-                    //     if rts_tx.send(map).is_err() {
-                    //         should_shutdown = true;
-                    //     }
-                    // }
-                } // _ => { todo!() },
-            }
-            false
-        };
-
         loop {
             // #[cfg(feature = "dioxus")]
             // dioxus::logger::tracing::info!("Entering processing loop");
@@ -337,63 +242,156 @@ impl MsgBus {
 
                 break;
             }
-
+            // let change_value = bc_rx.
             select! {
                 //KEEP
-                // select! {
-                // change_value = bc_rx.changed().fuse() => {
-                //     #[cfg(feature = "dioxus")]
-                //     dioxus::logger::tracing::info!("bc_rx.changed()");
-                //     match *bc_rx.borrow() {
-                //         BusControlMsg::Run => {},  // should never receive this but it's a non-issue
-                //         BusControlMsg::Shutdown => {
-                //             println!("Received shutdown request");
-                //             should_shutdown = true;
-                //             // break 'main;
-                //         }// TOOD log this
-                //     }
-                // },
+                    change_res = bc_rx.changed() => {
+                    #[cfg(feature = "dioxus")]
+                    dioxus::logger::tracing::info!("bc_rx.changed() {:?}", change_res);
+                    match change_res {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error receiving bus control message: {:?}", e);
+                            should_shutdown = true;
+
+                        }
+                    }
+                    match *bc_rx.borrow_and_update() {
+                        BusControlMsg::Run => {},  // should never receive this but it's a non-issue
+                        BusControlMsg::Shutdown => {
+                            // println!("Received shutdown request");
+                            should_shutdown = true;
+                            // break 'main;
+                        }// TOOD log this
+                    }
+                },
                 //AWAY
                 //
                 // #[cfg(feature = "dioxus")]
-                msg = rx.recv() => should_shutdown = process_message(msg),
+                msg = rx.recv() => should_shutdown = Self::process_message(msg, &mut map, &rts_tx),
                 // #[cfg(feature = "tokio")]
                 // msg = rx.recv().fuse() => should_shutdown = process_message(msg),
 
             };
         }
     }
+
+    fn process_message(
+        msg: Option<BrokerMsg>,
+        map: &mut HashMap<Uuid, Nexthop>,
+        rts_tx: &watch::Sender<HashMap<Uuid, Nexthop>>,
+    ) -> bool {
+        // #[cfg(feature = "dioxus")]
+        // dioxus::logger::tracing::info!("Processing msg: {:?}", msg);
+
+        let Some(msg) = msg else { return true };
+        match msg {
+            BrokerMsg::Subscribe(_uuid, _tx) => {
+                todo!()
+            }
+            BrokerMsg::RegisterUnicast(uuid, unbounded_sender) => {}
+
+            BrokerMsg::RegisterAnycast(uuid, tx) => {
+                // TODO Make the Routes have Cow elements for ease of cloning
+                // let mut new_map = (*map).clone();
+                let endpoint = map.get_mut(&uuid);
+                match endpoint {
+                    // No entry, insert a fresh Vector with one destination
+                    None => {
+                        let dest = AnycastDest {
+                            cost: 0,
+                            dest_type: DestinationType::Local(tx.clone()),
+                        };
+                        let mut v = SortedVec::new();
+                        v.insert(dest);
+                        let ep = Nexthop::Anycast(v);
+                        map.insert(uuid, ep);
+                    }
+
+                    // Entry exists, insert a new destination
+                    Some(Nexthop::Anycast(v)) => {
+                        let dest = AnycastDest {
+                            cost: 0,
+                            dest_type: DestinationType::Local(tx.clone()),
+                        };
+                        v.insert(dest);
+                    }
+
+                    // Catches these two case
+                    //Some(Nexthop::Unicast(_))
+                    //Some(Nexthop::Broadcast(_))
+                    _ => {
+                        let msg = ClientMessage::FailedRegistration(uuid);
+                        let _ = tx.send(msg);
+                        return false;
+                    }
+                };
+                // let idx = endpoints.partition_point(|x| x.cost < entry.cost);
+                // endpoints.insert(idx, entry);
+                // map = Arc::new(new_map);
+                // #[cfg(feature = "dioxus")]
+                // dioxus::logger::tracing::info!("Sending updated map {:?}", map);
+                if rts_tx.send(map.clone()).is_err() {
+                    return true;
+                }; //  no handles are left so shut it down  TODO log the error
+                   // #[cfg(feature = "dioxus")]
+                   // dioxus::logger::tracing::info!("Map Sent");
+                   // TODO announce registration to peers
+                let _ = tx.send(ClientMessage::SuccessfulRegistration(uuid));
+            }
+            BrokerMsg::DeadLink(uuid) => {
+                // let mut new_map = (*map).clone();
+                let Some(nexthop) = map.get_mut(&uuid) else {
+                    return false;
+                };
+                match nexthop {
+                    Nexthop::Broadcast(_) => todo!(),
+                    Nexthop::Anycast(v) => {
+                        let size = v.len();
+                        v.retain(|dest| match &dest.dest_type {
+                            DestinationType::Remote(_) => true,
+                            DestinationType::Local(tx) => !tx.is_closed(),
+                        });
+                        if size != v.len() {
+                            // map = Arc::new(new_map);
+                            if rts_tx.send(map.clone()).is_err() {
+                                return true;
+                            }
+                        }
+                    }
+                    Nexthop::Unicast(_unicast_type) => {
+                        todo!()
+                    }
+                };
+                // let size = endpoints.len();
+                // endpoints.retain(|ep| !ep.dest.is_closed());
+                // if size != endpoints.len() {
+                //     let map = Arc::new(new_map);
+                //     if rts_tx.send(map).is_err() {
+                //         should_shutdown = true;
+                //     }
+                // }
+            }
+        }
+        false
+    }
 }
 
 fn shutdown_routing(map: Routes) {
     for (_id, entry) in map.iter() {
         match entry {
-            // Nexthop::AnycastOld(v) => {
-            //     for entry in v.iter() {
-            //         #[cfg(feature = "tokio")]
-            //         let res = entry.dest.send(ClientMessage::Shutdown);
-            //         #[cfg(feature = "dioxus")]
-            //         let res = entry.dest.unbounded_send(ClientMessage::Shutdown);
-
-            //         match res {
-            //             Ok(_) => {
-            //                 // TODO LOG
-            //             }
-            //             Err(e) => println!("Send error in shutdown_routing {id} {:?}", e), //TODO LOG
-            //         };
-            //     }
-            // }
             Nexthop::Broadcast(_) => todo!(),
             Nexthop::Anycast(sorted_vec) => {
                 for entry in sorted_vec.iter() {
                     match &entry.dest_type {
-                        AnycastDestType::Local(tx) => {
+                        DestinationType::Local(tx) => {
                             let _ = tx.send(ClientMessage::Shutdown);
                         }
-                        AnycastDestType::Remote(_uuid) => {} //TODO inform neighbor,
+                        DestinationType::Remote(_uuid) => {} //TODO inform neighbor,
                     }
                 }
             }
+            Nexthop::Unicast(unicast_type) => todo!(),
         }
     }
 }

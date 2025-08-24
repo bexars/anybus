@@ -7,9 +7,10 @@ use uuid::Uuid;
 
 use crate::bus_control_listener::BusListener;
 use crate::messages::{BrokerMsg, ClientMessage};
+use crate::DestinationType;
 use crate::{
     errors::{self, ReceiveError},
-    AnycastDestType, BusRider, BusRiderWithUuid, Nexthop, RoutesWatchRx,
+    BusRider, BusRiderWithUuid, Nexthop, RoutesWatchRx,
 };
 
 /// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
@@ -94,53 +95,12 @@ impl Handle {
 
                 // TODO Turn this into a scan iterator or just about anything better
                 match endpoint {
-                    // Nexthop::AnycastOld(v) => {
-                    //     // this is all convoluted to retrieve the original msg and send it to the next possible destination
-                    //     for entry in v.iter() {
-                    //         let mut m = None;
-                    //         swap(&mut m, &mut msg);
-                    //         let m = m.expect("Should never panic here. Problem swapping data");
-
-                    //         #[cfg(feature = "tokio")]
-                    //         let send_result = entry.dest.send(m);
-
-                    //         #[cfg(feature = "dioxus")]
-                    //         let send_result = entry.dest.unbounded_send(m);
-
-                    //         match send_result {
-                    //             Ok(_) => {
-                    //                 success = true;
-                    //                 if !had_failure {
-                    //                     return Ok(());
-                    //                 }
-                    //                 //TODO Something isn't right here.  Why !had_failure?
-                    //                 break;
-                    //             }
-                    //             // #[cfg(feature = "tokio")]
-                    //             // Err(SendError(m)) => {
-                    //             //     had_failure = true;
-                    //             //     let mut m = Some(m);
-                    //             //     swap(&mut m, &mut msg)
-                    //             // }
-                    //             // #[cfg(feature = "dioxus")]
-                    //             Err(e) => {
-                    //                 had_failure = true;
-                    //                 #[cfg(feature = "dioxus")]
-                    //                 let mut m = Some(e.into_inner());
-                    //                 #[cfg(feature = "tokio")]
-                    //                 let mut m = Some(e.0);
-
-                    //                 swap(&mut m, &mut msg)
-                    //             }
-                    //         }
-                    //     }
-                    // }
                     Nexthop::Anycast(dests) => {
                         //TODO call deadlink on these
                         let errors = dests
                             .iter()
                             .fold_while(Vec::new(), |mut prev, dest| match &dest.dest_type {
-                                AnycastDestType::Local(tx) => {
+                                DestinationType::Local(tx) => {
                                     let mut m = None;
                                     swap(&mut m, &mut msg);
                                     let m = m.unwrap();
@@ -160,7 +120,7 @@ impl Handle {
                                         }
                                     }
                                 }
-                                AnycastDestType::Remote(_uuid) => todo!(),
+                                DestinationType::Remote(_uuid) => todo!(),
                             })
                             .into_inner();
                         if !errors.is_empty() {
@@ -168,7 +128,7 @@ impl Handle {
                         };
                     }
                     Nexthop::Broadcast(_) => todo!(),
-                    // Endpoint::External(_) => todo!(),
+                    Nexthop::Unicast(unicast_type) => todo!(),
                 }
 
                 if had_failure {
