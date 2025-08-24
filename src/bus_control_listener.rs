@@ -5,6 +5,7 @@ use std::{
 
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracing::info;
 
 use crate::{messages::ClientMessage, BusRider, ReceiveError, RegistrationStatus};
 
@@ -57,8 +58,8 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                             reply_to: _,
                             msg: _,
                         } => todo!(),
-                        ClientMessage::FailedRegistration(_uuid) => {
-                            return Err(ReceiveError::RegistrationFailed)
+                        ClientMessage::FailedRegistration(_uuid, msg) => {
+                            return Err(ReceiveError::RegistrationFailed(msg))
                         }
                         ClientMessage::Shutdown => {
                             println!("Shutdown in BusListener");
@@ -108,8 +109,8 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                             reply_to: _,
                             msg: _,
                         } => todo!(),
-                        ClientMessage::FailedRegistration(_uuid) => {
-                            return Err(ReceiveError::RegistrationFailed)
+                        ClientMessage::FailedRegistration(_uuid, msg) => {
+                            return Err(ReceiveError::RegistrationFailed(msg))
                         }
                         ClientMessage::Shutdown => {
                             println!("Shutdown in BusListener");
@@ -123,20 +124,27 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     }
 
     /// Check if the client is registered with the bus.
-    pub async fn is_registered(&mut self) -> bool {
-        match self.registration_status {
-            RegistrationStatus::Registered => true,
-            RegistrationStatus::Failed => false,
-            RegistrationStatus::Pending => match self.rx.recv().await {
-                Some(ClientMessage::SuccessfulRegistration(_)) => {
-                    self.registration_status = RegistrationStatus::Registered;
-                    true
+    pub async fn wait_for_registration(&mut self) -> RegistrationStatus {
+        match &self.registration_status {
+            RegistrationStatus::Registered => {}
+            RegistrationStatus::Failed(_msg) => {}
+            RegistrationStatus::Pending => {
+                let res = self.rx.recv().await;
+                info!("Received message: {:?}", res);
+                match res {
+                    Some(ClientMessage::SuccessfulRegistration(_)) => {
+                        self.registration_status = RegistrationStatus::Registered;
+                    }
+                    Some(ClientMessage::FailedRegistration(_, msg)) => {
+                        self.registration_status = RegistrationStatus::Failed(msg.clone());
+                    }
+                    _ => {
+                        self.registration_status =
+                            RegistrationStatus::Failed("Unknown error".to_string());
+                    }
                 }
-                _ => {
-                    self.registration_status = RegistrationStatus::Failed;
-                    false
-                }
-            },
+            }
         }
+        self.registration_status.clone()
     }
 }

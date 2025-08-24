@@ -22,7 +22,7 @@ pub use handle::Handle;
 use sorted_vec::partial::SortedVec;
 use std::any::Any;
 use std::collections::HashMap;
-use tracing::error;
+use tracing::{error, info};
 
 // use tokio::sync::oneshot::Receiver as OneShotReceiver;
 
@@ -128,7 +128,7 @@ pub(crate) enum Nexthop {
     // AnycastOld(SortedVec<AnycastEntry>),
     Anycast(SortedVec<AnycastDest>),
     Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
-    Unicast(UnicastType),
+    Unicast(UnicastDest),
     // External(tokio::sync::mpsc::Sender<ClientMessage>),
 }
 
@@ -138,12 +138,12 @@ pub(crate) enum BusControlMsg {
     Shutdown,
 }
 
-#[derive(Debug, Default)]
-enum RegistrationStatus {
+#[derive(Debug, Default, Clone)]
+pub enum RegistrationStatus {
     #[default]
     Pending,
     Registered,
-    Failed,
+    Failed(String),
 }
 
 /// Handle for programatically shutting down the system.  Can be wrapped with [helper::ShutdownWithCtrlC] to catch user termination
@@ -221,7 +221,6 @@ impl MsgBus {
         mut map: Routes,
         mut rx: UnboundedReceiver<BrokerMsg>,
         // #[cfg(feature = "tokio")] mut bc_rx: tokio::sync::watch::Receiver<BusControlMsg>,
-        #[allow(unused)] //TODO  Need to reimplement this with tokio only
         mut bc_rx: Receiver<BusControlMsg>,
 
         rts_tx: RoutesWatchTx,
@@ -246,8 +245,8 @@ impl MsgBus {
             select! {
                 //KEEP
                     change_res = bc_rx.changed() => {
-                    #[cfg(feature = "dioxus")]
-                    dioxus::logger::tracing::info!("bc_rx.changed() {:?}", change_res);
+
+                    info!("bc_rx.changed() {:?}", change_res);
                     match change_res {
                         Ok(_) => {}
                         Err(e) => {
@@ -289,7 +288,25 @@ impl MsgBus {
             BrokerMsg::Subscribe(_uuid, _tx) => {
                 todo!()
             }
-            BrokerMsg::RegisterUnicast(uuid, unbounded_sender) => {}
+            BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => {
+                let current_endpoint = map.get_mut(&uuid);
+                match current_endpoint {
+                    Some(_endpoint) => {
+                        let _ = unbounded_sender.send(ClientMessage::FailedRegistration(
+                            uuid,
+                            "Duplicate registration".into(),
+                        ));
+                    }
+                    None => {
+                        let endpoint = Nexthop::Unicast(UnicastDest {
+                            unicast_type,
+                            dest_type: DestinationType::Local(unbounded_sender.clone()),
+                        });
+                        map.insert(uuid, endpoint);
+                        let _ = unbounded_sender.send(ClientMessage::SuccessfulRegistration(uuid));
+                    }
+                }
+            }
 
             BrokerMsg::RegisterAnycast(uuid, tx) => {
                 // TODO Make the Routes have Cow elements for ease of cloning
@@ -321,7 +338,10 @@ impl MsgBus {
                     //Some(Nexthop::Unicast(_))
                     //Some(Nexthop::Broadcast(_))
                     _ => {
-                        let msg = ClientMessage::FailedRegistration(uuid);
+                        let msg = ClientMessage::FailedRegistration(
+                            uuid,
+                            "Duplicate registration".into(),
+                        );
                         let _ = tx.send(msg);
                         return false;
                     }
@@ -360,7 +380,7 @@ impl MsgBus {
                         }
                     }
                     Nexthop::Unicast(_unicast_type) => {
-                        todo!()
+                        map.remove(&uuid);
                     }
                 };
                 // let size = endpoints.len();
@@ -391,7 +411,12 @@ fn shutdown_routing(map: Routes) {
                     }
                 }
             }
-            Nexthop::Unicast(unicast_type) => todo!(),
+            Nexthop::Unicast(unicast_dest) => match &unicast_dest.dest_type {
+                DestinationType::Local(unbounded_sender) => {
+                    let _ = unbounded_sender.send(ClientMessage::Shutdown);
+                }
+                DestinationType::Remote(node) => {}
+            },
         }
     }
 }

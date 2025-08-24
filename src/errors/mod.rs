@@ -13,7 +13,7 @@ pub enum ReceiveError {
     ConnectionClosed,
     /// Error when registering a Uuid that is already exclusively registered.  i.e. register_anycast() on an existing Unicast, or Multicast Uuid
     #[error("Unable to register, possibly already registered as subscribe address")]
-    RegistrationFailed,
+    RegistrationFailed(String),
     /// The system is shutting down now
     #[error("System shutdown requested")]
     Shutdown,

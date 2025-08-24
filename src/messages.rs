@@ -1,13 +1,13 @@
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
 
-use crate::BusRider;
+use crate::{BusRider, UnicastType};
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
     RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
-    RegisterUnicast(Uuid, UnboundedSender<ClientMessage>),
+    RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
 }
@@ -21,7 +21,9 @@ pub(crate) enum ClientMessage {
         reply_to: UnboundedReceiver<Box<ClientMessage>>,
         msg: Box<dyn BusRider>,
     },
-    FailedRegistration(Uuid),
+
+    //TODO Make subset of this error
+    FailedRegistration(Uuid, String),
     SuccessfulRegistration(Uuid),
     Shutdown,
 }

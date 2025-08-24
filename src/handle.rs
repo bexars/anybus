@@ -3,15 +3,17 @@ use std::{error::Error, marker::PhantomData, mem::swap};
 use itertools::{FoldWhile, Itertools};
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::bus_control_listener::BusListener;
+use crate::errors::MsgBusHandleError;
 use crate::messages::{BrokerMsg, ClientMessage};
-use crate::DestinationType;
 use crate::{
     errors::{self, ReceiveError},
     BusRider, BusRiderWithUuid, Nexthop, RoutesWatchRx,
 };
+use crate::{DestinationType, RegistrationStatus, UnicastType};
 
 /// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]
@@ -29,10 +31,7 @@ impl Handle {
         // uuid: Uuid,
     ) -> Result<BusListener<T>, ReceiveError> {
         let uuid = T::MSGBUS_UUID;
-        // #[cfg(feature = "tokio")]
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        // #[cfg(feature = "dioxus")]
-        // let (tx, rx) = futures_channel::mpsc::unbounded();
 
         let mut bl = BusListener::<T> {
             rx,
@@ -41,29 +40,39 @@ impl Handle {
         };
 
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
-
-        // #[cfg(feature = "dioxus")]
-        // self.tx.unbounded_send(register_msg)?;
-
-        // #[cfg(feature = "tokio")]
         self.tx.send(register_msg)?;
+        // info!("Send register_msg");
 
-        #[cfg(feature = "tokio")]
-        info!("Send register_msg");
-
-        if bl.is_registered().await {
-            Ok(bl)
-        } else {
-            Err(ReceiveError::RegistrationFailed)
+        match bl.wait_for_registration().await {
+            RegistrationStatus::Pending => unreachable!(),
+            RegistrationStatus::Registered => Ok(bl),
+            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
         }
     }
 
     /// Placeholder - Not Implemented
-    pub fn register_unicast<T: BusRider + DeserializeOwned>(
+    pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
-        _uuid: Uuid,
-    ) -> Result<BusListener<T>, Box<dyn Error>> {
-        todo!()
+    ) -> Result<BusListener<T>, ReceiveError> {
+        let uuid = T::MSGBUS_UUID;
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut bl = BusListener::<T> {
+            rx,
+            _pd: PhantomData,
+            registration_status: Default::default(),
+        };
+
+        let register_msg = BrokerMsg::RegisterUnicast(uuid, tx, UnicastType::Datagram);
+        info!("Send register_msg {:?}", register_msg);
+
+        self.tx.send(register_msg)?;
+
+        match bl.wait_for_registration().await {
+            RegistrationStatus::Pending => unreachable!(),
+            RegistrationStatus::Registered => Ok(bl),
+            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
+        }
     }
 
     /// Placeholder - Not Implemented
@@ -87,7 +96,7 @@ impl Handle {
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
         let mut msg = Some(ClientMessage::Message(u, payload));
-
+        info!("Send route-map {:?}", self.rts_rx.borrow());
         match self.rts_rx.borrow().get(&u) {
             Some(endpoint) => {
                 let mut success = false;
@@ -126,23 +135,38 @@ impl Handle {
                         if !errors.is_empty() {
                             had_failure = true;
                         };
+
+                        if had_failure {
+                            // #[cfg(feature = "tokio")]
+                            // self.tx.send(BrokerMsg::DeadLink(u));
+                            // #[cfg(feature = "dioxus")]
+                            let _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
+                        }
+
+                        if !success {
+                            let Some(ClientMessage::Message(_, payload)) = msg else {
+                                panic!()
+                            };
+                            return Err(errors::MsgBusHandleError::SendError(payload));
+                        }
                     }
                     Nexthop::Broadcast(_) => todo!(),
-                    Nexthop::Unicast(unicast_type) => todo!(),
-                }
-
-                if had_failure {
-                    // #[cfg(feature = "tokio")]
-                    // self.tx.send(BrokerMsg::DeadLink(u));
-                    // #[cfg(feature = "dioxus")]
-                    let _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
-                }
-
-                if !success {
-                    let Some(ClientMessage::Message(_, payload)) = msg else {
-                        panic!()
-                    };
-                    return Err(errors::MsgBusHandleError::SendError(payload));
+                    Nexthop::Unicast(dest) => {
+                        info!("Send Unicast {dest:?} {msg:?}");
+                        match &dest.dest_type {
+                            DestinationType::Local(tx) => {
+                                let res = tx.send(msg.unwrap()).map_err(|e| {
+                                    let msg = e.0;
+                                    if let ClientMessage::Message(_, payload) = msg {
+                                        return MsgBusHandleError::SendError(payload);
+                                    }
+                                    todo!();
+                                });
+                                return res;
+                            }
+                            DestinationType::Remote(node) => todo!(),
+                        };
+                    }
                 }
             }
             None => return Err(errors::MsgBusHandleError::NoRoute),
