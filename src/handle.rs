@@ -3,17 +3,18 @@ use std::{error::Error, marker::PhantomData, mem::swap};
 use itertools::{FoldWhile, Itertools};
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::bus_control_listener::BusListener;
+use crate::bus_control_listener::{BusListener, RpcResponse};
 use crate::errors::MsgBusHandleError;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::{
     errors::{self, ReceiveError},
     BusRider, BusRiderWithUuid, Nexthop, RoutesWatchRx,
 };
-use crate::{DestinationType, RegistrationStatus, UnicastType};
+use crate::{BusRiderRpc, DestinationType, RegistrationStatus, UnicastDest, UnicastType};
 
 /// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]
@@ -50,7 +51,7 @@ impl Handle {
         }
     }
 
-    /// Placeholder - Not Implemented
+    /// Similar to anycast but only one receiver can be registered at a time
     pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<BusListener<T>, ReceiveError> {
@@ -64,6 +65,31 @@ impl Handle {
         };
 
         let register_msg = BrokerMsg::RegisterUnicast(uuid, tx, UnicastType::Datagram);
+        info!("Send register_msg {:?}", register_msg);
+
+        self.tx.send(register_msg)?;
+
+        match bl.wait_for_registration().await {
+            RegistrationStatus::Pending => unreachable!(),
+            RegistrationStatus::Registered => Ok(bl),
+            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
+        }
+    }
+
+    /// Register a RPC service with the broker.
+    pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned>(
+        &mut self,
+    ) -> Result<BusListener<T>, ReceiveError> {
+        let uuid = T::MSGBUS_UUID;
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut bl = BusListener::<T> {
+            rx,
+            _pd: PhantomData,
+            registration_status: Default::default(),
+        };
+
+        let register_msg = BrokerMsg::RegisterUnicast(uuid, tx, UnicastType::Rpc);
         info!("Send register_msg {:?}", register_msg);
 
         self.tx.send(register_msg)?;
@@ -95,10 +121,10 @@ impl Handle {
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
-        let mut msg = Some(ClientMessage::Message(u, payload));
-        info!("Send route-map {:?}", self.rts_rx.borrow());
         match self.rts_rx.borrow().get(&u) {
             Some(endpoint) => {
+                let mut msg = Some(ClientMessage::Message(u, payload));
+
                 let mut success = false;
                 let mut had_failure = false;
 
@@ -169,11 +195,53 @@ impl Handle {
                     }
                 }
             }
-            None => return Err(errors::MsgBusHandleError::NoRoute),
+            None => return Err(errors::MsgBusHandleError::NoRoute(payload)),
         };
 
         // TODO lookup in watched hashmap
         // self.tx.send(Message::Message(u, payload))?;
         Ok(())
+    }
+
+    /// Initiate an RPC request to a remote node
+    pub fn request<T: BusRiderRpc>(&self, payload: T) -> Result<RpcResponse<T>, MsgBusHandleError> {
+        let u = T::MSGBUS_UUID;
+        let payload = Box::new(payload);
+        let map = self.rts_rx.borrow();
+        dbg!(&map);
+        match map.get(&u) {
+            Some(endpoint) => {
+                // let msg = ClientMessage::Message(u, payload);
+
+                // TODO Turn this into a scan iterator or just about anything better
+                match endpoint {
+                    Nexthop::Unicast(UnicastDest {
+                        unicast_type: UnicastType::Rpc,
+                        dest_type: DestinationType::Local(tx),
+                    }) => {
+                        let (resp_tx, resp_rx) = oneshot::channel::<Box<dyn BusRider>>();
+                        let msg = ClientMessage::Rpc {
+                            to: u,
+                            reply_to: resp_tx,
+                            msg: payload,
+                        };
+                        tx.send(msg).map_err(|value| match value.0 {
+                            ClientMessage::Message(_uuid, bus_rider) => {
+                                MsgBusHandleError::SendError(bus_rider)
+                            }
+                            _ => unreachable!(),
+                        })?;
+                        let rhandle: RpcResponse<T> = RpcResponse::new(resp_rx);
+                        Ok(rhandle)
+                    }
+
+                    _ => Err(MsgBusHandleError::NoRoute(payload)),
+                }
+            }
+            None => {
+                // Handle the case when there is no route
+                Err(MsgBusHandleError::NoRoute(payload))
+            }
+        }
     }
 }

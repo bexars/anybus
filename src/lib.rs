@@ -15,6 +15,7 @@ use erased_serde::Serialize;
 pub use errors::ReceiveError;
 mod bus_control_listener;
 pub use bus_control_listener::BusListener;
+pub use bus_control_listener::RpcResponse;
 mod handle;
 mod messages;
 pub use handle::Handle;
@@ -68,9 +69,9 @@ pub trait BusRiderWithUuid: BusRider {
 }
 
 /// Trait for denoting the type of a returned RPC response
-pub trait BusRiderRpc: BusRider {
+pub trait BusRiderRpc: BusRiderWithUuid {
     /// The type of the response that will be returned by the RPC call
-    type Response;
+    type Response: BusRider;
 }
 
 /// Reference to a foreign instance of [MsgBus]
@@ -138,11 +139,15 @@ pub(crate) enum BusControlMsg {
     Shutdown,
 }
 
+/// Shows the status of a registration attempt.
 #[derive(Debug, Default, Clone)]
-pub(crate) enum RegistrationStatus {
+pub enum RegistrationStatus {
+    /// Initial state
     #[default]
     Pending,
+    /// Registration successful
     Registered,
+    /// Registration failed
     Failed(String),
 }
 
@@ -209,7 +214,7 @@ impl MsgBus {
         tokio::spawn(Self::run(map, rx, bc_rx, rts_tx));
 
         control_handle
-    }   
+    }
 
     async fn run(
         mut map: Routes,
@@ -297,6 +302,9 @@ impl MsgBus {
                             dest_type: DestinationType::Local(unbounded_sender.clone()),
                         });
                         map.insert(uuid, endpoint);
+                        if rts_tx.send(map.clone()).is_err() {
+                            return true;
+                        };
                         let _ = unbounded_sender.send(ClientMessage::SuccessfulRegistration(uuid));
                     }
                 }

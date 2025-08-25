@@ -45,7 +45,7 @@ pub enum MsgBusHandleError {
     SendError(Box<dyn BusRider>),
     /// The destination [Uuid](uuid::Uuid) is unknown
     #[error("Route not found for that UUID")]
-    NoRoute,
+    NoRoute(Box<dyn BusRider>),
 
     /// Not implemented yet
     #[error("Unable to subscribe, possibly already subscribed as register address")]

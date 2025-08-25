@@ -1,13 +1,17 @@
 use std::{
     any::{Any, TypeId},
+    error::Error,
     marker::PhantomData,
 };
 
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
 
-use crate::{messages::ClientMessage, BusRider, ReceiveError, RegistrationStatus};
+use crate::{
+    errors::MsgBusHandleError, messages::ClientMessage, BusRider, BusRiderRpc, ReceiveError,
+    RegistrationStatus,
+};
 
 #[derive(Debug)]
 /// Helper struct returned by [Handle::register_anycast()]
@@ -21,110 +25,50 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
     /// Returns T until an error occurs.  There is no recovery from an
     /// error and the connection should be considered closed.
     ///
-    /// If this was created from a failed registration, the first message will be [RegistrationFailed](errors::ReceiveError::RegistrationFailed)
+    /// If this was created from a failed registration it will return (errors::ReceiveError::RegistrationFailed)
     pub async fn recv(&mut self) -> Result<T, ReceiveError> {
         loop {
-            // #[cfg(feature = "dioxus")]
-            // dioxus::logger::tracing::info!("In recv loop: {:?}", self);
-
-            // #[cfg(feature = "tokio")]
             let new_msg = self.rx.recv().await;
-            // #[cfg(feature = "dioxus")]
-            // let new_msg = self.rx.next().await;
-            // #[cfg(feature = "dioxus")]
-            // dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
+
             match new_msg {
                 None => {
                     return Err(ReceiveError::ConnectionClosed);
                 }
-                Some(msg) => {
-                    match msg {
-                        ClientMessage::Message(_id, payload) => {
-                            // let payload = payload.as_any();
-                            if TypeId::of::<T>() == (*payload).type_id() {
-                                let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
-                                // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
-                                return Ok(*payload);
-                            } else {
-                                continue;
-                            }
-                        }
-                        ClientMessage::Bytes(_id, bytes) => match serde_cbor::from_slice(&bytes) {
-                            Ok(payload) => return Ok(payload),
-                            Err(_) => continue,
-                        },
-                        ClientMessage::Rpc {
-                            to: _,
-                            reply_to: _,
-                            msg: _,
-                        } => todo!(),
-                        ClientMessage::FailedRegistration(_uuid, msg) => {
-                            return Err(ReceiveError::RegistrationFailed(msg))
-                        }
-                        ClientMessage::Shutdown => {
-                            println!("Shutdown in BusListener");
-                            return Err(ReceiveError::Shutdown);
-                        }
-                        ClientMessage::SuccessfulRegistration(_uuid) => todo!(),
-                    }
-                }
-            };
-        }
-    }
-
-    /// Similar to recv() but with a enum denoting a message or a RPC request
-    pub async fn recv_rpc(&mut self) -> Result<T, ReceiveError> {
-        loop {
-            // #[cfg(feature = "dioxus")]
-            // dioxus::logger::tracing::info!("In recv loop: {:?}", self);
-
-            // #[cfg(feature = "tokio")]
-            let new_msg = self.rx.recv().await;
-            // #[cfg(feature = "dioxus")]
-            // let new_msg = self.rx.next().await;
-            // #[cfg(feature = "dioxus")]
-            // dioxus::logger::tracing::info!("Received msg: {:?}", new_msg);
-            match new_msg {
-                None => {
-                    return Err(ReceiveError::ConnectionClosed);
-                }
-                Some(msg) => {
-                    match msg {
-                        ClientMessage::Message(_id, payload) => {
+                Some(msg) => match msg {
+                    ClientMessage::Message(_id, payload) => {
+                        if TypeId::of::<T>() == (*payload).type_id() {
                             let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
-                            if TypeId::of::<T>() == (*payload).type_id() {
-                                let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
-                                // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
-                                return Ok(*payload);
-                            } else {
-                                continue;
-                            }
+                            return Ok(*payload);
+                        } else {
+                            continue;
                         }
-                        ClientMessage::Bytes(_id, bytes) => match serde_cbor::from_slice(&bytes) {
-                            Ok(payload) => return Ok(payload),
-                            Err(_) => continue,
-                        },
-                        ClientMessage::Rpc {
-                            to: _,
-                            reply_to: _,
-                            msg: _,
-                        } => todo!(),
-                        ClientMessage::FailedRegistration(_uuid, msg) => {
-                            return Err(ReceiveError::RegistrationFailed(msg))
-                        }
-                        ClientMessage::Shutdown => {
-                            println!("Shutdown in BusListener");
-                            return Err(ReceiveError::Shutdown);
-                        }
-                        ClientMessage::SuccessfulRegistration(_uuid) => todo!(),
                     }
-                }
+                    ClientMessage::Bytes(_id, bytes) => match serde_cbor::from_slice(&bytes) {
+                        Ok(payload) => return Ok(payload),
+                        Err(_) => continue,
+                    },
+                    ClientMessage::Rpc {
+                        to: _,
+                        reply_to: _,
+                        msg: _,
+                    } => todo!(),
+                    ClientMessage::FailedRegistration(_uuid, msg) => {
+                        return Err(ReceiveError::RegistrationFailed(msg))
+                    }
+                    ClientMessage::Shutdown => {
+                        println!("Shutdown in BusListener");
+                        return Err(ReceiveError::Shutdown);
+                    }
+                    ClientMessage::SuccessfulRegistration(_uuid) => {
+                        self.registration_status = RegistrationStatus::Registered;
+                        continue;
+                    }
+                },
             };
         }
     }
-
     /// Check if the client is registered with the bus.
-    pub(crate) async fn wait_for_registration(&mut self) -> RegistrationStatus {
+    pub async fn wait_for_registration(&mut self) -> RegistrationStatus {
         match &self.registration_status {
             RegistrationStatus::Registered => {}
             RegistrationStatus::Failed(_msg) => {}
@@ -146,5 +90,142 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
             }
         }
         self.registration_status.clone()
+    }
+}
+
+impl<T: BusRiderRpc + DeserializeOwned> BusListener<T> {
+    /// Similar to recv() but with a enum denoting a message or a RPC request
+    pub async fn recv_rpc(&mut self) -> Result<RpcRequest<T>, ReceiveError> {
+        loop {
+            let new_msg = self.rx.recv().await;
+
+            match new_msg {
+                None => {
+                    return Err(ReceiveError::ConnectionClosed);
+                }
+                Some(msg) => {
+                    match msg {
+                        ClientMessage::Message(_id, _payload) => {
+                            // let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                            // if TypeId::of::<T>() == (*payload).type_id() {
+                            //     let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                            //     // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
+                            //     return Ok(*payload);
+                            // } else {
+                            //     continue;
+                            // }
+                            continue;
+                        }
+                        ClientMessage::Bytes(_id, _bytes) => {
+                            // match serde_cbor::from_slice(&bytes) {
+                            // Ok(payload) => return Ok(payload),
+                            // Err(_) => continue,
+                            continue;
+                        }
+                        ClientMessage::Rpc {
+                            to: _,
+                            reply_to: tx,
+                            msg: payload,
+                        } => {
+                            let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                            if TypeId::of::<T>() == (*payload).type_id() {
+                                let payload: Box<T> = (payload as Box<dyn Any>).downcast().unwrap();
+                                // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
+                                return Ok(RpcRequest::<T>::new(tx, *payload));
+                            } else {
+                                continue;
+                            }
+                        }
+                        ClientMessage::FailedRegistration(_uuid, msg) => {
+                            return Err(ReceiveError::RegistrationFailed(msg))
+                        }
+                        ClientMessage::Shutdown => {
+                            println!("Shutdown in BusListener");
+                            return Err(ReceiveError::Shutdown);
+                        }
+                        ClientMessage::SuccessfulRegistration(_uuid) => todo!(),
+                    }
+                }
+            };
+        }
+    }
+}
+
+// enum RpcResponseType<T>
+// where
+//     T: BusRiderRpc,
+// {
+//     Remote(Uuid),
+//     Local(oneshot::Sender<T::Response>),
+// }
+
+pub struct RpcRequest<T>
+where
+    T: BusRiderRpc,
+{
+    response: oneshot::Sender<Box<dyn BusRider>>,
+    payload: Option<T>,
+}
+
+impl<T> RpcRequest<T>
+where
+    T: BusRiderRpc,
+{
+    pub fn new(response: oneshot::Sender<Box<dyn BusRider>>, payload: T) -> RpcRequest<T> {
+        Self {
+            response,
+            payload: Some(payload),
+        }
+    }
+
+    /// First call will return the payload, subsequent calls will return None.
+    pub fn payload(&mut self) -> Option<T> {
+        self.payload.take()
+    }
+
+    pub fn respond(self, response: T::Response) -> Result<(), MsgBusHandleError> {
+        self.response
+            .send(Box::new(response))
+            .map_err(MsgBusHandleError::SendError)
+    }
+}
+
+/// Represents a response to an RPC request.
+#[derive(Debug)]
+pub struct RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    response: oneshot::Receiver<Box<dyn BusRider>>,
+    phantom: PhantomData<T>,
+}
+
+impl<T> RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    /// A helper struct that waits for the RPC response and returns it.
+    pub async fn recv(self) -> Result<T::Response, Box<dyn Error>> {
+        let rx = self.response;
+        let payload = rx.await?;
+        let payload: Box<T::Response> = (payload as Box<dyn Any>).downcast().unwrap();
+        if TypeId::of::<T::Response>() == (*payload).type_id() {
+            // let payload: Box<P> = (payload as Box<dyn Any>).downcast().unwrap();
+            // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
+            return Ok(*payload);
+        };
+        Err("Bad payload".into())
+    }
+}
+
+impl<T> RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    pub(crate) fn new(response: oneshot::Receiver<Box<dyn BusRider>>) -> RpcResponse<T> {
+        Self {
+            response,
+            phantom: PhantomData::<T>,
+        }
     }
 }

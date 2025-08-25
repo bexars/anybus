@@ -1,4 +1,7 @@
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::UnboundedSender,
+    oneshot::{self},
+};
 use uuid::Uuid;
 
 use crate::{BusRider, UnicastType};
@@ -17,8 +20,8 @@ pub(crate) enum ClientMessage {
     Message(Uuid, Box<dyn BusRider>),
     Bytes(Uuid, Vec<u8>),
     Rpc {
-        to: &'static Uuid,
-        reply_to: UnboundedReceiver<Box<ClientMessage>>,
+        to: Uuid,
+        reply_to: oneshot::Sender<Box<dyn BusRider>>,
         msg: Box<dyn BusRider>,
     },
 
