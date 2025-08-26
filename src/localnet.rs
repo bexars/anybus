@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::{neighbor::NeighborDiscovery, BusControlMsg};
 
-
 #[allow(unused_variables)]
 #[allow(dead_code)]
 
@@ -26,13 +25,27 @@ impl Router {
 
     pub(crate) async fn run(self) {
         let addrs = if_addrs::get_if_addrs().unwrap();
-        let link_locals: Vec<_> = addrs.into_iter() // TODO have a smarter filtering system with external input; ENV vars?
-            .filter(|a| if let IfAddr::V6(_b) = &a.addr { true } else { false } )
+        let link_locals: Vec<_> = addrs
+            .into_iter() // TODO have a smarter filtering system with external input; ENV vars?
+            .filter(|a| {
+                if let IfAddr::V6(_b) = &a.addr {
+                    true
+                } else {
+                    false
+                }
+            })
             .filter(|a| a.addr.is_link_local())
             .filter(|a| !a.name.starts_with("lo"))
             .filter(|a| a.name.contains("en0"))
             .map(|int| {
-                let IfAddr::V6(Ifv6Addr{ ip, netmask: _, broadcast: _}) = int.addr else { panic!() };
+                let IfAddr::V6(Ifv6Addr {
+                    ip,
+                    netmask: _,
+                    broadcast: _,
+                }) = int.addr
+                else {
+                    panic!()
+                };
                 let Some(index) = int.index else { panic!() };
                 (ip, index, int.name)
             })

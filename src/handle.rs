@@ -11,11 +11,12 @@ use uuid::Uuid;
 use crate::bus_listener::BusListener;
 use crate::errors::MsgBusHandleError;
 use crate::messages::{BrokerMsg, ClientMessage};
+use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 use crate::{
     errors::{self, ReceiveError},
-    BusRider, BusRiderWithUuid, Nexthop, RoutesWatchRx,
+    Nexthop, RoutesWatchRx,
 };
-use crate::{BusRiderRpc, DestinationType, RegistrationStatus, UnicastDest, UnicastType};
+use crate::{DestinationType, RegistrationStatus, UnicastDest, UnicastType};
 
 /// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]

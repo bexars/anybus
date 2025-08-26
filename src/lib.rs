@@ -11,17 +11,17 @@
 
 // use dioxus::Ok;
 // use common::random_uuid;
-use erased_serde::Serialize;
 pub use errors::ReceiveError;
 mod bus_listener;
 pub use bus_listener::BusListener;
 pub use handle::RpcResponse;
 mod handle;
 mod messages;
+mod route_table;
+mod traits;
 pub use handle::Handle;
 
 use sorted_vec::partial::SortedVec;
-use std::any::Any;
 use std::collections::HashMap;
 use tracing::{error, info};
 
@@ -52,27 +52,6 @@ pub mod errors;
 pub use msgbus_macro::bus_uuid;
 
 use crate::messages::{BrokerMsg, ClientMessage};
-
-/// Any message handled by [MsgBus] must have these properties
-///
-///
-pub trait BusRider: Any + Serialize + Send + Sync + std::fmt::Debug + 'static {}
-
-/// Blanket implementation for any type that has the correct traits
-///
-impl<T: Any + Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
-
-/// Trait for ease of sending over the bus without the client needing to know the UUID of the default receiver
-pub trait BusRiderWithUuid: BusRider {
-    /// The default Uuid that will be used if not overridden during registration
-    const MSGBUS_UUID: Uuid;
-}
-
-/// Trait for denoting the type of a returned RPC response
-pub trait BusRiderRpc: BusRiderWithUuid {
-    /// The type of the response that will be returned by the RPC call
-    type Response: BusRider;
-}
 
 /// Reference to a foreign instance of [MsgBus]
 /// * Could be in the same process, just a different MsgBus instance

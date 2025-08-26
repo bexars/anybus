@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::BusRider;
+use crate::traits::BusRider;
 
 /// Errors returned by [BusListener::recv()](crate::BusListener::recv())
 #[derive(Error, Debug)]

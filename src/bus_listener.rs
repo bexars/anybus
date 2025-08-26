@@ -8,8 +8,10 @@ use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
 
 use crate::{
-    errors::MsgBusHandleError, messages::ClientMessage, BusRider, BusRiderRpc, ReceiveError,
-    RegistrationStatus,
+    errors::MsgBusHandleError,
+    messages::ClientMessage,
+    traits::{BusRider, BusRiderRpc},
+    ReceiveError, RegistrationStatus,
 };
 
 #[derive(Debug)]
