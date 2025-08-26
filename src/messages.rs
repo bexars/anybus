@@ -4,7 +4,7 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 
-use crate::{traits::BusRider, UnicastType};
+use crate::{route_table::UnicastType, traits::BusRider};
 
 #[allow(dead_code)]
 #[derive(Debug)]

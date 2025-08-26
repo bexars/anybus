@@ -1,1 +1,210 @@
-struct RouteTable {}
+use sorted_vec::partial::SortedVec;
+use std::collections::HashMap;
+use thiserror::Error;
+
+use tokio::sync::{mpsc::UnboundedSender, watch};
+use uuid::Uuid;
+
+use crate::{messages::ClientMessage, Node};
+
+type Routes = HashMap<Uuid, Nexthop>;
+type RoutesWatchTx = watch::Sender<Routes>;
+pub(crate) type RoutesWatchRx = watch::Receiver<Routes>;
+
+pub(crate) struct RouteTableController {
+    routes: Routes,
+    routes_watch_tx: RoutesWatchTx,
+    routes_watch_rx: RoutesWatchRx,
+}
+
+impl RouteTableController {
+    pub(crate) fn new() -> Self {
+        let routes = HashMap::new();
+        let (tx, rx) = watch::channel(routes.clone());
+        Self {
+            routes,
+            routes_watch_tx: tx,
+            routes_watch_rx: rx,
+        }
+    }
+
+    pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
+        self.routes_watch_rx.clone()
+    }
+
+    pub(crate) fn add_unicast(
+        &mut self,
+        uuid: Uuid,
+        dest: UnicastDest,
+    ) -> Result<(), RouteTableError> {
+        let current_endpoint = self.routes.get_mut(&uuid);
+        match current_endpoint {
+            Some(_endpoint) => {
+                return Err(RouteTableError::DuplicateRoute);
+            }
+            None => {
+                let endpoint = Nexthop::Unicast(dest);
+                self.routes.insert(uuid, endpoint);
+                if self.routes_watch_tx.send(self.routes.clone()).is_err() {
+                    return Err(RouteTableError::ShutdownRequested);
+                };
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn add_anycast(
+        &mut self,
+        uuid: Uuid,
+        dest: AnycastDest,
+    ) -> Result<(), RouteTableError> {
+        let current_endpoint = self.routes.get_mut(&uuid);
+        match current_endpoint {
+            // No entry, insert a fresh Vector with one destination
+            None => {
+                let mut v = SortedVec::new();
+                v.insert(dest);
+                let nexthop = Nexthop::Anycast(v);
+                self.routes.insert(uuid, nexthop);
+            }
+
+            // Entry exists, insert a new destination
+            Some(Nexthop::Anycast(v)) => {
+                v.insert(dest);
+            }
+
+            // Catches these two case
+            //Some(Nexthop::Unicast(_))
+            //Some(Nexthop::Broadcast(_))
+            _ => {
+                return Err(RouteTableError::DuplicateRoute);
+            }
+        }
+        return self.update_watchers();
+    }
+
+    pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<(), RouteTableError> {
+        let Some(nexthop) = self.routes.get_mut(&uuid) else {
+            return Ok(());
+        };
+        match nexthop {
+            Nexthop::Broadcast(_) => todo!(),
+            Nexthop::Anycast(v) => {
+                let size = v.len();
+                v.retain(|dest| match &dest.dest_type {
+                    DestinationType::Remote(_) => true,
+                    DestinationType::Local(tx) => !tx.is_closed(),
+                });
+                if size != v.len() {
+                    // map = Arc::new(new_map);
+                    return self.update_watchers();
+                }
+            }
+            Nexthop::Unicast(dest) => {
+                if let UnicastDest {
+                    dest_type: DestinationType::Local(local),
+                    ..
+                } = dest
+                {
+                    if !local.is_closed() {
+                        return Ok(());
+                    }
+                };
+                self.routes.remove(&uuid);
+                return self.update_watchers();
+            }
+        };
+        Ok(())
+    }
+
+    pub(crate) fn shutdown_routing(&mut self) {
+        for (_id, entry) in self.routes.iter() {
+            match entry {
+                Nexthop::Broadcast(_) => todo!(),
+                Nexthop::Anycast(sorted_vec) => {
+                    for entry in sorted_vec.iter() {
+                        match &entry.dest_type {
+                            DestinationType::Local(tx) => {
+                                let _ = tx.send(ClientMessage::Shutdown);
+                            }
+                            DestinationType::Remote(_uuid) => {} //TODO inform neighbor,
+                        }
+                    }
+                }
+                Nexthop::Unicast(unicast_dest) => match &unicast_dest.dest_type {
+                    DestinationType::Local(unbounded_sender) => {
+                        let _ = unbounded_sender.send(ClientMessage::Shutdown);
+                    }
+                    DestinationType::Remote(_node) => {}
+                },
+            }
+        }
+        self.routes = HashMap::new();
+        let _ = self.update_watchers();
+    }
+
+    fn update_watchers(&mut self) -> Result<(), RouteTableError> {
+        if self.routes_watch_tx.send(self.routes.clone()).is_err() {
+            return Err(RouteTableError::ShutdownRequested);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] //TODO
+pub(crate) enum UnicastType {
+    Datagram,
+    Rpc,
+    RpcResponse,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DestinationType {
+    Local(UnboundedSender<ClientMessage>),
+    #[allow(dead_code)] //TODO
+    Remote(Node),
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] //TODO
+pub(crate) struct UnicastDest {
+    pub(crate) unicast_type: UnicastType,
+    pub(crate) dest_type: DestinationType,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnycastDest {
+    pub(crate) cost: u16,
+    pub(crate) dest_type: DestinationType,
+}
+
+impl PartialOrd for AnycastDest {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.cost.partial_cmp(&other.cost)
+    }
+}
+
+impl PartialEq for AnycastDest {
+    fn eq(&self, other: &Self) -> bool {
+        self.cost == other.cost
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) enum Nexthop {
+    // AnycastOld(SortedVec<AnycastEntry>),
+    Anycast(SortedVec<AnycastDest>),
+    Broadcast(tokio::sync::broadcast::Sender<ClientMessage>),
+    Unicast(UnicastDest),
+    // External(tokio::sync::mpsc::Sender<ClientMessage>),
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum RouteTableError {
+    #[error("Duplicate route")]
+    DuplicateRoute,
+    #[error("All handles closed")]
+    ShutdownRequested,
+}
