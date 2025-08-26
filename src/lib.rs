@@ -13,6 +13,7 @@ pub use bus_listener::BusListener;
 pub use errors::ReceiveError;
 pub use handle::RpcResponse;
 pub use messages::RegistrationStatus;
+pub use traits::*;
 mod bus_listener;
 mod handle;
 mod messages;
