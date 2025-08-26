@@ -30,3 +30,21 @@ pub(crate) enum ClientMessage {
     SuccessfulRegistration(Uuid),
     Shutdown,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BusControlMsg {
+    Run,
+    Shutdown,
+}
+
+/// Shows the status of a registration attempt.
+#[derive(Debug, Default, Clone)]
+pub enum RegistrationStatus {
+    /// Initial state
+    #[default]
+    Pending,
+    /// Registration successful
+    Registered,
+    /// Registration failed
+    Failed(String),
+}

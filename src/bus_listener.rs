@@ -9,9 +9,9 @@ use tracing::info;
 
 use crate::{
     errors::MsgBusHandleError,
-    messages::ClientMessage,
+    messages::{ClientMessage, RegistrationStatus},
     traits::{BusRider, BusRiderRpc},
-    ReceiveError, RegistrationStatus,
+    ReceiveError,
 };
 
 #[derive(Debug)]

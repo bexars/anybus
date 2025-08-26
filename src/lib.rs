@@ -9,10 +9,11 @@
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
 
-pub use errors::ReceiveError;
-mod bus_listener;
 pub use bus_listener::BusListener;
+pub use errors::ReceiveError;
 pub use handle::RpcResponse;
+pub use messages::RegistrationStatus;
+mod bus_listener;
 mod handle;
 mod messages;
 mod route_table;
@@ -41,6 +42,7 @@ pub mod errors;
 
 pub use msgbus_macro::bus_uuid;
 
+use crate::messages::BusControlMsg;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::route_table::AnycastDest;
 use crate::route_table::DestinationType;
@@ -54,24 +56,6 @@ use crate::route_table::UnicastDest;
 pub(crate) struct Node {
     id: Uuid,
     //TODO store how to get to this node
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum BusControlMsg {
-    Run,
-    Shutdown,
-}
-
-/// Shows the status of a registration attempt.
-#[derive(Debug, Default, Clone)]
-pub enum RegistrationStatus {
-    /// Initial state
-    #[default]
-    Pending,
-    /// Registration successful
-    Registered,
-    /// Registration failed
-    Failed(String),
 }
 
 /// Handle for programatically shutting down the system.  Can be wrapped with [helper::ShutdownWithCtrlC] to catch user termination
