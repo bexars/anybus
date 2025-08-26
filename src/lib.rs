@@ -13,9 +13,9 @@
 // use common::random_uuid;
 use erased_serde::Serialize;
 pub use errors::ReceiveError;
-mod bus_control_listener;
-pub use bus_control_listener::BusListener;
-pub use bus_control_listener::RpcResponse;
+mod bus_listener;
+pub use bus_listener::BusListener;
+pub use handle::RpcResponse;
 mod handle;
 mod messages;
 pub use handle::Handle;

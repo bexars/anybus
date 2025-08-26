@@ -1,3 +1,4 @@
+use std::any::{Any, TypeId};
 use std::{error::Error, marker::PhantomData, mem::swap};
 
 use itertools::{FoldWhile, Itertools};
@@ -7,7 +8,7 @@ use tokio::sync::oneshot;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::bus_control_listener::{BusListener, RpcResponse};
+use crate::bus_listener::BusListener;
 use crate::errors::MsgBusHandleError;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::{
@@ -242,6 +243,46 @@ impl Handle {
                 // Handle the case when there is no route
                 Err(MsgBusHandleError::NoRoute(payload))
             }
+        }
+    }
+}
+
+/// Represents a response to an RPC request.
+#[derive(Debug)]
+pub struct RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    response: oneshot::Receiver<Box<dyn BusRider>>,
+    phantom: PhantomData<T>,
+}
+
+impl<T> RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    /// A helper struct that waits for the RPC response and returns it.
+    pub async fn recv(self) -> Result<T::Response, Box<dyn Error>> {
+        let rx = self.response;
+        let payload = rx.await?;
+        let payload: Box<T::Response> = (payload as Box<dyn Any>).downcast().unwrap();
+        if TypeId::of::<T::Response>() == (*payload).type_id() {
+            // let payload: Box<P> = (payload as Box<dyn Any>).downcast().unwrap();
+            // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
+            return Ok(*payload);
+        };
+        Err("Bad payload".into())
+    }
+}
+
+impl<T> RpcResponse<T>
+where
+    T: BusRiderRpc,
+{
+    pub(crate) fn new(response: oneshot::Receiver<Box<dyn BusRider>>) -> RpcResponse<T> {
+        Self {
+            response,
+            phantom: PhantomData::<T>,
         }
     }
 }
