@@ -56,4 +56,13 @@ pub enum MsgBusHandleError {
     /// The system is shutting down now
     #[error("System shutdown requested")]
     Shutdown,
+    /// Error in the receive calls
+    #[error("Error in the RPC response")]
+    ReceiveError(String),
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for MsgBusHandleError {
+    fn from(value: tokio::sync::oneshot::error::RecvError) -> Self {
+        MsgBusHandleError::ReceiveError(value.to_string())
+    }
 }

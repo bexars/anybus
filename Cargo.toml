@@ -11,7 +11,7 @@ members = ["msgbus-macro"]
 
 
 [features]
-default = ["dioxus"]
+default = ["tokio"]
 tokio = ["tokio/rt"]
 dioxus = ["dep:dioxus"]
 net = ["tokio/rt", "tokio/net"]

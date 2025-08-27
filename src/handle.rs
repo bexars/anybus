@@ -203,12 +203,15 @@ impl Handle {
     }
 
     /// Initiate an RPC request to a remote node
-    pub fn request<T: BusRiderRpc>(&self, payload: T) -> Result<RpcResponse<T>, MsgBusHandleError> {
+    pub async fn request<T: BusRiderRpc>(
+        &self,
+        payload: T,
+    ) -> Result<T::Response, MsgBusHandleError> {
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
         let map = self.rts_rx.borrow();
         dbg!(&map);
-        match map.get_route(&u) {
+        let response = match map.get_route(&u) {
             Some(endpoint) => {
                 // let msg = ClientMessage::Message(u, payload);
 
@@ -241,7 +244,8 @@ impl Handle {
                 // Handle the case when there is no route
                 Err(MsgBusHandleError::NoRoute(payload))
             }
-        }
+        }?;
+        response.recv().await
     }
 }
 
@@ -260,7 +264,7 @@ where
     T: BusRiderRpc,
 {
     /// A helper struct that waits for the RPC response and returns it.
-    pub async fn recv(self) -> Result<T::Response, Box<dyn Error>> {
+    pub async fn recv(self) -> Result<T::Response, MsgBusHandleError> {
         let rx = self.response;
         let payload = rx.await?;
         let payload: Box<T::Response> = (payload as Box<dyn Any>).downcast().unwrap();
@@ -269,7 +273,10 @@ where
             // let Some(res) = (*payload).downcast_ref::<T>() else { continue };
             return Ok(*payload);
         };
-        Err("Bad payload".into())
+        Err(MsgBusHandleError::ReceiveError(
+            "TODO the correct error".into(),
+        ))
+        // Err("Bad payload".into())
     }
 }
 

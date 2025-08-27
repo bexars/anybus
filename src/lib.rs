@@ -12,10 +12,12 @@
 pub use bus_listener::BusListener;
 pub use errors::ReceiveError;
 pub use handle::RpcResponse;
+pub use helper::spawn;
 pub use messages::RegistrationStatus;
 pub use traits::*;
 mod bus_listener;
 mod handle;
+mod helper;
 mod messages;
 mod route_table;
 mod traits;
