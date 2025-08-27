@@ -14,6 +14,7 @@ members = ["msgbus-macro"]
 default = ["dioxus"]
 tokio = ["tokio/rt"]
 dioxus = ["dep:dioxus"]
+net = ["tokio/rt", "tokio/net"]
 
 [dependencies]
 uuid = "*"
