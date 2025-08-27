@@ -120,7 +120,7 @@ impl Handle {
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
-        match self.rts_rx.borrow().get(&u) {
+        match self.rts_rx.borrow().get_route(&u) {
             Some(endpoint) => {
                 let mut msg = Some(ClientMessage::Message(u, payload));
 
@@ -208,7 +208,7 @@ impl Handle {
         let payload = Box::new(payload);
         let map = self.rts_rx.borrow();
         dbg!(&map);
-        match map.get(&u) {
+        match map.get_route(&u) {
             Some(endpoint) => {
                 // let msg = ClientMessage::Message(u, payload);
 

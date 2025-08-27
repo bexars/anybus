@@ -7,29 +7,20 @@ use uuid::Uuid;
 
 use crate::{messages::ClientMessage, Node};
 
-type Routes = HashMap<Uuid, Nexthop>;
+type UpdateRequired = bool;
+
+// type Routes = HashMap<Uuid, Nexthop>;
 type RoutesWatchTx = watch::Sender<Routes>;
 pub(crate) type RoutesWatchRx = watch::Receiver<Routes>;
 
-pub(crate) struct RouteTableController {
-    routes: Routes,
-    routes_watch_tx: RoutesWatchTx,
-    routes_watch_rx: RoutesWatchRx,
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Routes {
+    nexthops: HashMap<Uuid, Nexthop>,
 }
 
-impl RouteTableController {
-    pub(crate) fn new() -> Self {
-        let routes = HashMap::new();
-        let (tx, rx) = watch::channel(routes.clone());
-        Self {
-            routes,
-            routes_watch_tx: tx,
-            routes_watch_rx: rx,
-        }
-    }
-
-    pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
-        self.routes_watch_rx.clone()
+impl Routes {
+    pub(crate) fn get_route(&self, uuid: &Uuid) -> Option<&Nexthop> {
+        self.nexthops.get(&uuid)
     }
 
     pub(crate) fn add_unicast(
@@ -37,17 +28,14 @@ impl RouteTableController {
         uuid: Uuid,
         dest: UnicastDest,
     ) -> Result<(), RouteTableError> {
-        let current_endpoint = self.routes.get_mut(&uuid);
+        let current_endpoint = self.nexthops.get_mut(&uuid);
         match current_endpoint {
             Some(_endpoint) => {
                 return Err(RouteTableError::DuplicateRoute);
             }
             None => {
                 let endpoint = Nexthop::Unicast(dest);
-                self.routes.insert(uuid, endpoint);
-                if self.routes_watch_tx.send(self.routes.clone()).is_err() {
-                    return Err(RouteTableError::ShutdownRequested);
-                };
+                self.nexthops.insert(uuid, endpoint);
             }
         }
         Ok(())
@@ -58,14 +46,14 @@ impl RouteTableController {
         uuid: Uuid,
         dest: AnycastDest,
     ) -> Result<(), RouteTableError> {
-        let current_endpoint = self.routes.get_mut(&uuid);
+        let current_endpoint = self.nexthops.get_mut(&uuid);
         match current_endpoint {
             // No entry, insert a fresh Vector with one destination
             None => {
                 let mut v = SortedVec::new();
                 v.insert(dest);
                 let nexthop = Nexthop::Anycast(v);
-                self.routes.insert(uuid, nexthop);
+                self.nexthops.insert(uuid, nexthop);
             }
 
             // Entry exists, insert a new destination
@@ -80,12 +68,12 @@ impl RouteTableController {
                 return Err(RouteTableError::DuplicateRoute);
             }
         }
-        return self.update_watchers();
+        Ok(())
     }
 
-    pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<(), RouteTableError> {
-        let Some(nexthop) = self.routes.get_mut(&uuid) else {
-            return Ok(());
+    pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<UpdateRequired, RouteTableError> {
+        let Some(nexthop) = self.nexthops.get_mut(&uuid) else {
+            return Ok(false);
         };
         match nexthop {
             Nexthop::Broadcast(_) => todo!(),
@@ -97,7 +85,7 @@ impl RouteTableController {
                 });
                 if size != v.len() {
                     // map = Arc::new(new_map);
-                    return self.update_watchers();
+                    return Ok(true);
                 }
             }
             Nexthop::Unicast(dest) => {
@@ -107,18 +95,18 @@ impl RouteTableController {
                 } = dest
                 {
                     if !local.is_closed() {
-                        return Ok(());
+                        return Ok(false);
                     }
                 };
-                self.routes.remove(&uuid);
-                return self.update_watchers();
+                self.nexthops.remove(&uuid);
+                return Ok(true);
             }
         };
-        Ok(())
+        Ok(false)
     }
 
     pub(crate) fn shutdown_routing(&mut self) {
-        for (_id, entry) in self.routes.iter() {
+        for (_id, entry) in self.nexthops.iter() {
             match entry {
                 Nexthop::Broadcast(_) => todo!(),
                 Nexthop::Anycast(sorted_vec) => {
@@ -139,7 +127,61 @@ impl RouteTableController {
                 },
             }
         }
-        self.routes = HashMap::new();
+        self.nexthops = HashMap::new();
+    }
+}
+
+pub(crate) struct RouteTableController {
+    routes: Routes,
+    routes_watch_tx: RoutesWatchTx,
+    routes_watch_rx: RoutesWatchRx,
+}
+
+impl RouteTableController {
+    pub(crate) fn new() -> Self {
+        let routes = Routes::default();
+        let (tx, rx) = watch::channel(routes.clone());
+        Self {
+            routes,
+            routes_watch_tx: tx,
+            routes_watch_rx: rx,
+        }
+    }
+
+    pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
+        self.routes_watch_rx.clone()
+    }
+
+    pub(crate) fn add_unicast(
+        &mut self,
+        uuid: Uuid,
+        dest: UnicastDest,
+    ) -> Result<(), RouteTableError> {
+        self.routes.add_unicast(uuid, dest)?;
+        self.update_watchers()
+    }
+
+    pub(crate) fn add_anycast(
+        &mut self,
+        uuid: Uuid,
+        dest: AnycastDest,
+    ) -> Result<(), RouteTableError> {
+        //
+        self.routes.add_anycast(uuid, dest)?;
+        return self.update_watchers();
+    }
+
+    pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<(), RouteTableError> {
+        let update_required = self.routes.dead_link(uuid)?;
+        if update_required {
+            return self.update_watchers();
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn shutdown_routing(&mut self) {
+        self.routes.shutdown_routing();
         let _ = self.update_watchers();
     }
 
