@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc::UnboundedSender, watch};
 use uuid::Uuid;
 
-use crate::{messages::ClientMessage, Node};
+use crate::{Node, messages::ClientMessage};
 
 type UpdateRequired = bool;
 

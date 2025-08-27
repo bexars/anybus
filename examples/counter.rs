@@ -1,10 +1,10 @@
 use std::{fmt::Display, time::Duration};
 
 // use msgbus::helper::ShutdownWithCtrlC;
-use msgbus::{bus_uuid, Handle, MsgBus};
+use msgbus::{Handle, MsgBus, bus_uuid};
 use tokio;
 // use msgbus_macro::bus_uuid;
-use uuid::Uuid;
+// use uuid::Uuid;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[bus_uuid("018dce05-972c-7c2d-a5a1-579b828f7610")]
@@ -65,9 +65,7 @@ struct ChatListener {}
 
 impl ChatListener {
     async fn run(mut handle: Handle) {
-        let mut listener = handle
-            .register_anycast::<ChatMessage>(ChatMessage::get_uuid())
-            .unwrap();
+        let mut listener = handle.register_anycast::<ChatMessage>().await.unwrap();
         println!("Entering chat listen loop");
         loop {
             let message = listener.recv().await;
@@ -76,13 +74,14 @@ impl ChatListener {
                 Err(e) => {
                     match e {
                         msgbus::errors::ReceiveError::ConnectionClosed => {
-                            eprintln!("Chatlistener connection closed")
+                            println!("Chatlistener connection closed")
                         }
-                        msgbus::errors::ReceiveError::RegistrationFailed => {
-                            eprintln!("Registration failed")
+                        msgbus::errors::ReceiveError::RegistrationFailed(_) => {
+                            println!("Registration failed")
                         }
                         msgbus::errors::ReceiveError::Shutdown => {
-                            eprintln!("Chatlistener received shutdown")
+                            println!("Chatlistener received shutdown");
+                            return;
                         }
                     }
                     eprintln!("{e}");
@@ -123,20 +122,25 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
     }
 }
 
-#[cfg(target_family = "unix")]
-#[tokio::main(flavor = "current_thread")]
+// #[cfg(target_family = "unix")]
+#[tokio::main]
 async fn main() {
     // let (bus, handle) = MsgBus::new();
-    let handle = MsgBus::init();
+    let mut bus = MsgBus::new();
+    let handle = bus.handle().clone();
     // #[cfg(target_family = "unix")]
     // let bus = ShutdownWithCtrlC::from(bus);
 
     let cl = tokio::spawn(ChatListener::run(handle.clone()));
-    std::thread::sleep(Duration::from_secs(1));
+    std::thread::sleep(Duration::from_secs(2));
 
-    let c1 = tokio::spawn(countdown(handle.clone(), "Alice".into(), 10));
-    let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 30));
-    let c3 = tokio::spawn(tokio::time::sleep(Duration::from_secs(15)));
+    let c1 = tokio::spawn(countdown(handle.clone(), "Alice".into(), 3));
+    let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 15));
+    let c3 = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        bus.shutdown();
+    });
     let _blah = tokio::join! { cl, c1, c2, c3 };
+    println!("After join()");
     // bus.shutdown();
 }
