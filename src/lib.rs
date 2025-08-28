@@ -23,6 +23,11 @@ mod route_table;
 mod traits;
 pub use handle::Handle;
 
+#[cfg(any(feature = "ipc", feature = "net"))]
+mod peers;
+#[cfg(feature = "ipc")]
+use crate::peers::IpcManager;
+
 use tracing::{error, info};
 
 use tokio::{
@@ -89,7 +94,12 @@ impl BusControlHandle {
 // type RoutesWatchRx = watch::Receiver<Routes>;
 
 /// The main entry point into the MsgBus system.
-pub struct MsgBus {}
+pub struct MsgBus {
+    routes: RouteTableController,
+    rx: UnboundedReceiver<BrokerMsg>,
+    bc_rx: Receiver<BusControlMsg>,
+    id: Uuid,
+}
 
 impl MsgBus {
     /// This starts and runs the MsgBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
@@ -97,6 +107,8 @@ impl MsgBus {
     ///
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> BusControlHandle {
+        let id = Uuid::now_v7();
+
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
@@ -110,33 +122,50 @@ impl MsgBus {
             tx: bc_tx,
             handle: handle.clone(),
         };
-
-        let fut = Self::run(route_table_controller, rx, bc_rx);
-
+        let msg_bus = MsgBus {
+            routes: route_table_controller,
+            rx,
+            bc_rx,
+            id,
+        };
+        // let fut = Self::run(msg_bus, rx, bc_rx);
+        let fut = msg_bus.run();
         #[cfg(feature = "dioxus")]
         dioxus::prelude::spawn(fut);
         #[cfg(feature = "tokio")]
         tokio::spawn(fut);
 
+        #[cfg(feature = "ipc")]
+        let _ = {
+            let mut path = std::env::temp_dir();
+            path.push("msgbus.ipc");
+            let manager = IpcManager::new(path, handle);
+            #[cfg(feature = "dioxus")]
+            dioxus::prelude::spawn(manager.start());
+            #[cfg(feature = "tokio")]
+            tokio::spawn(async move { manager.start() });
+        };
+
         control_handle
     }
 
     async fn run(
-        mut routes: RouteTableController,
-        mut rx: UnboundedReceiver<BrokerMsg>,
-        mut bc_rx: Receiver<BusControlMsg>,
+        mut self,
+        // mut routes: RouteTableController,
+        // mut rx: UnboundedReceiver<BrokerMsg>,
+        // mut bc_rx: Receiver<BusControlMsg>,
     ) {
         let mut should_shutdown = false;
 
         loop {
-            if *bc_rx.borrow() == BusControlMsg::Shutdown || should_shutdown {
-                routes.shutdown_routing();
+            if *self.bc_rx.borrow() == BusControlMsg::Shutdown || should_shutdown {
+                self.routes.shutdown_routing();
                 break;
             }
             select! {
-                msg = rx.recv() => should_shutdown = Self::process_message(msg, &mut routes),
+                msg = self.rx.recv() => should_shutdown = Self::process_message(msg, &mut self.routes),
 
-                change_res = bc_rx.changed() => {
+                change_res = self.bc_rx.changed() => {
                     info!("bc_rx.changed() {:?}", change_res);
                     match change_res {
                         Ok(_) => {}
@@ -145,7 +174,7 @@ impl MsgBus {
                             should_shutdown = true;
                         }
                     }
-                    match *bc_rx.borrow_and_update() {
+                    match *self.bc_rx.borrow_and_update() {
                         BusControlMsg::Run => {},  // should never receive this but it's a non-issue
                         BusControlMsg::Shutdown => {
                             should_shutdown = true;
