@@ -28,6 +28,7 @@ pub(crate) struct IpcPeer {
     ipc_control: UnboundedReceiver<IpcControl>,
     ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
     peer: Peer,
+    is_master: bool,
 }
 
 impl IpcPeer {
@@ -38,6 +39,7 @@ impl IpcPeer {
         ipc_control: UnboundedReceiver<IpcControl>,
         ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
         peer: Peer,
+        is_master: bool,
     ) -> IpcPeer {
         IpcPeer {
             // phantom: PhantomData,
@@ -47,6 +49,7 @@ impl IpcPeer {
             tx,
             ipc_control,
             ipc_neighbors,
+            is_master,
         }
     }
     pub(crate) async fn start(mut self: Self) {
@@ -54,7 +57,7 @@ impl IpcPeer {
         loop {
             if let Some(old_state) = state.take() {
                 state = old_state.next(&mut self).await;
-                // println!("Entered: {:?}", &state);
+                println!("Entered: {:?}", &state);
             } else {
                 break;
             }
@@ -176,7 +179,7 @@ impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
-            IpcControl::PeersChanged => todo!(),
+            // IpcControl::PeersChanged => todo!(),
         }
     }
 }
@@ -215,9 +218,10 @@ struct ClosePeer {}
 impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         _ = state_machine.tx.close().await;
-        _ = state_machine
-            .ipc_command
-            .send(IpcCommand::PeerClosed(state_machine.peer.uuid));
+        _ = state_machine.ipc_command.send(IpcCommand::PeerClosed(
+            state_machine.peer.uuid,
+            state_machine.is_master,
+        ));
         state_machine
             .peer
             .handle

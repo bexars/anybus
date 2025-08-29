@@ -97,13 +97,13 @@ impl IpcManager {
     }
 
     pub(crate) async fn start(mut self) {
-        let agent = IpcDiscoveryAgent {
-            tx: self.tx.clone(),
-            bus_control: self.bus_control.clone(),
-            rendezvous: "msgbus.ipc".to_string(),
-            uuid: self.uuid,
-        };
-        spawn(agent.start());
+        self.start_agent().await;
+        spawn(ipc_listener(
+            self.uuid,
+            None,
+            self.tx.clone(),
+            self.bus_control.clone(),
+        ));
 
         loop {
             select! {
@@ -119,10 +119,20 @@ impl IpcManager {
         });
     }
 
+    async fn start_agent(&self) {
+        let agent = IpcDiscoveryAgent {
+            tx: self.tx.clone(),
+            bus_control: self.bus_control.clone(),
+            rendezvous: "msgbus.ipc".to_string(),
+            uuid: self.uuid,
+        };
+        spawn(agent.start());
+    }
+
     async fn handle_message(&mut self, msg: IpcCommand) {
         //
         match msg {
-            IpcCommand::AddPeer(uuid, ipc_sender, ipc_receiver) => {
+            IpcCommand::AddPeer(uuid, ipc_sender, ipc_receiver, is_master) => {
                 let (tx, rx) = unbounded_channel();
                 let (tx_ipc_control, rx_ipc_control) = unbounded_channel();
 
@@ -139,13 +149,17 @@ impl IpcManager {
                     rx_ipc_control,
                     self.peers.clone(),
                     peer,
+                    is_master,
                 );
                 _ = spawn(ipc_peer.start());
                 self.peers.write().await.push((uuid, tx_ipc_control));
                 self.handle.register_peer(uuid, tx);
                 // spawn(ipc_peer.start());
             }
-            IpcCommand::PeerClosed(uuid) => {
+            IpcCommand::PeerClosed(uuid, is_master) => {
+                if is_master {
+                    self.start_agent().await;
+                }
                 self.peers
                     .write()
                     .await
@@ -191,7 +205,7 @@ impl IpcDiscoveryAgent {
                 if let IpcMessage::Hello(other_uuid) = msg {
                     if self.uuid != other_uuid {
                         // Handle the case where the UUIDs match
-                        _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx));
+                        _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
                     }
                     //Otherwise fallthrough and close the task
                 }
@@ -261,7 +275,10 @@ async fn ipc_listener(
         .nonblocking(local_socket::ListenerNonblockingMode::Neither)
         .name(name)
         .reclaim_name(true);
-    let res = listener_opts.create_tokio().unwrap();
+    let res = match listener_opts.create_tokio() {
+        Ok(res) => res,
+        Err(_) => return,
+    };
     loop {
         select! {
             _ = bus_control.changed() => {
@@ -282,7 +299,7 @@ async fn ipc_listener(
                     {
                         stream.send(IpcMessage::Hello(uuid)).await.unwrap();
                         let (tx, rx) = stream.split();
-                        _ = cmd_tx.send(IpcCommand::AddPeer(other_uuid, tx, rx));
+                        _ = cmd_tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, false));
                     } else {
                         _ = stream.close();
                     };
@@ -294,14 +311,13 @@ async fn ipc_listener(
 
 #[derive(Debug)]
 enum IpcCommand {
-    AddPeer(Uuid, PeerTx, PeerRx),
-    PeerClosed(Uuid),
+    AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
+    PeerClosed(Uuid, bool),
 }
 
 #[derive(Debug)]
 enum IpcControl {
     Shutdown,
-    PeersChanged,
 }
 
 /// Protocol messages for the IPC bus.

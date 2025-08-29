@@ -1,3 +1,10 @@
+# Current Needs
+* DONE - IPC needs to restart rendezvous service
+* DONE - Listen on your own port for conns
+* Connect to other ports and share known peers
+* Delinting and TODO cleanup
+
+
 Must implement
 * determine which interfaces to listen on
   * https://docs.rs/interfaces/latest/  - looks good for weeding out some interfaces
