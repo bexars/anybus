@@ -126,7 +126,7 @@ impl MsgBus {
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
 
-        let route_table_controller = RouteTableController::new();
+        let route_table_controller = RouteTableController::new(id);
         let rts_rx = route_table_controller.get_watcher();
 
         let handle = Handle { tx, rts_rx };
@@ -230,13 +230,20 @@ impl MsgBus {
                 let _ = tx.send(msg);
             }
             BrokerMsg::RegisterPeer(uuid, tx) => {
-                routes.add_peer(uuid, tx);
+                if let Err(e) = routes.add_peer(uuid, tx.clone()) {
+                    error!("Error registering peer {}: {:?}", uuid, e);
+                };
+                let ads = routes.get_advertisements();
+                tx.send(NodeMessage::Advertise(ads));
             }
             BrokerMsg::DeadLink(uuid) => {
                 // let mut new_map = (*map).clone();
                 let _ = routes.dead_link(uuid);
             }
-            BrokerMsg::UnRegisterPeer(uuid) => {} //TODO Yank all the routes that go through this peer
+            BrokerMsg::UnRegisterPeer(uuid) => {}
+            BrokerMsg::AddPeerEndpoints(uuid, advertisements) => {
+                routes.add_peer_advertisements(uuid, advertisements);
+            }
         }
         false
     }

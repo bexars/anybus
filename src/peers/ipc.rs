@@ -11,7 +11,7 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::error;
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
@@ -54,16 +54,20 @@ impl IpcPeer {
         loop {
             if let Some(old_state) = state.take() {
                 state = old_state.next(&mut self).await;
+                // println!("Entered: {:?}", &state);
+            } else {
+                break;
             }
         }
     }
 }
 
 #[async_trait]
-trait State: Send {
+trait State: Send + std::fmt::Debug {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>>;
 }
 
+#[derive(Debug)]
 struct NewConnection {}
 
 #[async_trait]
@@ -76,6 +80,7 @@ impl State for NewConnection {
     }
 }
 
+#[derive(Debug)]
 struct SendPeers {}
 
 #[async_trait]
@@ -83,7 +88,7 @@ impl State for SendPeers {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match state_machine
             .tx
-            .send(IpcMessage::KnownPeers(Vec::new()))
+            .send(IpcMessage::KnownPeers(Vec::new())) //TODO Send actual known peers
             .await
         {
             Ok(_) => Some(Box::new(WaitForMessages {})),
@@ -92,7 +97,9 @@ impl State for SendPeers {
     }
 }
 
+#[derive(Debug)]
 struct WaitForMessages {}
+
 #[async_trait]
 impl State for WaitForMessages {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
@@ -101,7 +108,7 @@ impl State for WaitForMessages {
                 match msg {
                     Some(Ok(ipc_message)) => Some(Box::new(IpcMessageReceived { message: ipc_message})),
                     Some(Err(e)) => Some(Box::new(HandleError { error: e.into()})),
-                    None => Some(Box::new(PeerClosed {})),
+                    None => Some(Box::new(ClosePeer {})),
                 }
             }
             control_msg = state_machine.ipc_control.recv() => {
@@ -120,6 +127,7 @@ impl State for WaitForMessages {
     }
 }
 
+#[derive(Debug)]
 struct HandleError {
     error: Box<dyn std::error::Error + Send + Sync>,
 }
@@ -130,21 +138,11 @@ impl State for HandleError {
             "Received Error in {} IPC peer handler: {:?}",
             state_machine.peer.uuid, self.error
         );
-        _ = state_machine.tx.close().await;
-        _ = state_machine
-            .ipc_command
-            .send(IpcCommand::PeerClosed(state_machine.peer.uuid));
-        state_machine
-            .peer
-            .handle
-            .unregister_peer(state_machine.peer.uuid);
-        state_machine.ipc_control.close();
-        state_machine.peer.rx.close();
-
-        None
+        Some(Box::new(ClosePeer {}))
     }
 }
 
+#[derive(Debug)]
 struct NodeMessageReceived {
     message: NodeMessage,
 }
@@ -160,10 +158,15 @@ impl State for NodeMessageReceived {
                 }
             }
             NodeMessage::Shutdown => Some(Box::new(Shutdown {})),
+            NodeMessage::Advertise(vec) => {
+                _ = state_machine.tx.send(IpcMessage::Advertise(vec)).await;
+                Some(Box::new(WaitForMessages {}))
+            }
         }
     }
 }
 
+#[derive(Debug)]
 struct IpcControlReceived {
     message: IpcControl,
 }
@@ -171,10 +174,14 @@ struct IpcControlReceived {
 #[async_trait]
 impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        todo!()
+        match self.message {
+            IpcControl::Shutdown => Some(Box::new(Shutdown {})),
+            IpcControl::PeersChanged => todo!(),
+        }
     }
 }
 
+#[derive(Debug)]
 struct IpcMessageReceived {
     message: IpcMessage,
 }
@@ -189,26 +196,48 @@ impl State for IpcMessageReceived {
             IpcMessage::BusRider(uuid, items) => {
                 _ = state_machine.peer.handle.send_bytes(uuid, items);
             }
+            IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
+            IpcMessage::Advertise(ads) => {
+                state_machine
+                    .peer
+                    .handle
+                    .add_peer_endpoints(state_machine.peer.uuid, ads);
+            }
         }
         Some(Box::new(WaitForMessages {}))
     }
 }
 
-struct PeerClosed {}
+#[derive(Debug)]
+struct ClosePeer {}
 
 #[async_trait]
-impl State for PeerClosed {
-    async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        todo!()
+impl State for ClosePeer {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        _ = state_machine.tx.close().await;
+        _ = state_machine
+            .ipc_command
+            .send(IpcCommand::PeerClosed(state_machine.peer.uuid));
+        state_machine
+            .peer
+            .handle
+            .unregister_peer(state_machine.peer.uuid);
+        state_machine.ipc_control.close();
+        state_machine.peer.rx.close();
+
+        None
     }
 }
 
-// Either received an explicit Shutdown order or an internal msg queue died
+// Received an explicit Shutdown order
+// or internal queues are dying and we're just bailing out gracefully
+#[derive(Debug)]
 struct Shutdown {}
 
 #[async_trait]
 impl State for Shutdown {
-    async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        todo!()
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        _ = state_machine.tx.send(IpcMessage::CloseConnection).await;
+        None
     }
 }

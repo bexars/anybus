@@ -8,10 +8,10 @@ use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
 
 use crate::{
+    ReceiveError,
     errors::MsgBusHandleError,
     messages::{ClientMessage, RegistrationStatus},
     traits::{BusRider, BusRiderRpc},
-    ReceiveError,
 };
 
 #[derive(Debug)]
@@ -44,9 +44,12 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                             continue;
                         }
                     }
-                    ClientMessage::Bytes(_id, bytes) => match serde_cbor::from_slice(&bytes) {
+                    ClientMessage::Bytes(_id, bytes) => match bincode2::deserialize(&bytes) {
                         Ok(payload) => return Ok(payload),
-                        Err(_) => continue,
+                        Err(e) => {
+                            println!("Deserialization error: {}", e);
+                            continue;
+                        }
                     },
                     ClientMessage::Rpc {
                         to: _,
@@ -54,7 +57,7 @@ impl<T: BusRider + DeserializeOwned> BusListener<T> {
                         msg: _,
                     } => todo!(),
                     ClientMessage::FailedRegistration(_uuid, msg) => {
-                        return Err(ReceiveError::RegistrationFailed(msg))
+                        return Err(ReceiveError::RegistrationFailed(msg));
                     }
                     ClientMessage::Shutdown => {
                         println!("Shutdown in BusListener");
@@ -138,7 +141,7 @@ impl<T: BusRiderRpc + DeserializeOwned> BusListener<T> {
                             }
                         }
                         ClientMessage::FailedRegistration(_uuid, msg) => {
-                            return Err(ReceiveError::RegistrationFailed(msg))
+                            return Err(ReceiveError::RegistrationFailed(msg));
                         }
                         ClientMessage::Shutdown => {
                             println!("Shutdown in BusListener");
@@ -187,6 +190,6 @@ where
     pub fn respond(self, response: T::Response) -> Result<(), MsgBusHandleError> {
         self.response
             .send(Box::new(response))
-            .map_err(MsgBusHandleError::SendError)
+            .map_err(|_| MsgBusHandleError::SendError)
     }
 }

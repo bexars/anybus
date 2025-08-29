@@ -2,6 +2,7 @@ use std::any::{Any, TypeId};
 use std::{error::Error, marker::PhantomData, mem::swap};
 
 use itertools::{FoldWhile, Itertools};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -14,7 +15,9 @@ use crate::errors::{self, ReceiveError};
 #[cfg(feature = "ipc")]
 use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage, RegistrationStatus};
-use crate::route_table::{DestinationType, Nexthop, RoutesWatchRx, UnicastDest, UnicastType};
+use crate::route_table::{
+    Advertisement, DestinationType, Nexthop, RoutesWatchRx, UnicastDest, UnicastType,
+};
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
 /// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
@@ -111,105 +114,150 @@ impl Handle {
     }
 
     pub(crate) fn send_bytes(&self, uuid: Uuid, payload: Vec<u8>) -> Result<(), MsgBusHandleError> {
-        let msg = ClientMessage::Bytes(uuid, payload);
-        self.inner_send(uuid, msg)
+        // let msg = ClientMessage::Bytes(uuid, payload);
+        self.rts_rx
+            .borrow()
+            .get_route_dest(&uuid)
+            .map(|dest| match dest {
+                DestinationType::Local(tx) => {
+                    tx.send(ClientMessage::Bytes(uuid, payload));
+                }
+                DestinationType::Remote(peer_uuid) => {
+                    let tx = self.rts_rx.borrow().get_peer(&peer_uuid).unwrap();
+                    tx.send(NodeMessage::BusRider(uuid, payload));
+                }
+            })
+            .ok_or(MsgBusHandleError::NoRoute)
     }
 
-    pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
-        let u = T::MSGBUS_UUID;
-        let payload = Box::new(payload);
-        let msg = ClientMessage::Message(u, payload);
-        self.inner_send(u, msg)
+    pub fn send<T: BusRiderWithUuid + Serialize>(
+        &self,
+        payload: T,
+    ) -> Result<(), errors::MsgBusHandleError> {
+        let uuid = T::MSGBUS_UUID;
+        // let payload = Box::new(payload);
+        // let msg = ClientMessage::Message(u, payload);
+        self.rts_rx
+            .borrow()
+            .get_route_dest(&uuid)
+            .map(|dest| match dest {
+                DestinationType::Local(tx) => {
+                    tx.send(ClientMessage::Message(uuid, Box::new(payload)));
+                }
+                DestinationType::Remote(peer_uuid) => {
+                    let vec = bincode2::serialize(&payload).unwrap();
+                    let tx = self.rts_rx.borrow().get_peer(&peer_uuid).unwrap();
+                    tx.send(NodeMessage::BusRider(uuid, vec));
+                }
+            })
+            .ok_or(MsgBusHandleError::NoRoute)
+        // self.inner_send(u, Payload::Rider(payload))
     }
 
     /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
     /// The system will deliver regardless of end type
-    fn inner_send(
-        &self,
-        uuid: Uuid,
-        message: ClientMessage,
-    ) -> Result<(), errors::MsgBusHandleError> {
-        match self.rts_rx.borrow().get_route(&uuid) {
-            Some(endpoint) => {
-                let mut msg = Some(message);
+    // fn inner_send<T: Serialize>(
+    //     &self,
+    //     uuid: Uuid,
+    //     payload: Payload<T>,
+    //     // message: ClientMessage,
+    // ) -> Result<(), errors::MsgBusHandleError> {
+    //     match self.rts_rx.borrow().get_route(&uuid) {
+    //         Some(endpoint) => {
+    //             // let mut msg = Some(message);
 
-                let mut success = false;
-                let mut had_failure = false;
+    //             let mut success = false;
+    //             let mut had_failure = false;
 
-                // TODO Turn this into a scan iterator or just about anything better
-                match endpoint {
-                    Nexthop::Anycast(dests) => {
-                        //TODO call deadlink on these
-                        let errors = dests
-                            .iter()
-                            .fold_while(Vec::new(), |mut prev, dest| match &dest.dest_type {
-                                DestinationType::Local(tx) => {
-                                    let mut m = None;
-                                    swap(&mut m, &mut msg);
-                                    let m = m.unwrap();
+    //             // TODO Turn this into a scan iterator or just about anything better
+    //             match endpoint {
+    //                 Nexthop::Anycast(dests) => {
+    //                     //TODO call deadlink on these
+    //                     let errors = dests
+    //                         .iter()
+    //                         .fold_while(Vec::new(), |mut prev, dest| match &dest.dest_type {
+    //                             DestinationType::Local(tx) => {
+    //                                 todo!();
+    //                                 // let mut m = None;
+    //                                 // // swap(&mut m, &mut msg);
+    //                                 // let m = m.unwrap();
 
-                                    let res = tx.send(m);
-                                    match res {
-                                        Ok(_) => {
-                                            success = true;
-                                            FoldWhile::Done(prev)
-                                        }
-                                        Err(e) => {
-                                            let m = e.0;
-                                            let mut m = Some(m);
-                                            swap(&mut m, &mut msg);
-                                            prev.push(tx.clone());
-                                            itertools::FoldWhile::Continue(prev)
-                                        }
-                                    }
-                                }
-                                DestinationType::Remote(_uuid) => todo!(),
-                            })
-                            .into_inner();
-                        if !errors.is_empty() {
-                            had_failure = true;
-                        };
+    //                                 // let res = tx.send(m);
+    //                                 // match res {
+    //                                 //     Ok(_) => {
+    //                                 //         success = true;
+    //                                 //         FoldWhile::Done(prev)
+    //                                 //     }
+    //                                 //     Err(e) => {
+    //                                 //         let m = e.0;
+    //                                 //         let mut m = Some(m);
+    //                                 //         swap(&mut m, &mut msg);
+    //                                 //         prev.push(tx.clone());
+    //                                 //         itertools::FoldWhile::Continue(prev)
+    //                                 //     }
+    //                                 // }
+    //                             }
+    //                             DestinationType::Remote(peer_uuid) => {
+    //                                 if let Payload::Rider(payload) = &payload {
+    //                                     let vec = bincode2::serialize(payload).unwrap();
+    //                                     let tx = self.rts_rx.borrow().get_peer(peer_uuid).unwrap();
+    //                                     tx.send(NodeMessage::BusRider(uuid, vec));
+    //                                 }
 
-                        if had_failure {
-                            // #[cfg(feature = "tokio")]
-                            // self.tx.send(BrokerMsg::DeadLink(u));
-                            // #[cfg(feature = "dioxus")]
-                            let _ = self.tx.send(BrokerMsg::DeadLink(uuid)); // Just ignore if this fails
-                        }
+    //                                 FoldWhile::Done(prev)
+    //                             }
+    //                         })
+    //                         .into_inner();
+    //                     if !errors.is_empty() {
+    //                         had_failure = true;
+    //                     };
 
-                        if !success {
-                            let Some(ClientMessage::Message(_, payload)) = msg else {
-                                panic!()
-                            };
-                            return Err(errors::MsgBusHandleError::SendError(payload));
-                        }
-                    }
-                    Nexthop::Broadcast(_) => todo!(),
-                    Nexthop::Unicast(dest) => {
-                        info!("Send Unicast {dest:?} {msg:?}");
-                        match &dest.dest_type {
-                            DestinationType::Local(tx) => {
-                                let res = tx.send(msg.unwrap()).map_err(|e| {
-                                    let msg = e.0;
-                                    if let ClientMessage::Message(_, payload) = msg {
-                                        return MsgBusHandleError::SendError(payload);
-                                    }
-                                    todo!();
-                                });
-                                return res;
-                            }
-                            DestinationType::Remote(_node) => todo!(),
-                        };
-                    }
-                }
-            }
-            None => return Err(errors::MsgBusHandleError::NoRoute),
-        };
+    //                     if had_failure {
+    //                         // #[cfg(feature = "tokio")]
+    //                         // self.tx.send(BrokerMsg::DeadLink(u));
+    //                         // #[cfg(feature = "dioxus")]
+    //                         let _ = self.tx.send(BrokerMsg::DeadLink(uuid)); // Just ignore if this fails
+    //                     }
 
-        // TODO lookup in watched hashmap
-        // self.tx.send(Message::Message(u, payload))?;
-        Ok(())
-    }
+    //                     if !success {
+    //                         // let Some(ClientMessage::Message(_, payload)) = msg else {
+    //                         //     panic!()
+    //                         // };
+    //                         return Err(errors::MsgBusHandleError::SendError);
+    //                     }
+    //                 }
+    //                 Nexthop::Broadcast(_) => todo!(),
+    //                 Nexthop::Unicast(dest) => {
+    //                     // info!("Send Unicast {dest:?} {msg:?}");
+
+    //                     match &dest.dest_type {
+
+    //                         DestinationType::Local(tx) => {
+    //                             let msg = match payload {
+    //                                 Payload::Bytes(items) => ClientMessage::Bytes(uuid, items),
+    //                                 Payload::Rider(obj) => ClientMessage::Message(uuid,Box::new(obj)),
+    //                             }
+    //                             let res = tx.send(msg).map_err(|e| {
+    //                                 let msg = e.0;
+    //                                 if let ClientMessage::Message(_, payload) = msg {
+    //                                     return MsgBusHandleError::SendError;
+    //                                 }
+    //                                 todo!();
+    //                             });
+    //                             return res;
+    //                         }
+    //                         DestinationType::Remote(_node) => todo!(),
+    //                     };
+    //                 }
+    //             }
+    //         }
+    //         None => return Err(errors::MsgBusHandleError::NoRoute),
+    //     };
+
+    //     // TODO lookup in watched hashmap
+    //     // self.tx.send(Message::Message(u, payload))?;
+    //     Ok(())
+    // }
 
     /// Initiate an RPC request to a remote node
     pub async fn request<T: BusRiderRpc>(
@@ -238,7 +286,7 @@ impl Handle {
                         };
                         tx.send(msg).map_err(|value| match value.0 {
                             ClientMessage::Message(_uuid, bus_rider) => {
-                                MsgBusHandleError::SendError(bus_rider)
+                                MsgBusHandleError::SendError
                             }
                             _ => unreachable!(),
                         })?;
@@ -255,6 +303,10 @@ impl Handle {
             }
         }?;
         response.recv().await
+    }
+
+    pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: Vec<Advertisement>) {
+        _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
     }
 
     #[cfg(feature = "ipc")]
@@ -309,4 +361,10 @@ where
             phantom: PhantomData::<T>,
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum Payload<T: Serialize> {
+    Bytes(Vec<u8>),
+    Rider(T),
 }

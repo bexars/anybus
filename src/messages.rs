@@ -5,7 +5,10 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 
-use crate::{route_table::UnicastType, traits::BusRider};
+use crate::{
+    route_table::{Advertisement, UnicastType},
+    traits::BusRider,
+};
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -16,6 +19,7 @@ pub(crate) enum BrokerMsg {
     DeadLink(Uuid),
     RegisterPeer(Uuid, UnboundedSender<NodeMessage>),
     UnRegisterPeer(Uuid),
+    AddPeerEndpoints(Uuid, Vec<Advertisement>),
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -57,4 +61,5 @@ pub enum RegistrationStatus {
 pub(crate) enum NodeMessage {
     BusRider(Uuid, Vec<u8>),
     Shutdown,
+    Advertise(Vec<Advertisement>),
 }

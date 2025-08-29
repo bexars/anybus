@@ -1,4 +1,8 @@
-use std::{fmt::Display, time::Duration};
+use std::{
+    env::{self, Args},
+    fmt::Display,
+    time::Duration,
+};
 
 // use msgbus::helper::ShutdownWithCtrlC;
 use msgbus::{Handle, MsgBus, bus_uuid};
@@ -10,9 +14,9 @@ use tokio;
 #[bus_uuid("018dce05-972c-7c2d-a5a1-579b828f7610")]
 
 enum ChatMessage {
-    Msg { from: Box<str>, text: Box<str> },
+    Msg { from: String, text: String },
     Goodbye,
-    Hello(Box<str>), // Name to display when joining
+    Hello(String), // Name to display when joining
 }
 
 // impl msgbus::BusRider for ChatMessage {
@@ -70,7 +74,7 @@ impl ChatListener {
         loop {
             let message = listener.recv().await;
             match message {
-                Ok(msg) => println!("{msg}"),
+                Ok(msg) => println!("Chatlistener msg: {msg}"),
                 Err(e) => {
                     match e {
                         msgbus::errors::ReceiveError::ConnectionClosed => {
@@ -92,8 +96,8 @@ impl ChatListener {
     }
 }
 
-async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
-    handle.send(ChatMessage::Hello(name.clone())).unwrap();
+async fn countdown(handle: Handle, name: String, mut count: isize) {
+    _ = handle.send(ChatMessage::Hello(name.clone()));
 
     loop {
         let payload = if count > 0 {
@@ -103,7 +107,7 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
         };
         if let Result::Err(e) = handle.send(ChatMessage::Msg {
             from: name.clone(),
-            text: payload.into_boxed_str(),
+            text: payload.into(),
         }) {
             // match e {
             //     msgbus::errors::MsgBusHandleError::SendError(bus_rider) => todo!(),
@@ -111,8 +115,8 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
             //     msgbus::errors::MsgBusHandleError::SubscriptionFailed => todo!(),
             //     msgbus::errors::MsgBusHandleError::Shutdown => todo!(),
             // }
-            dbg!(e);
-            break;
+            // dbg!(e);
+            // break;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
         count -= 1;
@@ -125,22 +129,28 @@ async fn countdown(handle: Handle, name: Box<str>, mut count: isize) {
 // #[cfg(target_family = "unix")]
 #[tokio::main]
 async fn main() {
+    let name = env::args().skip(1).next().unwrap();
+
     // let (bus, handle) = MsgBus::new();
     let mut bus = MsgBus::new();
     let handle = bus.handle().clone();
     // #[cfg(target_family = "unix")]
     // let bus = ShutdownWithCtrlC::from(bus);
 
-    let cl = tokio::spawn(ChatListener::run(handle.clone()));
+    let cl = if name == "Alice" {
+        tokio::spawn(ChatListener::run(handle.clone()))
+    } else {
+        tokio::spawn(async {})
+    };
     std::thread::sleep(Duration::from_secs(2));
 
-    let c1 = tokio::spawn(countdown(handle.clone(), "Alice".into(), 3));
-    let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 15));
+    let c1 = tokio::spawn(countdown(handle.clone(), name, 10));
+    // let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 15));
     let c3 = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(120)).await;
         bus.shutdown();
     });
-    let _blah = tokio::join! { cl, c1, c2, c3 };
+    let _blah = tokio::join! { cl, c1, c3 };
     println!("After join()");
     // bus.shutdown();
 }

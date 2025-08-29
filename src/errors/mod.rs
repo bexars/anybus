@@ -42,7 +42,8 @@ impl<E> From<tokio::sync::mpsc::error::SendError<E>> for ReceiveError {
 pub enum MsgBusHandleError {
     /// Send failed for unknown reason.  Original message is returned in the error
     #[error("Unable to send.  The passed Message is returned within this error")]
-    SendError(Box<dyn BusRider>),
+    // SendError(Box<dyn BusRider>),
+    SendError,
     /// The destination [Uuid](uuid::Uuid) is unknown
     #[error("Route not found for that UUID")]
     // NoRoute(Box<dyn BusRider>),

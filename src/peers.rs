@@ -48,6 +48,7 @@ use crate::{
     BusRider, Handle, Node, Peer,
     messages::{BusControlMsg, NodeMessage},
     peers::ipc::IpcPeer,
+    route_table::Advertisement,
     spawn,
 };
 
@@ -291,11 +292,13 @@ async fn ipc_listener(
     }
 }
 
+#[derive(Debug)]
 enum IpcCommand {
     AddPeer(Uuid, PeerTx, PeerRx),
     PeerClosed(Uuid),
 }
 
+#[derive(Debug)]
 enum IpcControl {
     Shutdown,
     PeersChanged,
@@ -308,4 +311,6 @@ enum IpcMessage {
     KnownPeers(Vec<Uuid>),
     NeighborRemoved(Uuid),   //Node/Peer ID
     BusRider(Uuid, Vec<u8>), // Destination ID
+    CloseConnection,
+    Advertise(Vec<Advertisement>),
 }

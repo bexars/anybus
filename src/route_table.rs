@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use sorted_vec::partial::SortedVec;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -25,6 +26,22 @@ pub(crate) struct Routes {
 impl Routes {
     pub(crate) fn get_route(&self, uuid: &Uuid) -> Option<&Nexthop> {
         self.nexthops.get(&uuid)
+    }
+
+    pub(crate) fn get_route_dest(&self, uuid: &Uuid) -> Option<DestinationType> {
+        self.nexthops
+            .get(&uuid)
+            .map(|nexthop| match nexthop {
+                Nexthop::Anycast(sorted_vec) => {
+                    sorted_vec.first().map(|dest| &dest.dest_type).unwrap()
+                }
+                Nexthop::Broadcast(_sender) => todo!(),
+                Nexthop::Unicast(UnicastDest {
+                    unicast_type: _,
+                    dest_type,
+                }) => dest_type,
+            })
+            .cloned()
     }
 
     pub(crate) fn add_unicast(
@@ -113,6 +130,10 @@ impl Routes {
         Ok(false)
     }
 
+    pub(crate) fn get_peer(&self, uuid: &Uuid) -> Option<UnboundedSender<NodeMessage>> {
+        self.peers.get(uuid).cloned()
+    }
+
     pub(crate) fn shutdown_routing(&mut self) {
         for (_id, entry) in self.nexthops.iter() {
             match entry {
@@ -143,16 +164,18 @@ pub(crate) struct RouteTableController {
     routes: Routes,
     routes_watch_tx: RoutesWatchTx,
     routes_watch_rx: RoutesWatchRx,
+    uuid: Uuid,
 }
 
 impl RouteTableController {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(uuid: Uuid) -> Self {
         let routes = Routes::default();
         let (tx, rx) = watch::channel(routes.clone());
         Self {
             routes,
             routes_watch_tx: tx,
             routes_watch_rx: rx,
+            uuid,
         }
     }
 
@@ -208,9 +231,76 @@ impl RouteTableController {
         }
         Ok(())
     }
+
+    pub(crate) fn get_peer(&self, uuid: Uuid) -> Option<UnboundedSender<NodeMessage>> {
+        self.routes.peers.get(&uuid).cloned()
+    }
+
+    pub(crate) fn get_advertisements(&self) -> Vec<Advertisement> {
+        let mut ads = Vec::new();
+        for (uuid, nexthop) in self.routes.nexthops.iter() {
+            match nexthop {
+                Nexthop::Anycast(sorted_vec) => {
+                    for dest in sorted_vec {
+                        if let AnycastDest {
+                            dest_type: DestinationType::Local(_),
+                            cost,
+                        } = dest
+                        {
+                            ads.push(Advertisement::Anycast(*uuid, *cost));
+                        }
+                    }
+                }
+                Nexthop::Broadcast(sender) => todo!(),
+                Nexthop::Unicast(unicast_dest) => {
+                    if let UnicastDest {
+                        unicast_type: UnicastType::Datagram,
+                        dest_type: DestinationType::Local(_),
+                    } = unicast_dest
+                    {
+                        ads.push(Advertisement::UnicastDatagram(*uuid))
+                    }
+                }
+            }
+        }
+        ads
+    }
+
+    pub(crate) fn add_peer_advertisements(
+        &mut self,
+        remote_uuid: Uuid,
+        advertisements: Vec<Advertisement>,
+    ) {
+        {
+            for ad in advertisements {
+                match ad {
+                    Advertisement::UnicastDatagram(uuid) => {
+                        let dest = UnicastDest {
+                            unicast_type: UnicastType::Datagram,
+                            dest_type: DestinationType::Remote(remote_uuid),
+                        };
+                        let _ = self.add_unicast(uuid, dest);
+                    }
+                    Advertisement::Anycast(uuid, cost) => {
+                        let dest = AnycastDest {
+                            cost: cost,
+                            dest_type: DestinationType::Remote(remote_uuid),
+                        };
+                        let _ = self.add_anycast(uuid, dest);
+                    }
+                }
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum Advertisement {
+    UnicastDatagram(Uuid),
+    Anycast(Uuid, u16),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)] //TODO
 pub(crate) enum UnicastType {
     Datagram,
@@ -222,7 +312,7 @@ pub(crate) enum UnicastType {
 pub(crate) enum DestinationType {
     Local(UnboundedSender<ClientMessage>),
     #[allow(dead_code)] //TODO
-    Remote(PeerHandle),
+    Remote(Uuid),
 }
 
 #[derive(Debug, Clone)]
