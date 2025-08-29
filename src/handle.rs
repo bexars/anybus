@@ -110,21 +110,28 @@ impl Handle {
         todo!()
     }
 
-    // pub fn register<T: BusRider + DeserializeOwned>(
-    //     &mut self,
+    pub(crate) fn send_bytes(&self, uuid: Uuid, payload: Vec<u8>) -> Result<(), MsgBusHandleError> {
+        let msg = ClientMessage::Bytes(uuid, payload);
+        self.inner_send(uuid, msg)
+    }
 
-    // ) -> Result<BusListener<T>, Box<dyn Error>> {
-    //     self.register_with_uuid(T::default_uuid())
-    // }
-
-    /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
-    /// The system will deliver regardless of end type
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), errors::MsgBusHandleError> {
         let u = T::MSGBUS_UUID;
         let payload = Box::new(payload);
-        match self.rts_rx.borrow().get_route(&u) {
+        let msg = ClientMessage::Message(u, payload);
+        self.inner_send(u, msg)
+    }
+
+    /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
+    /// The system will deliver regardless of end type
+    fn inner_send(
+        &self,
+        uuid: Uuid,
+        message: ClientMessage,
+    ) -> Result<(), errors::MsgBusHandleError> {
+        match self.rts_rx.borrow().get_route(&uuid) {
             Some(endpoint) => {
-                let mut msg = Some(ClientMessage::Message(u, payload));
+                let mut msg = Some(message);
 
                 let mut success = false;
                 let mut had_failure = false;
@@ -167,7 +174,7 @@ impl Handle {
                             // #[cfg(feature = "tokio")]
                             // self.tx.send(BrokerMsg::DeadLink(u));
                             // #[cfg(feature = "dioxus")]
-                            let _ = self.tx.send(BrokerMsg::DeadLink(u)); // Just ignore if this fails
+                            let _ = self.tx.send(BrokerMsg::DeadLink(uuid)); // Just ignore if this fails
                         }
 
                         if !success {
@@ -196,7 +203,7 @@ impl Handle {
                     }
                 }
             }
-            None => return Err(errors::MsgBusHandleError::NoRoute(payload)),
+            None => return Err(errors::MsgBusHandleError::NoRoute),
         };
 
         // TODO lookup in watched hashmap
@@ -239,12 +246,12 @@ impl Handle {
                         Ok(rhandle)
                     }
 
-                    _ => Err(MsgBusHandleError::NoRoute(payload)),
+                    _ => Err(MsgBusHandleError::NoRoute),
                 }
             }
             None => {
                 // Handle the case when there is no route
-                Err(MsgBusHandleError::NoRoute(payload))
+                Err(MsgBusHandleError::NoRoute)
             }
         }?;
         response.recv().await
@@ -253,6 +260,11 @@ impl Handle {
     #[cfg(feature = "ipc")]
     pub(crate) fn register_peer(&self, uuid: Uuid, tx: UnboundedSender<NodeMessage>) {
         self.tx.send(BrokerMsg::RegisterPeer(uuid, tx)).unwrap();
+    }
+
+    #[cfg(feature = "ipc")]
+    pub(crate) fn unregister_peer(&self, uuid: Uuid) {
+        self.tx.send(BrokerMsg::UnRegisterPeer(uuid)).unwrap();
     }
 }
 

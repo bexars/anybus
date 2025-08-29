@@ -156,9 +156,7 @@ impl MsgBus {
         control_handle
     }
 
-    async fn run(
-        mut self,
-    ) {
+    async fn run(mut self) {
         let mut should_shutdown = false;
 
         loop {
@@ -215,7 +213,6 @@ impl MsgBus {
                 };
                 let _todo = unbounded_sender.send(msg); // TODO Make a deadlink update
             }
-
             BrokerMsg::RegisterAnycast(uuid, tx) => {
                 // TODO Make the Routes have Cow elements for ease of cloning
                 // let mut new_map = (*map).clone();
@@ -239,6 +236,7 @@ impl MsgBus {
                 // let mut new_map = (*map).clone();
                 let _ = routes.dead_link(uuid);
             }
+            BrokerMsg::UnRegisterPeer(uuid) => {} //TODO Yank all the routes that go through this peer
         }
         false
     }

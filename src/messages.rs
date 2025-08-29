@@ -15,6 +15,7 @@ pub(crate) enum BrokerMsg {
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
     RegisterPeer(Uuid, UnboundedSender<NodeMessage>),
+    UnRegisterPeer(Uuid),
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -54,6 +55,6 @@ pub enum RegistrationStatus {
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
 #[derive(Debug)]
 pub(crate) enum NodeMessage {
-    BusRider(Box<dyn BusRider>),
+    BusRider(Uuid, Vec<u8>),
     Shutdown,
 }
