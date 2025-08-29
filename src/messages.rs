@@ -1,3 +1,4 @@
+use serde::Serialize;
 use tokio::sync::{
     mpsc::UnboundedSender,
     oneshot::{self},
@@ -13,6 +14,7 @@ pub(crate) enum BrokerMsg {
     RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
+    RegisterPeer(Uuid, UnboundedSender<NodeMessage>),
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -47,4 +49,11 @@ pub enum RegistrationStatus {
     Registered,
     /// Registration failed
     Failed(String),
+}
+
+/// Messages going to the Peer entity that is owned by the connection to a remote peer
+#[derive(Debug)]
+pub(crate) enum NodeMessage {
+    BusRider(Box<dyn BusRider>),
+    Shutdown,
 }

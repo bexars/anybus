@@ -34,14 +34,14 @@ use tokio::{
     // stream:: StreamExt,
     select,
     sync::{
-        mpsc::UnboundedReceiver,
+        mpsc::{UnboundedReceiver, UnboundedSender},
         watch::{self, Receiver},
     },
 };
 
 // use std::sync::mpsc::{Receiver, Sender};
 
-use uuid::Uuid;
+use uuid::{Timestamp, Uuid};
 
 // use crate::router::Router;
 
@@ -50,8 +50,8 @@ pub mod errors;
 
 pub use msgbus_macro::bus_uuid;
 
-use crate::messages::BusControlMsg;
 use crate::messages::{BrokerMsg, ClientMessage};
+use crate::messages::{BusControlMsg, NodeMessage};
 use crate::route_table::AnycastDest;
 use crate::route_table::DestinationType;
 use crate::route_table::RouteTableController;
@@ -59,11 +59,24 @@ use crate::route_table::UnicastDest;
 
 /// Reference to a foreign instance of [MsgBus]
 /// * Could be in the same process, just a different MsgBus instance
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(dead_code)] //TODO
 pub(crate) struct Node {
     id: Uuid,
-    //TODO store how to get to this node
+}
+
+#[derive(Debug)]
+pub(crate) struct Peer {
+    pub(crate) uuid: Uuid,
+    pub(crate) rx: UnboundedReceiver<NodeMessage>,
+    pub(crate) handle: Handle,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] //TODO
+pub(crate) struct PeerHandle {
+    id: Uuid,
+    tx: UnboundedSender<NodeMessage>, //TODO store how to get to this node
 }
 
 /// Handle for programatically shutting down the system.  Can be wrapped with [helper::ShutdownWithCtrlC] to catch user termination
@@ -125,25 +138,19 @@ impl MsgBus {
         let msg_bus = MsgBus {
             routes: route_table_controller,
             rx,
-            bc_rx,
+            bc_rx: bc_rx.clone(),
             id,
         };
         // let fut = Self::run(msg_bus, rx, bc_rx);
         let fut = msg_bus.run();
-        #[cfg(feature = "dioxus")]
-        dioxus::prelude::spawn(fut);
-        #[cfg(feature = "tokio")]
-        tokio::spawn(fut);
+        spawn(fut);
 
         #[cfg(feature = "ipc")]
         let _ = {
             let mut path = std::env::temp_dir();
             path.push("msgbus.ipc");
-            let manager = IpcManager::new(path, handle);
-            #[cfg(feature = "dioxus")]
-            dioxus::prelude::spawn(manager.start());
-            #[cfg(feature = "tokio")]
-            tokio::spawn(async move { manager.start() });
+            let manager = IpcManager::new(path, handle, bc_rx, id);
+            spawn(manager.start());
         };
 
         control_handle
@@ -151,9 +158,6 @@ impl MsgBus {
 
     async fn run(
         mut self,
-        // mut routes: RouteTableController,
-        // mut rx: UnboundedReceiver<BrokerMsg>,
-        // mut bc_rx: Receiver<BusControlMsg>,
     ) {
         let mut should_shutdown = false;
 
@@ -227,6 +231,9 @@ impl MsgBus {
                 };
 
                 let _ = tx.send(msg);
+            }
+            BrokerMsg::RegisterPeer(uuid, tx) => {
+                routes.add_peer(uuid, tx);
             }
             BrokerMsg::DeadLink(uuid) => {
                 // let mut new_map = (*map).clone();

@@ -5,7 +5,10 @@ use thiserror::Error;
 use tokio::sync::{mpsc::UnboundedSender, watch};
 use uuid::Uuid;
 
-use crate::{Node, messages::ClientMessage};
+use crate::{
+    PeerHandle,
+    messages::{ClientMessage, NodeMessage},
+};
 
 type UpdateRequired = bool;
 
@@ -16,6 +19,7 @@ pub(crate) type RoutesWatchRx = watch::Receiver<Routes>;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Routes {
     nexthops: HashMap<Uuid, Nexthop>,
+    peers: HashMap<Uuid, UnboundedSender<NodeMessage>>,
 }
 
 impl Routes {
@@ -69,6 +73,10 @@ impl Routes {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn add_peer(&mut self, uuid: Uuid, tx: UnboundedSender<NodeMessage>) {
+        self.peers.insert(uuid, tx);
     }
 
     pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<UpdateRequired, RouteTableError> {
@@ -171,6 +179,15 @@ impl RouteTableController {
         return self.update_watchers();
     }
 
+    pub(crate) fn add_peer(
+        &mut self,
+        uuid: Uuid,
+        tx: UnboundedSender<NodeMessage>,
+    ) -> Result<(), RouteTableError> {
+        self.routes.add_peer(uuid, tx);
+        self.update_watchers()
+    }
+
     pub(crate) fn dead_link(&mut self, uuid: Uuid) -> Result<(), RouteTableError> {
         let update_required = self.routes.dead_link(uuid)?;
         if update_required {
@@ -205,7 +222,7 @@ pub(crate) enum UnicastType {
 pub(crate) enum DestinationType {
     Local(UnboundedSender<ClientMessage>),
     #[allow(dead_code)] //TODO
-    Remote(Node),
+    Remote(PeerHandle),
 }
 
 #[derive(Debug, Clone)]

@@ -11,6 +11,8 @@ use uuid::Uuid;
 use crate::bus_listener::BusListener;
 use crate::errors::MsgBusHandleError;
 use crate::errors::{self, ReceiveError};
+#[cfg(feature = "ipc")]
+use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage, RegistrationStatus};
 use crate::route_table::{DestinationType, Nexthop, RoutesWatchRx, UnicastDest, UnicastType};
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
@@ -246,6 +248,11 @@ impl Handle {
             }
         }?;
         response.recv().await
+    }
+
+    #[cfg(feature = "ipc")]
+    pub(crate) fn register_peer(&self, uuid: Uuid, tx: UnboundedSender<NodeMessage>) {
+        self.tx.send(BrokerMsg::RegisterPeer(uuid, tx)).unwrap();
     }
 }
 
