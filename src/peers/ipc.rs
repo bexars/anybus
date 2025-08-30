@@ -1,6 +1,6 @@
 // Cribbed the state machine from: https://moonbench.xyz/projects/rust-event-driven-finite-state-machine
 
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
@@ -11,7 +11,7 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::{debug, error, info, trace};
+use tracing::error;
 use uuid::Uuid;
 
 use crate::{
@@ -89,9 +89,17 @@ struct SendPeers {}
 #[async_trait]
 impl State for SendPeers {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        let peers = state_machine
+            .ipc_neighbors
+            .read()
+            .await
+            .iter()
+            .map(|(uuid, _tx)| *uuid)
+            .filter(|u| *u != state_machine.peer.peer_uuid)
+            .collect();
         match state_machine
             .tx
-            .send(IpcMessage::KnownPeers(Vec::new())) //TODO Send actual known peers
+            .send(IpcMessage::KnownPeers(peers)) //TODO Send actual known peers
             .await
         {
             Ok(_) => Some(Box::new(WaitForMessages {})),
@@ -139,7 +147,7 @@ impl State for HandleError {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         error!(
             "Received Error in {} IPC peer handler: {:?}",
-            state_machine.peer.uuid, self.error
+            state_machine.peer.peer_uuid, self.error
         );
         Some(Box::new(ClosePeer {}))
     }
@@ -193,9 +201,13 @@ struct IpcMessageReceived {
 impl State for IpcMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
-            IpcMessage::Hello(uuid) => {}
-            IpcMessage::KnownPeers(uuids) => {}
-            IpcMessage::NeighborRemoved(uuid) => {}
+            IpcMessage::Hello(_uuid) => {}
+            IpcMessage::KnownPeers(uuids) => {
+                _ = state_machine
+                    .ipc_command
+                    .send(IpcCommand::LearnedPeers(uuids));
+            }
+            IpcMessage::NeighborRemoved(_uuid) => {}
             IpcMessage::BusRider(uuid, items) => {
                 _ = state_machine.peer.handle.send_bytes(uuid, items);
             }
@@ -204,7 +216,7 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .add_peer_endpoints(state_machine.peer.uuid, ads);
+                    .add_peer_endpoints(state_machine.peer.peer_uuid, ads);
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -219,13 +231,13 @@ impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         _ = state_machine.tx.close().await;
         _ = state_machine.ipc_command.send(IpcCommand::PeerClosed(
-            state_machine.peer.uuid,
+            state_machine.peer.peer_uuid,
             state_machine.is_master,
         ));
         state_machine
             .peer
             .handle
-            .unregister_peer(state_machine.peer.uuid);
+            .unregister_peer(state_machine.peer.peer_uuid);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
 

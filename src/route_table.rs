@@ -6,10 +6,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc::UnboundedSender, watch};
 use uuid::Uuid;
 
-use crate::{
-    PeerHandle,
-    messages::{ClientMessage, NodeMessage},
-};
+use crate::messages::{ClientMessage, NodeMessage};
 
 type UpdateRequired = bool;
 
@@ -251,7 +248,7 @@ impl RouteTableController {
                         }
                     }
                 }
-                Nexthop::Broadcast(sender) => todo!(),
+                Nexthop::Broadcast(_sender) => todo!(),
                 Nexthop::Unicast(unicast_dest) => {
                     if let UnicastDest {
                         unicast_type: UnicastType::Datagram,

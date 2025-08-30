@@ -1,4 +1,3 @@
-use serde::Serialize;
 use tokio::sync::{
     mpsc::UnboundedSender,
     oneshot::{self},

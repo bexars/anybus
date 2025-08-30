@@ -1,7 +1,6 @@
 use std::any::{Any, TypeId};
-use std::{error::Error, marker::PhantomData, mem::swap};
+use std::{error::Error, marker::PhantomData};
 
-use itertools::{FoldWhile, Itertools};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
@@ -81,7 +80,7 @@ impl Handle {
     }
 
     /// Register a RPC service with the broker.
-    pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned>(
+    pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
         &mut self,
     ) -> Result<BusListener<T>, ReceiveError> {
         let uuid = T::MSGBUS_UUID;
@@ -120,16 +119,18 @@ impl Handle {
             .get_route_dest(&uuid)
             .map(|dest| match dest {
                 DestinationType::Local(tx) => {
-                    tx.send(ClientMessage::Bytes(uuid, payload));
+                    _ = tx.send(ClientMessage::Bytes(uuid, payload));
                 }
                 DestinationType::Remote(peer_uuid) => {
                     let tx = self.rts_rx.borrow().get_peer(&peer_uuid).unwrap();
-                    tx.send(NodeMessage::BusRider(uuid, payload));
+                    _ = tx.send(NodeMessage::BusRider(uuid, payload));
                 }
             })
             .ok_or(MsgBusHandleError::NoRoute)
     }
 
+    /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
+    /// The system will deliver regardless of end type
     pub fn send<T: BusRiderWithUuid + Serialize>(
         &self,
         payload: T,
@@ -142,125 +143,20 @@ impl Handle {
             .get_route_dest(&uuid)
             .map(|dest| match dest {
                 DestinationType::Local(tx) => {
-                    tx.send(ClientMessage::Message(uuid, Box::new(payload)));
+                    _ = tx.send(ClientMessage::Message(uuid, Box::new(payload)))
                 }
                 DestinationType::Remote(peer_uuid) => {
                     let vec = bincode2::serialize(&payload).unwrap();
                     let tx = self.rts_rx.borrow().get_peer(&peer_uuid).unwrap();
-                    tx.send(NodeMessage::BusRider(uuid, vec));
+                    _ = tx.send(NodeMessage::BusRider(uuid, vec));
                 }
             })
             .ok_or(MsgBusHandleError::NoRoute)
         // self.inner_send(u, Payload::Rider(payload))
     }
 
-    /// Sends a single [BusRider] message to the indicated [Uuid].  This can be a Unicast, AnyCast, or Multicast receiver.
-    /// The system will deliver regardless of end type
-    // fn inner_send<T: Serialize>(
-    //     &self,
-    //     uuid: Uuid,
-    //     payload: Payload<T>,
-    //     // message: ClientMessage,
-    // ) -> Result<(), errors::MsgBusHandleError> {
-    //     match self.rts_rx.borrow().get_route(&uuid) {
-    //         Some(endpoint) => {
-    //             // let mut msg = Some(message);
-
-    //             let mut success = false;
-    //             let mut had_failure = false;
-
-    //             // TODO Turn this into a scan iterator or just about anything better
-    //             match endpoint {
-    //                 Nexthop::Anycast(dests) => {
-    //                     //TODO call deadlink on these
-    //                     let errors = dests
-    //                         .iter()
-    //                         .fold_while(Vec::new(), |mut prev, dest| match &dest.dest_type {
-    //                             DestinationType::Local(tx) => {
-    //                                 todo!();
-    //                                 // let mut m = None;
-    //                                 // // swap(&mut m, &mut msg);
-    //                                 // let m = m.unwrap();
-
-    //                                 // let res = tx.send(m);
-    //                                 // match res {
-    //                                 //     Ok(_) => {
-    //                                 //         success = true;
-    //                                 //         FoldWhile::Done(prev)
-    //                                 //     }
-    //                                 //     Err(e) => {
-    //                                 //         let m = e.0;
-    //                                 //         let mut m = Some(m);
-    //                                 //         swap(&mut m, &mut msg);
-    //                                 //         prev.push(tx.clone());
-    //                                 //         itertools::FoldWhile::Continue(prev)
-    //                                 //     }
-    //                                 // }
-    //                             }
-    //                             DestinationType::Remote(peer_uuid) => {
-    //                                 if let Payload::Rider(payload) = &payload {
-    //                                     let vec = bincode2::serialize(payload).unwrap();
-    //                                     let tx = self.rts_rx.borrow().get_peer(peer_uuid).unwrap();
-    //                                     tx.send(NodeMessage::BusRider(uuid, vec));
-    //                                 }
-
-    //                                 FoldWhile::Done(prev)
-    //                             }
-    //                         })
-    //                         .into_inner();
-    //                     if !errors.is_empty() {
-    //                         had_failure = true;
-    //                     };
-
-    //                     if had_failure {
-    //                         // #[cfg(feature = "tokio")]
-    //                         // self.tx.send(BrokerMsg::DeadLink(u));
-    //                         // #[cfg(feature = "dioxus")]
-    //                         let _ = self.tx.send(BrokerMsg::DeadLink(uuid)); // Just ignore if this fails
-    //                     }
-
-    //                     if !success {
-    //                         // let Some(ClientMessage::Message(_, payload)) = msg else {
-    //                         //     panic!()
-    //                         // };
-    //                         return Err(errors::MsgBusHandleError::SendError);
-    //                     }
-    //                 }
-    //                 Nexthop::Broadcast(_) => todo!(),
-    //                 Nexthop::Unicast(dest) => {
-    //                     // info!("Send Unicast {dest:?} {msg:?}");
-
-    //                     match &dest.dest_type {
-
-    //                         DestinationType::Local(tx) => {
-    //                             let msg = match payload {
-    //                                 Payload::Bytes(items) => ClientMessage::Bytes(uuid, items),
-    //                                 Payload::Rider(obj) => ClientMessage::Message(uuid,Box::new(obj)),
-    //                             }
-    //                             let res = tx.send(msg).map_err(|e| {
-    //                                 let msg = e.0;
-    //                                 if let ClientMessage::Message(_, payload) = msg {
-    //                                     return MsgBusHandleError::SendError;
-    //                                 }
-    //                                 todo!();
-    //                             });
-    //                             return res;
-    //                         }
-    //                         DestinationType::Remote(_node) => todo!(),
-    //                     };
-    //                 }
-    //             }
-    //         }
-    //         None => return Err(errors::MsgBusHandleError::NoRoute),
-    //     };
-
-    //     // TODO lookup in watched hashmap
-    //     // self.tx.send(Message::Message(u, payload))?;
-    //     Ok(())
-    // }
-
     /// Initiate an RPC request to a remote node
-    pub async fn request<T: BusRiderRpc>(
+    pub async fn request<T: BusRiderRpc + BusRiderWithUuid>(
         &self,
         payload: T,
     ) -> Result<T::Response, MsgBusHandleError> {
@@ -285,7 +181,7 @@ impl Handle {
                             msg: payload,
                         };
                         tx.send(msg).map_err(|value| match value.0 {
-                            ClientMessage::Message(_uuid, bus_rider) => {
+                            ClientMessage::Message(_uuid, _bus_rider) => {
                                 MsgBusHandleError::SendError
                             }
                             _ => unreachable!(),
@@ -361,10 +257,4 @@ where
             phantom: PhantomData::<T>,
         }
     }
-}
-
-#[derive(Debug)]
-pub(crate) enum Payload<T: Serialize> {
-    Bytes(Vec<u8>),
-    Rider(T),
 }

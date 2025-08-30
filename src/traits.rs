@@ -19,7 +19,7 @@ pub trait BusRiderWithUuid: BusRider {
 }
 
 /// Trait for denoting the type of a returned RPC response
-pub trait BusRiderRpc: BusRiderWithUuid {
+pub trait BusRiderRpc: BusRider {
     /// The type of the response that will be returned by the RPC call
     type Response: BusRider;
 }

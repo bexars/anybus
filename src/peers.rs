@@ -1,9 +1,6 @@
 mod ipc;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
 use futures::{
@@ -45,11 +42,7 @@ type PeerRx = SplitStream<
 >;
 
 use crate::{
-    BusRider, Handle, Node, Peer,
-    messages::{BusControlMsg, NodeMessage},
-    peers::ipc::IpcPeer,
-    route_table::Advertisement,
-    spawn,
+    Handle, Peer, messages::BusControlMsg, peers::ipc::IpcPeer, route_table::Advertisement, spawn,
 };
 
 // struct IpcPeer {
@@ -67,7 +60,7 @@ use crate::{
 // }
 
 pub(crate) struct IpcManager {
-    rendezvous: PathBuf,
+    rendezvous: String,
     handle: Handle,
     bus_control: watch::Receiver<BusControlMsg>,
     peers: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
@@ -78,7 +71,7 @@ pub(crate) struct IpcManager {
 
 impl IpcManager {
     pub(crate) fn new(
-        rendezvous: PathBuf,
+        rendezvous: String,
         handle: Handle,
         bus_control: watch::Receiver<BusControlMsg>,
         uuid: Uuid,
@@ -137,7 +130,8 @@ impl IpcManager {
                 let (tx_ipc_control, rx_ipc_control) = unbounded_channel();
 
                 let peer = Peer {
-                    uuid,
+                    peer_uuid: uuid,
+                    our_uuid: self.uuid,
                     rx,
                     handle: self.handle.clone(),
                 };
@@ -165,7 +159,50 @@ impl IpcManager {
                     .await
                     .retain(|(id, _tx)| if *id == uuid { false } else { true });
             }
+            IpcCommand::LearnedPeers(mut uuids) => {
+                uuids.sort();
+                let current_peers: Vec<_> =
+                    self.peers.read().await.iter().map(|(u, _)| *u).collect();
+                uuids.retain(|id| *id != self.uuid && !current_peers.contains(&id));
+                for peer_uuid in uuids.into_iter() {
+                    let ipc_command = self.tx.clone();
+                    let our_uuid = self.uuid;
+                    let name = peer_uuid.to_name();
+                    spawn(ipc_peer_connect(name, our_uuid, ipc_command));
+                }
+            }
         }
+    }
+}
+
+async fn ipc_peer_connect(name: Name<'_>, uuid: Uuid, ipc_command: UnboundedSender<IpcCommand>) {
+    let stream = local_socket::tokio::Stream::connect(name.clone()).await;
+    match stream {
+        Ok(stream) => {
+            let stream: AsyncBincodeStream<
+                local_socket::tokio::Stream,
+                IpcMessage,
+                IpcMessage,
+                async_bincode::AsyncDestination,
+            > = AsyncBincodeStream::from(stream).for_async();
+
+            let (mut tx, mut rx) = stream.split();
+
+            let msg = IpcMessage::Hello(uuid);
+            dbg!(&msg);
+            tx.send(msg).await.unwrap();
+            let msg = rx.next().await.unwrap().unwrap();
+            dbg!(&msg);
+            if let IpcMessage::Hello(other_uuid) = msg {
+                if uuid != other_uuid {
+                    // Handle the case where the UUIDs match
+                    _ = ipc_command.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
+                }
+                //Otherwise fallthrough and close the task
+            }
+            // self.tx.send(IpcCommand::AddPeer((), (), ()))
+        }
+        Err(_) => {}
     }
 }
 
@@ -252,10 +289,10 @@ impl IpcDiscoveryAgent {
 
 /// Helper trait to convert Uuid to a 'interprocess' Name<>
 trait NameHelper {
-    fn to_name(&self) -> Name<'_>;
+    fn to_name(&self) -> Name<'static>;
 }
 impl NameHelper for Uuid {
-    fn to_name(&self) -> Name<'_> {
+    fn to_name(&self) -> Name<'static> {
         format!("msgbus.ipc.{}", self)
             .to_ns_name::<GenericNamespaced>()
             .unwrap()
@@ -313,6 +350,7 @@ async fn ipc_listener(
 enum IpcCommand {
     AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
     PeerClosed(Uuid, bool),
+    LearnedPeers(Vec<Uuid>),
 }
 
 #[derive(Debug)]

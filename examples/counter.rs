@@ -1,5 +1,5 @@
 use std::{
-    env::{self, Args},
+    env::{self},
     fmt::Display,
     time::Duration,
 };
@@ -105,19 +105,10 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
         } else {
             "Boom!".into()
         };
-        if let Result::Err(e) = handle.send(ChatMessage::Msg {
+        if let Result::Err(_e) = handle.send(ChatMessage::Msg {
             from: name.clone(),
             text: payload.into(),
-        }) {
-            // match e {
-            //     msgbus::errors::MsgBusHandleError::SendError(bus_rider) => todo!(),
-            //     msgbus::errors::MsgBusHandleError::NoRoute => todo!(),
-            //     msgbus::errors::MsgBusHandleError::SubscriptionFailed => todo!(),
-            //     msgbus::errors::MsgBusHandleError::Shutdown => todo!(),
-            // }
-            // dbg!(e);
-            // break;
-        }
+        }) {}
         tokio::time::sleep(Duration::from_secs(1)).await;
         count -= 1;
         if count < 0 {

@@ -41,7 +41,7 @@ use tokio::{
 
 // use std::sync::mpsc::{Receiver, Sender};
 
-use uuid::{Timestamp, Uuid};
+use uuid::Uuid;
 
 // use crate::router::Router;
 
@@ -67,7 +67,8 @@ pub(crate) struct Node {
 
 #[derive(Debug)]
 pub(crate) struct Peer {
-    pub(crate) uuid: Uuid,
+    pub(crate) peer_uuid: Uuid,
+    pub(crate) our_uuid: Uuid,
     pub(crate) rx: UnboundedReceiver<NodeMessage>,
     pub(crate) handle: Handle,
 }
@@ -147,9 +148,7 @@ impl MsgBus {
 
         #[cfg(feature = "ipc")]
         let _ = {
-            let mut path = std::env::temp_dir();
-            path.push("msgbus.ipc");
-            let manager = IpcManager::new(path, handle, bc_rx, id);
+            let manager = IpcManager::new("anybus.ipc".into(), handle, bc_rx, id);
             spawn(manager.start());
         };
 
@@ -234,13 +233,13 @@ impl MsgBus {
                     error!("Error registering peer {}: {:?}", uuid, e);
                 };
                 let ads = routes.get_advertisements();
-                tx.send(NodeMessage::Advertise(ads));
+                _ = tx.send(NodeMessage::Advertise(ads));
             }
             BrokerMsg::DeadLink(uuid) => {
                 // let mut new_map = (*map).clone();
                 let _ = routes.dead_link(uuid);
             }
-            BrokerMsg::UnRegisterPeer(uuid) => {}
+            BrokerMsg::UnRegisterPeer(_uuid) => {}
             BrokerMsg::AddPeerEndpoints(uuid, advertisements) => {
                 routes.add_peer_advertisements(uuid, advertisements);
             }
