@@ -22,12 +22,11 @@ mod messages;
 mod route_table;
 mod traits;
 pub use handle::Handle;
+use peers::IpcManager;
 
 #[cfg(any(feature = "ipc", feature = "net"))]
 mod peers;
 #[cfg(feature = "ipc")]
-use crate::peers::IpcManager;
-
 use tracing::{error, info};
 
 use tokio::{

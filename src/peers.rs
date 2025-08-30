@@ -1,4 +1,6 @@
 mod ipc;
+mod ipc_manager;
+pub(crate) use ipc_manager::IpcManager;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -59,121 +61,121 @@ use crate::{
 //     }
 // }
 
-pub(crate) struct IpcManager {
-    rendezvous: String,
-    handle: Handle,
-    bus_control: watch::Receiver<BusControlMsg>,
-    peers: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
-    tx: UnboundedSender<IpcCommand>,
-    rx: UnboundedReceiver<IpcCommand>,
-    uuid: Uuid,
-}
+// pub(crate) struct IpcManager {
+//     rendezvous: String,
+//     handle: Handle,
+//     bus_control: watch::Receiver<BusControlMsg>,
+//     peers: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
+//     tx: UnboundedSender<IpcCommand>,
+//     rx: UnboundedReceiver<IpcCommand>,
+//     uuid: Uuid,
+// }
 
-impl IpcManager {
-    pub(crate) fn new(
-        rendezvous: String,
-        handle: Handle,
-        bus_control: watch::Receiver<BusControlMsg>,
-        uuid: Uuid,
-    ) -> Self {
-        let (tx, rx) = unbounded_channel();
+// impl IpcManager {
+//     pub(crate) fn new(
+//         rendezvous: String,
+//         handle: Handle,
+//         bus_control: watch::Receiver<BusControlMsg>,
+//         uuid: Uuid,
+//     ) -> Self {
+//         let (tx, rx) = unbounded_channel();
 
-        IpcManager {
-            rendezvous,
-            handle,
-            bus_control,
-            peers: Default::default(),
-            tx,
-            rx,
-            uuid,
-        }
-    }
+//         IpcManager {
+//             rendezvous,
+//             handle,
+//             bus_control,
+//             peers: Default::default(),
+//             tx,
+//             rx,
+//             uuid,
+//         }
+//     }
 
-    pub(crate) async fn start(mut self) {
-        self.start_agent().await;
-        spawn(ipc_listener(
-            self.uuid,
-            None,
-            self.tx.clone(),
-            self.bus_control.clone(),
-        ));
+//     pub(crate) async fn start(mut self) {
+//         self.start_agent().await;
+//         spawn(ipc_listener(
+//             self.uuid,
+//             None,
+//             self.tx.clone(),
+//             self.bus_control.clone(),
+//         ));
 
-        loop {
-            select! {
-                Some(msg) = self.rx.recv() => { self.handle_message(msg).await; },
-                _ = self.bus_control.changed() => {
-                    //TODO evaluate the message and then die
-                    break;
-                }
-            }
-        }
-        self.peers.read().await.iter().for_each(|(_id, tx)| {
-            let _ = tx.send(IpcControl::Shutdown);
-        });
-    }
+//         loop {
+//             select! {
+//                 Some(msg) = self.rx.recv() => { self.handle_message(msg).await; },
+//                 _ = self.bus_control.changed() => {
+//                     //TODO evaluate the message and then die
+//                     break;
+//                 }
+//             }
+//         }
+//         self.peers.read().await.iter().for_each(|(_id, tx)| {
+//             let _ = tx.send(IpcControl::Shutdown);
+//         });
+//     }
 
-    async fn start_agent(&self) {
-        let agent = IpcDiscoveryAgent {
-            tx: self.tx.clone(),
-            bus_control: self.bus_control.clone(),
-            rendezvous: "msgbus.ipc".to_string(),
-            uuid: self.uuid,
-        };
-        spawn(agent.start());
-    }
+//     async fn start_agent(&self) {
+//         let agent = IpcDiscoveryAgent {
+//             tx: self.tx.clone(),
+//             bus_control: self.bus_control.clone(),
+//             rendezvous: "msgbus.ipc".to_string(),
+//             uuid: self.uuid,
+//         };
+//         spawn(agent.start());
+//     }
 
-    async fn handle_message(&mut self, msg: IpcCommand) {
-        //
-        match msg {
-            IpcCommand::AddPeer(uuid, ipc_sender, ipc_receiver, is_master) => {
-                let (tx, rx) = unbounded_channel();
-                let (tx_ipc_control, rx_ipc_control) = unbounded_channel();
+//     async fn handle_message(&mut self, msg: IpcCommand) {
+//         //
+//         match msg {
+//             IpcCommand::AddPeer(uuid, ipc_sender, ipc_receiver, is_master) => {
+//                 let (tx, rx) = unbounded_channel();
+//                 let (tx_ipc_control, rx_ipc_control) = unbounded_channel();
 
-                let peer = Peer {
-                    peer_uuid: uuid,
-                    our_uuid: self.uuid,
-                    rx,
-                    handle: self.handle.clone(),
-                };
+//                 let peer = Peer {
+//                     peer_uuid: uuid,
+//                     our_uuid: self.uuid,
+//                     rx,
+//                     handle: self.handle.clone(),
+//                 };
 
-                let ipc_peer = IpcPeer::new(
-                    ipc_receiver,
-                    ipc_sender,
-                    self.tx.clone(),
-                    rx_ipc_control,
-                    self.peers.clone(),
-                    peer,
-                    is_master,
-                );
-                _ = spawn(ipc_peer.start());
-                self.peers.write().await.push((uuid, tx_ipc_control));
-                self.handle.register_peer(uuid, tx);
-                // spawn(ipc_peer.start());
-            }
-            IpcCommand::PeerClosed(uuid, is_master) => {
-                if is_master {
-                    self.start_agent().await;
-                }
-                self.peers
-                    .write()
-                    .await
-                    .retain(|(id, _tx)| if *id == uuid { false } else { true });
-            }
-            IpcCommand::LearnedPeers(mut uuids) => {
-                uuids.sort();
-                let current_peers: Vec<_> =
-                    self.peers.read().await.iter().map(|(u, _)| *u).collect();
-                uuids.retain(|id| *id != self.uuid && !current_peers.contains(&id));
-                for peer_uuid in uuids.into_iter() {
-                    let ipc_command = self.tx.clone();
-                    let our_uuid = self.uuid;
-                    let name = peer_uuid.to_name();
-                    spawn(ipc_peer_connect(name, our_uuid, ipc_command));
-                }
-            }
-        }
-    }
-}
+//                 let ipc_peer = IpcPeer::new(
+//                     ipc_receiver,
+//                     ipc_sender,
+//                     self.tx.clone(),
+//                     rx_ipc_control,
+//                     self.peers.clone(),
+//                     peer,
+//                     is_master,
+//                 );
+//                 _ = spawn(ipc_peer.start());
+//                 self.peers.write().await.push((uuid, tx_ipc_control));
+//                 self.handle.register_peer(uuid, tx);
+//                 // spawn(ipc_peer.start());
+//             }
+//             IpcCommand::PeerClosed(uuid, is_master) => {
+//                 if is_master {
+//                     self.start_agent().await;
+//                 }
+//                 self.peers
+//                     .write()
+//                     .await
+//                     .retain(|(id, _tx)| if *id == uuid { false } else { true });
+//             }
+//             IpcCommand::LearnedPeers(mut uuids) => {
+//                 uuids.sort();
+//                 let current_peers: Vec<_> =
+//                     self.peers.read().await.iter().map(|(u, _)| *u).collect();
+//                 uuids.retain(|id| *id != self.uuid && !current_peers.contains(&id));
+//                 for peer_uuid in uuids.into_iter() {
+//                     let ipc_command = self.tx.clone();
+//                     let our_uuid = self.uuid;
+//                     let name = peer_uuid.to_name();
+//                     spawn(ipc_peer_connect(name, our_uuid, ipc_command));
+//                 }
+//             }
+//         }
+//     }
+// }
 
 async fn ipc_peer_connect(name: Name<'_>, uuid: Uuid, ipc_command: UnboundedSender<IpcCommand>) {
     let stream = local_socket::tokio::Stream::connect(name.clone()).await;
