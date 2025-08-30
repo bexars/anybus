@@ -289,6 +289,25 @@ impl RouteTableController {
             }
         }
     }
+
+    pub(crate) fn remove_peer(&mut self, uuid: Uuid) {
+        self.routes.peers.remove(&uuid);
+        self.routes.nexthops.retain(|_k, v| match v {
+            Nexthop::Broadcast(_) => true,
+            Nexthop::Anycast(v) => {
+                v.retain(|dest| match &dest.dest_type {
+                    DestinationType::Remote(peer_uuid) => *peer_uuid != uuid,
+                    DestinationType::Local(_) => true,
+                });
+                !v.is_empty()
+            }
+            Nexthop::Unicast(unicast_dest) => match &unicast_dest.dest_type {
+                DestinationType::Remote(peer_uuid) => *peer_uuid != uuid,
+                DestinationType::Local(_) => true,
+            },
+        });
+        let _ = self.update_watchers();
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

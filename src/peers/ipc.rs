@@ -57,7 +57,7 @@ impl IpcPeer {
         loop {
             if let Some(old_state) = state.take() {
                 state = old_state.next(&mut self).await;
-                println!("Entered: {:?}", &state);
+                // println!("Entered: {:?}", &state);
             } else {
                 break;
             }

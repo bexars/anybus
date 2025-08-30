@@ -237,13 +237,17 @@ impl IpcDiscoveryAgent {
                 let msg = IpcMessage::Hello(self.uuid);
                 dbg!(&msg);
                 tx.send(msg).await.unwrap();
-                let msg = rx.next().await.unwrap().unwrap();
+                let msg = match rx.next().await {
+                    Some(Ok(msg)) => msg,
+                    _ => return,
+                };
                 dbg!(&msg);
                 if let IpcMessage::Hello(other_uuid) = msg {
                     if self.uuid != other_uuid {
                         // Handle the case where the UUIDs match
                         _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
                     }
+
                     //Otherwise fallthrough and close the task
                 }
                 // self.tx.send(IpcCommand::AddPeer((), (), ()))

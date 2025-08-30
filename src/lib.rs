@@ -239,7 +239,9 @@ impl MsgBus {
                 // let mut new_map = (*map).clone();
                 let _ = routes.dead_link(uuid);
             }
-            BrokerMsg::UnRegisterPeer(_uuid) => {}
+            BrokerMsg::UnRegisterPeer(uuid) => {
+                routes.remove_peer(uuid);
+            }
             BrokerMsg::AddPeerEndpoints(uuid, advertisements) => {
                 routes.add_peer_advertisements(uuid, advertisements);
             }
