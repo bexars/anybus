@@ -1,51 +1,40 @@
 mod ipc;
 mod ipc_manager;
+use core::fmt;
+
 pub(crate) use ipc_manager::IpcManager;
 
-use std::{path::PathBuf, sync::Arc};
-
 use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
-use futures::{
-    SinkExt, StreamExt,
-    stream::{SplitSink, SplitStream},
-};
-use interprocess::local_socket::{
-    self, GenericNamespaced, Name, ToNsName,
-    traits::tokio::{Listener, Stream},
-};
+use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 
 use serde::{Deserialize, Serialize};
-use tokio::{
-    select,
-    sync::{
-        RwLock,
-        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-        watch,
-    },
-};
-use tracing::error;
 use uuid::Uuid;
-type PeerTx = SplitSink<
-    AsyncBincodeStream<
-        interprocess::local_socket::tokio::Stream,
-        IpcMessage,
-        IpcMessage,
-        AsyncDestination,
-    >,
+// type PeerTx = SplitSink<
+//     AsyncBincodeStream<
+//         interprocess::local_socket::tokio::Stream,
+//         IpcMessage,
+//         IpcMessage,
+//         AsyncDestination,
+//     >,
+//     IpcMessage,
+// >;
+// type PeerRx = SplitStream<
+//     AsyncBincodeStream<
+//         interprocess::local_socket::tokio::Stream,
+//         IpcMessage,
+//         IpcMessage,
+//         AsyncDestination,
+//     >,
+// >;
+
+type PeerStream = AsyncBincodeStream<
+    interprocess::local_socket::tokio::Stream,
     IpcMessage,
->;
-type PeerRx = SplitStream<
-    AsyncBincodeStream<
-        interprocess::local_socket::tokio::Stream,
-        IpcMessage,
-        IpcMessage,
-        AsyncDestination,
-    >,
+    IpcMessage,
+    AsyncDestination,
 >;
 
-use crate::{
-    Handle, Peer, messages::BusControlMsg, peers::ipc::IpcPeer, route_table::Advertisement, spawn,
-};
+use crate::route_table::Advertisement;
 
 // struct IpcPeer {
 //     // tx: PeerTx,
@@ -177,121 +166,121 @@ use crate::{
 //     }
 // }
 
-async fn ipc_peer_connect(name: Name<'_>, uuid: Uuid, ipc_command: UnboundedSender<IpcCommand>) {
-    let stream = local_socket::tokio::Stream::connect(name.clone()).await;
-    match stream {
-        Ok(stream) => {
-            let stream: AsyncBincodeStream<
-                local_socket::tokio::Stream,
-                IpcMessage,
-                IpcMessage,
-                async_bincode::AsyncDestination,
-            > = AsyncBincodeStream::from(stream).for_async();
+// async fn ipc_peer_connect(name: Name<'_>, uuid: Uuid, ipc_command: UnboundedSender<IpcCommand>) {
+//     let stream = local_socket::tokio::Stream::connect(name.clone()).await;
+//     match stream {
+//         Ok(stream) => {
+//             let stream: AsyncBincodeStream<
+//                 local_socket::tokio::Stream,
+//                 IpcMessage,
+//                 IpcMessage,
+//                 async_bincode::AsyncDestination,
+//             > = AsyncBincodeStream::from(stream).for_async();
 
-            let (mut tx, mut rx) = stream.split();
+//             let (mut tx, mut rx) = stream.split();
 
-            let msg = IpcMessage::Hello(uuid);
-            dbg!(&msg);
-            tx.send(msg).await.unwrap();
-            let msg = rx.next().await.unwrap().unwrap();
-            dbg!(&msg);
-            if let IpcMessage::Hello(other_uuid) = msg {
-                if uuid != other_uuid {
-                    // Handle the case where the UUIDs match
-                    _ = ipc_command.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
-                }
-                //Otherwise fallthrough and close the task
-            }
-            // self.tx.send(IpcCommand::AddPeer((), (), ()))
-        }
-        Err(_) => {}
-    }
-}
+//             let msg = IpcMessage::Hello(uuid);
+//             dbg!(&msg);
+//             tx.send(msg).await.unwrap();
+//             let msg = rx.next().await.unwrap().unwrap();
+//             dbg!(&msg);
+//             if let IpcMessage::Hello(other_uuid) = msg {
+//                 if uuid != other_uuid {
+//                     // Handle the case where the UUIDs match
+//                     _ = ipc_command.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
+//                 }
+//                 //Otherwise fallthrough and close the task
+//             }
+//             // self.tx.send(IpcCommand::AddPeer((), (), ()))
+//         }
+//         Err(_) => {}
+//     }
+// }
 
-#[derive(Debug, Clone)]
-struct IpcDiscoveryAgent {
-    tx: UnboundedSender<IpcCommand>,
-    bus_control: watch::Receiver<BusControlMsg>,
-    rendezvous: String,
-    uuid: Uuid,
-}
-impl IpcDiscoveryAgent {
-    async fn start(self) {
-        let name = self
-            .rendezvous
-            .clone()
-            .to_ns_name::<GenericNamespaced>()
-            .unwrap();
-        let stream = local_socket::tokio::Stream::connect(name.clone()).await;
-        match stream {
-            Ok(stream) => {
-                // let (rx, tx) = stream.split();
+// #[derive(Debug, Clone)]
+// struct IpcDiscoveryAgent {
+//     tx: UnboundedSender<IpcCommand>,
+//     bus_control: watch::Receiver<BusControlMsg>,
+//     rendezvous: String,
+//     uuid: Uuid,
+// }
+// impl IpcDiscoveryAgent {
+//     async fn start(self) {
+//         let name = self
+//             .rendezvous
+//             .clone()
+//             .to_ns_name::<GenericNamespaced>()
+//             .unwrap();
+//         let stream = local_socket::tokio::Stream::connect(name.clone()).await;
+//         match stream {
+//             Ok(stream) => {
+//                 // let (rx, tx) = stream.split();
 
-                let stream: AsyncBincodeStream<
-                    local_socket::tokio::Stream,
-                    IpcMessage,
-                    IpcMessage,
-                    async_bincode::AsyncDestination,
-                > = AsyncBincodeStream::from(stream).for_async();
+//                 let stream: AsyncBincodeStream<
+//                     local_socket::tokio::Stream,
+//                     IpcMessage,
+//                     IpcMessage,
+//                     async_bincode::AsyncDestination,
+//                 > = AsyncBincodeStream::from(stream).for_async();
 
-                let (mut tx, mut rx) = stream.split();
+//                 let (mut tx, mut rx) = stream.split();
 
-                let msg = IpcMessage::Hello(self.uuid);
-                dbg!(&msg);
-                tx.send(msg).await.unwrap();
-                let msg = match rx.next().await {
-                    Some(Ok(msg)) => msg,
-                    _ => return,
-                };
-                dbg!(&msg);
-                if let IpcMessage::Hello(other_uuid) = msg {
-                    if self.uuid != other_uuid {
-                        // Handle the case where the UUIDs match
-                        _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
-                    }
+//                 let msg = IpcMessage::Hello(self.uuid);
+//                 dbg!(&msg);
+//                 tx.send(msg).await.unwrap();
+//                 let msg = match rx.next().await {
+//                     Some(Ok(msg)) => msg,
+//                     _ => return,
+//                 };
+//                 dbg!(&msg);
+//                 if let IpcMessage::Hello(other_uuid) = msg {
+//                     if self.uuid != other_uuid {
+//                         // Handle the case where the UUIDs match
+//                         _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, true));
+//                     }
 
-                    //Otherwise fallthrough and close the task
-                }
-                // self.tx.send(IpcCommand::AddPeer((), (), ()))
-            }
-            Err(_) => {
-                // Handle the error
-                #[cfg(unix)]
-                let _ = {
-                    let path = PathBuf::new().join("/tmp").join(&self.rendezvous);
-                    _ = std::fs::remove_file(path);
-                };
-                ipc_listener(self.uuid, Some(name), self.tx.clone(), self.bus_control).await;
-            }
-        }
-        // TODO loop to check for rendezvous server and start if it's not running
-    }
-    // async fn launch_rendezvous_server(&self, name: Name<'_>) {
-    //     dbg!(&name);
-    //     let listener_opts = local_socket::ListenerOptions::new()
-    //         .nonblocking(local_socket::ListenerNonblockingMode::Neither)
-    //         .name(name)
-    //         .reclaim_name(true);
-    //     let res = listener_opts.create_tokio().unwrap();
-    //     loop {
-    //         let client = res.accept().await.unwrap();
+//                     //Otherwise fallthrough and close the task
+//                 }
+//                 // self.tx.send(IpcCommand::AddPeer((), (), ()))
+//             }
+//             Err(_) => {
+//                 // Handle the error
+//                 #[cfg(unix)]
+//                 let _ = {
+//                     let path = PathBuf::new().join("/tmp").join(&self.rendezvous);
+//                     _ = std::fs::remove_file(path);
+//                 };
+//                 ipc_listener(self.uuid, Some(name), self.tx.clone(), self.bus_control).await;
+//             }
+//         }
+//         // TODO loop to check for rendezvous server and start if it's not running
+//     }
+//     // async fn launch_rendezvous_server(&self, name: Name<'_>) {
+//     //     dbg!(&name);
+//     //     let listener_opts = local_socket::ListenerOptions::new()
+//     //         .nonblocking(local_socket::ListenerNonblockingMode::Neither)
+//     //         .name(name)
+//     //         .reclaim_name(true);
+//     //     let res = listener_opts.create_tokio().unwrap();
+//     //     loop {
+//     //         let client = res.accept().await.unwrap();
 
-    //         let mut stream = AsyncBincodeStream::from(client).for_async();
+//     //         let mut stream = AsyncBincodeStream::from(client).for_async();
 
-    //         if let Some(msg) = stream.next().await {
-    //             if let Ok(IpcMessage::Hello(other_uuid)) = msg
-    //                 && other_uuid != self.uuid
-    //             {
-    //                 stream.send(IpcMessage::Hello(self.uuid)).await.unwrap();
-    //                 let (tx, rx) = stream.split();
-    //                 _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx));
-    //             } else {
-    //                 _ = stream.close();
-    //             };
-    //         }
-    //     }
-    // }
-}
+//     //         if let Some(msg) = stream.next().await {
+//     //             if let Ok(IpcMessage::Hello(other_uuid)) = msg
+//     //                 && other_uuid != self.uuid
+//     //             {
+//     //                 stream.send(IpcMessage::Hello(self.uuid)).await.unwrap();
+//     //                 let (tx, rx) = stream.split();
+//     //                 _ = self.tx.send(IpcCommand::AddPeer(other_uuid, tx, rx));
+//     //             } else {
+//     //                 _ = stream.close();
+//     //             };
+//     //         }
+//     //     }
+//     // }
+// }
 
 /// Helper trait to convert Uuid to a 'interprocess' Name<>
 trait NameHelper {
@@ -305,67 +294,68 @@ impl NameHelper for Uuid {
     }
 }
 
-async fn ipc_listener(
-    uuid: Uuid,
-    name: Option<Name<'_>>,
-    cmd_tx: UnboundedSender<IpcCommand>,
-    mut bus_control: watch::Receiver<BusControlMsg>,
-) {
-    let name = name.unwrap_or_else(|| uuid.to_name());
+// async fn ipc_listener(
+//     uuid: Uuid,
+//     name: Option<Name<'_>>,
+//     cmd_tx: UnboundedSender<IpcCommand>,
+//     mut bus_control: watch::Receiver<BusControlMsg>,
+// ) {
+//     let name = name.unwrap_or_else(|| uuid.to_name());
 
-    dbg!(&name);
-    let listener_opts = local_socket::ListenerOptions::new()
-        .nonblocking(local_socket::ListenerNonblockingMode::Neither)
-        .name(name)
-        .reclaim_name(true);
-    let res = match listener_opts.create_tokio() {
-        Ok(res) => res,
-        Err(_) => return,
-    };
-    loop {
-        select! {
-            _ = bus_control.changed() => {
-                //TODO evaluate the message and then die
-                break;
-            },
-            accept_res = res.accept() => {
-                if let Err(e) = accept_res {
-                    error!("Error accepting IPC connection: {:?}", e);
-                    continue;
-                }
-                let client = accept_res.unwrap();
-                let mut stream = AsyncBincodeStream::from(client).for_async();
+//     dbg!(&name);
+//     let listener_opts = local_socket::ListenerOptions::new()
+//         .nonblocking(local_socket::ListenerNonblockingMode::Neither)
+//         .name(name)
+//         .reclaim_name(true);
+//     let res = match listener_opts.create_tokio() {
+//         Ok(res) => res,
+//         Err(_) => return,
+//     };
+//     loop {
+//         select! {
+//             _ = bus_control.changed() => {
+//                 //TODO evaluate the message and then die
+//                 break;
+//             },
+//             accept_res = res.accept() => {
+//                 if let Err(e) = accept_res {
+//                     error!("Error accepting IPC connection: {:?}", e);
+//                     continue;
+//                 }
+//                 let client = accept_res.unwrap();
+//                 let mut stream = AsyncBincodeStream::from(client).for_async();
 
-                if let Some(msg) = stream.next().await {
-                    if let Ok(IpcMessage::Hello(other_uuid)) = msg
-                        && other_uuid != uuid
-                    {
-                        stream.send(IpcMessage::Hello(uuid)).await.unwrap();
-                        let (tx, rx) = stream.split();
-                        _ = cmd_tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, false));
-                    } else {
-                        _ = stream.close();
-                    };
-                }
-            }
-        }
-    }
-}
+//                 if let Some(msg) = stream.next().await {
+//                     if let Ok(IpcMessage::Hello(other_uuid)) = msg
+//                         && other_uuid != uuid
+//                     {
+//                         stream.send(IpcMessage::Hello(uuid)).await.unwrap();
+//                         let (tx, rx) = stream.split();
+//                         _ = cmd_tx.send(IpcCommand::AddPeer(other_uuid, tx, rx, false));
+//                     } else {
+//                         _ = stream.close();
+//                     };
+//                 }
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 enum IpcCommand {
-    AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
+    // AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
     PeerClosed(Uuid, bool),
     LearnedPeers(Vec<Uuid>),
 }
 
 #[derive(Debug)]
 enum IpcControl {
+    IAmMaster,
     Shutdown,
 }
 
 /// Protocol messages for the IPC bus.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 enum IpcMessage {
     Hello(Uuid), //Our Msgbus ID
     KnownPeers(Vec<Uuid>),
@@ -373,4 +363,26 @@ enum IpcMessage {
     BusRider(Uuid, Vec<u8>), // Destination ID
     CloseConnection,
     Advertise(Vec<Advertisement>),
+    IAmMaster,
+}
+
+impl fmt::Debug for IpcMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // f.debug_struct("IpcMessage").
+        match self {
+            IpcMessage::Hello(uuid) => write!(f, "Hello({})", uuid),
+            IpcMessage::KnownPeers(uuids) => {
+                write!(f, "KnownPeers({:?})", uuids)
+            }
+            IpcMessage::NeighborRemoved(uuid) => {
+                write!(f, "NeighborRemoved({})", uuid)
+            }
+            IpcMessage::BusRider(uuid, bytes) => {
+                write!(f, "BusRider({}, {} bytes)", uuid, bytes.len())
+            }
+            IpcMessage::CloseConnection => write!(f, "CloseConnection"),
+            IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
+            IpcMessage::IAmMaster => write!(f, "IAmMaster"),
+        }
+    }
 }

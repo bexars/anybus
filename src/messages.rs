@@ -59,6 +59,6 @@ pub enum RegistrationStatus {
 #[derive(Debug)]
 pub(crate) enum NodeMessage {
     BusRider(Uuid, Vec<u8>),
-    Shutdown,
+    // Shutdown,
     Advertise(Vec<Advertisement>),
 }

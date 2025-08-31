@@ -229,9 +229,9 @@ impl RouteTableController {
         Ok(())
     }
 
-    pub(crate) fn get_peer(&self, uuid: Uuid) -> Option<UnboundedSender<NodeMessage>> {
-        self.routes.peers.get(&uuid).cloned()
-    }
+    // pub(crate) fn get_peer(&self, uuid: Uuid) -> Option<UnboundedSender<NodeMessage>> {
+    //     self.routes.peers.get(&uuid).cloned()
+    // }
 
     pub(crate) fn get_advertisements(&self) -> Vec<Advertisement> {
         let mut ads = Vec::new();

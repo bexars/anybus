@@ -41,6 +41,8 @@ impl Handle {
             rx,
             _pd: PhantomData,
             registration_status: Default::default(),
+            handle: self.clone(),
+            endpoint_id: uuid,
         };
 
         let register_msg = BrokerMsg::RegisterAnycast(uuid, tx);
@@ -65,6 +67,8 @@ impl Handle {
             rx,
             _pd: PhantomData,
             registration_status: Default::default(),
+            handle: self.clone(),
+            endpoint_id: uuid,
         };
 
         let register_msg = BrokerMsg::RegisterUnicast(uuid, tx, UnicastType::Datagram);
@@ -90,6 +94,8 @@ impl Handle {
             rx,
             _pd: PhantomData,
             registration_status: Default::default(),
+            handle: self.clone(),
+            endpoint_id: uuid,
         };
 
         let register_msg = BrokerMsg::RegisterUnicast(uuid, tx, UnicastType::Rpc);
@@ -105,7 +111,7 @@ impl Handle {
     }
 
     /// Placeholder - Not Implemented
-    pub fn register_multicast<T: BusRider + DeserializeOwned>(
+    fn _register_multicast<T: BusRider + DeserializeOwned>(
         &mut self,
         _uuid: Uuid,
     ) -> Result<BusListener<T>, Box<dyn Error>> {
@@ -213,6 +219,10 @@ impl Handle {
     #[cfg(feature = "ipc")]
     pub(crate) fn unregister_peer(&self, uuid: Uuid) {
         self.tx.send(BrokerMsg::UnRegisterPeer(uuid)).unwrap();
+    }
+
+    pub(crate) fn unregister_endpoint(&self, endpoint_id: Uuid) {
+        _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
     }
 }
 

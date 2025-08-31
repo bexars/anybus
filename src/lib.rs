@@ -33,7 +33,7 @@ use tokio::{
     // stream:: StreamExt,
     select,
     sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::UnboundedReceiver,
         watch::{self, Receiver},
     },
 };
@@ -66,17 +66,33 @@ pub(crate) struct Node {
 
 #[derive(Debug)]
 pub(crate) struct Peer {
-    pub(crate) peer_uuid: Uuid,
-    pub(crate) our_uuid: Uuid,
+    pub(crate) peer_id: Uuid,
+    pub(crate) our_id: Uuid,
     pub(crate) rx: UnboundedReceiver<NodeMessage>,
     pub(crate) handle: Handle,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)] //TODO
-pub(crate) struct PeerHandle {
-    id: Uuid,
-    tx: UnboundedSender<NodeMessage>, //TODO store how to get to this node
+// #[derive(Debug, Clone)]
+// // #[allow(dead_code)] //TODO
+// pub(crate) struct PeerHandle {
+//     peer_id: Uuid,
+//     tx: UnboundedSender<NodeMessage>, //TODO store how to get to this node
+// }
+
+impl Peer {
+    pub(crate) fn new(
+        peer_id: Uuid,
+        our_id: Uuid,
+        handle: Handle,
+        rx: UnboundedReceiver<NodeMessage>,
+    ) -> Self {
+        Self {
+            peer_id,
+            our_id,
+            rx,
+            handle,
+        }
+    }
 }
 
 /// Handle for programatically shutting down the system.  Can be wrapped with [helper::ShutdownWithCtrlC] to catch user termination
@@ -155,6 +171,7 @@ impl MsgBus {
     }
 
     async fn run(mut self) {
+        info!("MsgBus started with id {}", self.id);
         let mut should_shutdown = false;
 
         loop {

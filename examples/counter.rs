@@ -120,6 +120,7 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
 // #[cfg(target_family = "unix")]
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     let name = env::args().skip(1).next().unwrap();
 
     // let (bus, handle) = MsgBus::new();
@@ -138,7 +139,7 @@ async fn main() {
     let c1 = tokio::spawn(countdown(handle.clone(), name, 10));
     // let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 15));
     let c3 = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(120)).await;
+        tokio::time::sleep(Duration::from_secs(12)).await;
         bus.shutdown();
     });
     let _blah = tokio::join! { cl, c1, c3 };

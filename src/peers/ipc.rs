@@ -11,19 +11,22 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::error;
+use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
     Peer,
     messages::NodeMessage,
-    peers::{IpcCommand, IpcControl, IpcMessage, PeerRx, PeerTx},
+    peers::{IpcCommand, IpcControl, IpcMessage, PeerStream},
 };
+
+fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
+    Some(Box::new(thing))
+}
 
 pub(crate) struct IpcPeer {
     // phantom: PhantomData<T>,
-    rx: PeerRx,
-    tx: PeerTx,
+    stream: PeerStream,
     ipc_command: UnboundedSender<IpcCommand>,
     ipc_control: UnboundedReceiver<IpcControl>,
     ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
@@ -33,8 +36,7 @@ pub(crate) struct IpcPeer {
 
 impl IpcPeer {
     pub(crate) fn new(
-        rx: PeerRx,
-        tx: PeerTx,
+        stream: PeerStream,
         ipc_command: UnboundedSender<IpcCommand>,
         ipc_control: UnboundedReceiver<IpcControl>,
         ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
@@ -43,10 +45,9 @@ impl IpcPeer {
     ) -> IpcPeer {
         IpcPeer {
             // phantom: PhantomData,
-            rx,
+            stream,
             ipc_command,
             peer,
-            tx,
             ipc_control,
             ipc_neighbors,
             is_master,
@@ -56,8 +57,8 @@ impl IpcPeer {
         let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
         loop {
             if let Some(old_state) = state.take() {
+                trace!("Entering: {:?}", &old_state);
                 state = old_state.next(&mut self).await;
-                // println!("Entered: {:?}", &state);
             } else {
                 break;
             }
@@ -77,7 +78,7 @@ struct NewConnection {}
 impl State for NewConnection {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         // Handle the event for the NewConnection state
-        println!("Handling event in NewConnection state");
+        // println!("Handling event in NewConnection state");
         // Transition to the next state (for example, Connected state)
         Some(Box::new(SendPeers {})) // Replace with actual next state
     }
@@ -95,10 +96,10 @@ impl State for SendPeers {
             .await
             .iter()
             .map(|(uuid, _tx)| *uuid)
-            .filter(|u| *u != state_machine.peer.peer_uuid)
+            .filter(|u| *u != state_machine.peer.peer_id)
             .collect();
         match state_machine
-            .tx
+            .stream
             .send(IpcMessage::KnownPeers(peers)) //TODO Send actual known peers
             .await
         {
@@ -115,7 +116,7 @@ struct WaitForMessages {}
 impl State for WaitForMessages {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         select! {
-            msg = state_machine.rx.next() => {
+            msg = state_machine.stream.next() => {
                 match msg {
                     Some(Ok(ipc_message)) => Some(Box::new(IpcMessageReceived { message: ipc_message})),
                     Some(Err(e)) => Some(Box::new(HandleError { error: e.into()})),
@@ -147,7 +148,7 @@ impl State for HandleError {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         error!(
             "Received Error in {} IPC peer handler: {:?}",
-            state_machine.peer.peer_uuid, self.error
+            state_machine.peer.peer_id, self.error
         );
         Some(Box::new(ClosePeer {}))
     }
@@ -163,14 +164,18 @@ impl State for NodeMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
             NodeMessage::BusRider(uuid, vec) => {
-                match state_machine.tx.send(IpcMessage::BusRider(uuid, vec)).await {
+                match state_machine
+                    .stream
+                    .send(IpcMessage::BusRider(uuid, vec))
+                    .await
+                {
                     Ok(_) => Some(Box::new(WaitForMessages {})),
                     Err(e) => Some(Box::new(HandleError { error: e.into() })),
                 }
             }
-            NodeMessage::Shutdown => Some(Box::new(Shutdown {})),
+            // NodeMessage::Shutdown => Some(Box::new(Shutdown {})),
             NodeMessage::Advertise(vec) => {
-                _ = state_machine.tx.send(IpcMessage::Advertise(vec)).await;
+                _ = state_machine.stream.send(IpcMessage::Advertise(vec)).await;
                 Some(Box::new(WaitForMessages {}))
             }
         }
@@ -187,7 +192,23 @@ impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
-            // IpcControl::PeersChanged => todo!(),
+            IpcControl::IAmMaster => b(SendMaster {}),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SendMaster {}
+
+#[async_trait]
+impl State for SendMaster {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        match state_machine.stream.send(IpcMessage::IAmMaster).await {
+            Ok(_) => Some(Box::new(WaitForMessages {})),
+            Err(_) => b(HandleError {
+                // TODO Make this a deadlink announcement
+                error: "Failed to send IAmMaster".into(),
+            }),
         }
     }
 }
@@ -216,7 +237,11 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .add_peer_endpoints(state_machine.peer.peer_uuid, ads);
+                    .add_peer_endpoints(state_machine.peer.peer_id, ads);
+            }
+            IpcMessage::IAmMaster => {
+                state_machine.is_master = true;
+                // b(WaitForMessages {})
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -229,15 +254,15 @@ struct ClosePeer {}
 #[async_trait]
 impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.tx.close().await;
+        _ = state_machine.stream.close().await;
         _ = state_machine.ipc_command.send(IpcCommand::PeerClosed(
-            state_machine.peer.peer_uuid,
+            state_machine.peer.peer_id,
             state_machine.is_master,
         ));
         state_machine
             .peer
             .handle
-            .unregister_peer(state_machine.peer.peer_uuid);
+            .unregister_peer(state_machine.peer.peer_id);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
 
@@ -253,7 +278,8 @@ struct Shutdown {}
 #[async_trait]
 impl State for Shutdown {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.tx.send(IpcMessage::CloseConnection).await;
+        _ = state_machine.stream.send(IpcMessage::CloseConnection).await;
+        _ = state_machine.stream.close().await;
         None
     }
 }

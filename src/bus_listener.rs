@@ -6,9 +6,10 @@ use std::{
 use serde::de::DeserializeOwned;
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
+use uuid::Uuid;
 
 use crate::{
-    ReceiveError,
+    Handle, ReceiveError,
     errors::MsgBusHandleError,
     messages::{ClientMessage, RegistrationStatus},
     traits::{BusRider, BusRiderRpc},
@@ -20,6 +21,14 @@ pub struct BusListener<T: BusRider> {
     pub(crate) rx: UnboundedReceiver<ClientMessage>,
     pub(crate) registration_status: RegistrationStatus,
     pub(crate) _pd: PhantomData<T>,
+    pub(crate) handle: Handle,
+    pub(crate) endpoint_id: Uuid,
+}
+
+impl<T: BusRider> Drop for BusListener<T> {
+    fn drop(&mut self) {
+        self.handle.unregister_endpoint(self.endpoint_id);
+    }
 }
 
 impl<T: BusRider + DeserializeOwned> BusListener<T> {
