@@ -63,15 +63,11 @@ impl IpcManager {
         }
     }
 
-    pub(crate) async fn start(mut self: Self) {
+    pub(crate) async fn start(mut self) {
         let mut state = Some(Box::new(Creation {}) as Box<dyn State>);
-        loop {
-            if let Some(old_state) = state.take() {
-                trace!("Entering: {:?}", &old_state);
-                state = old_state.next(&mut self).await;
-            } else {
-                break;
-            }
+        while let Some(old_state) = state.take() {
+            trace!("Entering: {:?}", &old_state);
+            state = old_state.next(&mut self).await;
         }
     }
 }
@@ -176,7 +172,7 @@ impl State for StartRendezvous {
         #[cfg(unix)]
         let _ = {
             use std::path::PathBuf;
-            let path = PathBuf::new().join("/tmp").join(&state.rendezvous);
+            let path = PathBuf::from("/tmp").join(&state.rendezvous);
             _ = std::fs::remove_file(path);
         };
         state.rendezvous_listener = match listener_opts.create_tokio() {
@@ -223,8 +219,7 @@ impl State for Listen {
                 state
                     .rendezvous_listener
                     .as_ref()
-                    .map(|l| Box::pin(l.accept()))
-                    .into_iter(),
+                    .map(|l| Box::pin(l.accept())),
             );
 
         let ipc_listeners = future::select_all(ipc_listeners);
@@ -245,8 +240,8 @@ impl State for Listen {
                     }
                     msg = state.bus_control.changed() => {
                         if msg.is_ok() {
-                            let control_msg = state.bus_control.borrow().clone();
-                            match control_msg {
+                            let control_msg = state.bus_control.borrow();
+                            match *control_msg {
                                 BusControlMsg::Shutdown=> b(Shutdown {}),
                                 BusControlMsg::Run => b(Listen {}),
                             }
@@ -264,7 +259,7 @@ struct Shutdown {}
 #[async_trait]
 impl State for Shutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        for (id, tx) in state.peers.write().await.drain(..) {
+        for (_id, tx) in state.peers.write().await.drain(..) {
             let _ = tx.send(IpcControl::Shutdown);
             // state.handle.unregister_peer(id);
         }
@@ -393,7 +388,7 @@ impl State for CreateIpcPeer {
         );
         state.peers.write().await.push((self.peer_id, tx));
         state.handle.register_peer(self.peer_id, node_tx);
-        let _ = spawn(ipc_peer.start());
+        _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once
         match s {

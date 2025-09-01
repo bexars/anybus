@@ -67,6 +67,7 @@ pub(crate) struct Node {
 #[derive(Debug)]
 pub(crate) struct Peer {
     pub(crate) peer_id: Uuid,
+    #[allow(dead_code)]
     pub(crate) our_id: Uuid,
     pub(crate) rx: UnboundedReceiver<NodeMessage>,
     pub(crate) handle: Handle,
@@ -162,7 +163,7 @@ impl MsgBus {
         spawn(fut);
 
         #[cfg(feature = "ipc")]
-        let _ = {
+        {
             let manager = IpcManager::new("anybus.ipc".into(), handle, bc_rx, id);
             spawn(manager.start());
         };

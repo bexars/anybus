@@ -53,15 +53,11 @@ impl IpcPeer {
             is_master,
         }
     }
-    pub(crate) async fn start(mut self: Self) {
+    pub(crate) async fn start(mut self) {
         let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
-        loop {
-            if let Some(old_state) = state.take() {
-                trace!("Entering: {:?}", &old_state);
-                state = old_state.next(&mut self).await;
-            } else {
-                break;
-            }
+        while let Some(old_state) = state.take() {
+            trace!("Entering: {:?}", &old_state);
+            state = old_state.next(&mut self).await;
         }
     }
 }
@@ -77,10 +73,8 @@ struct NewConnection {}
 #[async_trait]
 impl State for NewConnection {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        // Handle the event for the NewConnection state
-        // println!("Handling event in NewConnection state");
-        // Transition to the next state (for example, Connected state)
-        Some(Box::new(SendPeers {})) // Replace with actual next state
+        // We're handed a freshly created 'stream' that has already exchanged Hello's and need to drive it forward
+        Some(Box::new(SendPeers {}))
     }
 }
 
@@ -100,7 +94,7 @@ impl State for SendPeers {
             .collect();
         match state_machine
             .stream
-            .send(IpcMessage::KnownPeers(peers)) //TODO Send actual known peers
+            .send(IpcMessage::KnownPeers(peers))
             .await
         {
             Ok(_) => Some(Box::new(WaitForMessages {})),
@@ -126,13 +120,13 @@ impl State for WaitForMessages {
             control_msg = state_machine.ipc_control.recv() => {
                 match control_msg {
                     Some(control_msg) => Some(Box::new(IpcControlReceived { message: control_msg})),
-                    None  => Some(Box::new(Shutdown {})),
+                    None  => Some(Box::new(Shutdown {})), // something important crashed, bail out
                 }
             }
             peer_msg = state_machine.peer.rx.recv() => {
                 match peer_msg {
                     Some(node_msg) => Some(Box::new(NodeMessageReceived {message: node_msg})),
-                    None => Some(Box::new(Shutdown {})),
+                    None => Some(Box::new(Shutdown {})),  // something important crashed, bail out
                 }
             }
         }
@@ -173,7 +167,6 @@ impl State for NodeMessageReceived {
                     Err(e) => Some(Box::new(HandleError { error: e.into() })),
                 }
             }
-            // NodeMessage::Shutdown => Some(Box::new(Shutdown {})),
             NodeMessage::Advertise(vec) => {
                 _ = state_machine.stream.send(IpcMessage::Advertise(vec)).await;
                 Some(Box::new(WaitForMessages {}))
@@ -222,7 +215,7 @@ struct IpcMessageReceived {
 impl State for IpcMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
-            IpcMessage::Hello(_uuid) => {}
+            IpcMessage::Hello(_uuid) => {}  //TODO implement heartbeat checks?
             IpcMessage::KnownPeers(uuids) => {
                 _ = state_machine
                     .ipc_command
@@ -265,6 +258,7 @@ impl State for ClosePeer {
             .unregister_peer(state_machine.peer.peer_id);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
+        _ = state_machine.stream.close().await;
 
         None
     }

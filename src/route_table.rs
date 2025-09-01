@@ -22,12 +22,12 @@ pub(crate) struct Routes {
 
 impl Routes {
     pub(crate) fn get_route(&self, uuid: &Uuid) -> Option<&Nexthop> {
-        self.nexthops.get(&uuid)
+        self.nexthops.get(uuid)
     }
 
     pub(crate) fn get_route_dest(&self, uuid: &Uuid) -> Option<DestinationType> {
         self.nexthops
-            .get(&uuid)
+            .get(uuid)
             .map(|nexthop| match nexthop {
                 Nexthop::Anycast(sorted_vec) => {
                     sorted_vec.first().map(|dest| &dest.dest_type).unwrap()
@@ -115,10 +115,9 @@ impl Routes {
                     dest_type: DestinationType::Local(local),
                     ..
                 } = dest
+                    && !local.is_closed()
                 {
-                    if !local.is_closed() {
-                        return Ok(false);
-                    }
+                    return Ok(false);
                 };
                 self.nexthops.remove(&uuid);
                 return Ok(true);
@@ -161,6 +160,7 @@ pub(crate) struct RouteTableController {
     routes: Routes,
     routes_watch_tx: RoutesWatchTx,
     routes_watch_rx: RoutesWatchRx,
+    #[allow(dead_code)] //TODO
     uuid: Uuid,
 }
 
@@ -196,7 +196,7 @@ impl RouteTableController {
     ) -> Result<(), RouteTableError> {
         //
         self.routes.add_anycast(uuid, dest)?;
-        return self.update_watchers();
+        self.update_watchers()
     }
 
     pub(crate) fn add_peer(
@@ -280,7 +280,7 @@ impl RouteTableController {
                     }
                     Advertisement::Anycast(uuid, cost) => {
                         let dest = AnycastDest {
-                            cost: cost,
+                            cost,
                             dest_type: DestinationType::Remote(remote_uuid),
                         };
                         let _ = self.add_anycast(uuid, dest);
