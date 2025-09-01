@@ -120,7 +120,13 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
 // #[cfg(target_family = "unix")]
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .event_format(
+            tracing_subscriber::fmt::format()
+                .with_file(true)
+                .with_line_number(true),
+        )
+        .init();
     let name = env::args().skip(1).next().unwrap();
 
     // let (bus, handle) = MsgBus::new();

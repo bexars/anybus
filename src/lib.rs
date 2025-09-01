@@ -14,6 +14,8 @@ pub use errors::ReceiveError;
 pub use handle::RpcResponse;
 pub use helper::spawn;
 pub use messages::RegistrationStatus;
+use tracing::debug;
+use tracing::{error, info};
 pub use traits::*;
 mod bus_listener;
 mod handle;
@@ -26,8 +28,6 @@ use peers::IpcManager;
 
 #[cfg(any(feature = "ipc", feature = "net"))]
 mod peers;
-#[cfg(feature = "ipc")]
-use tracing::{error, info};
 
 use tokio::{
     // stream:: StreamExt,
@@ -184,7 +184,7 @@ impl MsgBus {
                 msg = self.rx.recv() => should_shutdown = Self::process_message(msg, &mut self.routes),
 
                 change_res = self.bc_rx.changed() => {
-                    info!("bc_rx.changed() {:?}", change_res);
+                    debug!("bc_rx.changed() {:?}", change_res);
                     match change_res {
                         Ok(_) => {}
                         Err(e) => {

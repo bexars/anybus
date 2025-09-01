@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
     Handle, Peer,
     messages::BusControlMsg,
-    peers::{IpcCommand, IpcControl, IpcMessage, NameHelper, PeerStream, ipc::IpcPeer},
+    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc::IpcPeer},
     spawn,
 };
 
@@ -119,9 +119,9 @@ impl State for ConnectToRendezvous {
 
 #[derive(Debug)]
 struct HandShake {
-    stream: PeerStream,
+    stream: IpcPeerStream,
     peer_is_master: bool,
-    extra_streams: Vec<PeerStream>,
+    extra_streams: Vec<IpcPeerStream>,
 }
 
 #[async_trait]
@@ -353,9 +353,9 @@ impl State for HandleIpcCommand {
                 if streams.is_empty() {
                     return b(Listen {});
                 }
-                let first = streams.pop();
+                let first = streams.pop().unwrap(); //guaranteed due to previous if
                 b(HandShake {
-                    stream: first.unwrap(),
+                    stream: first,
                     peer_is_master: false,
                     extra_streams: streams,
                 })
@@ -366,10 +366,10 @@ impl State for HandleIpcCommand {
 
 #[derive(Debug)]
 struct CreateIpcPeer {
-    stream: PeerStream,
+    stream: IpcPeerStream,
     peer_id: Uuid,
     peer_is_master: bool,
-    extra_streams: Vec<PeerStream>,
+    extra_streams: Vec<IpcPeerStream>,
 }
 
 #[async_trait]

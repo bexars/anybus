@@ -11,13 +11,13 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 use uuid::Uuid;
 
 use crate::{
     Peer,
     messages::NodeMessage,
-    peers::{IpcCommand, IpcControl, IpcMessage, PeerStream},
+    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -26,7 +26,7 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
 
 pub(crate) struct IpcPeer {
     // phantom: PhantomData<T>,
-    stream: PeerStream,
+    stream: IpcPeerStream,
     ipc_command: UnboundedSender<IpcCommand>,
     ipc_control: UnboundedReceiver<IpcControl>,
     ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
@@ -36,7 +36,7 @@ pub(crate) struct IpcPeer {
 
 impl IpcPeer {
     pub(crate) fn new(
-        stream: PeerStream,
+        stream: IpcPeerStream,
         ipc_command: UnboundedSender<IpcCommand>,
         ipc_control: UnboundedReceiver<IpcControl>,
         ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
@@ -70,9 +70,12 @@ trait State: Send + std::fmt::Debug {
 #[derive(Debug)]
 struct NewConnection {}
 
+// TODO Probably could elminate this state altogether
+
 #[async_trait]
 impl State for NewConnection {
-    async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        info!("New connection to: {}", state_machine.peer.peer_id);
         // We're handed a freshly created 'stream' that has already exchanged Hello's and need to drive it forward
         Some(Box::new(SendPeers {}))
     }
@@ -215,7 +218,7 @@ struct IpcMessageReceived {
 impl State for IpcMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
-            IpcMessage::Hello(_uuid) => {}  //TODO implement heartbeat checks?
+            IpcMessage::Hello(_uuid) => {} //TODO implement heartbeat checks?
             IpcMessage::KnownPeers(uuids) => {
                 _ = state_machine
                     .ipc_command
