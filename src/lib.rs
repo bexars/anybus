@@ -58,6 +58,7 @@ impl MsgBus {}
 // type RoutesWatchRx = watch::Receiver<Routes>;
 
 /// The main entry point into the MsgBus system.
+#[allow(dead_code)]
 pub struct MsgBus {
     bc_tx: Sender<BusControlMsg>,
     id: Uuid,
@@ -83,7 +84,7 @@ impl MsgBus {
         spawn(router.start());
 
         let msg_bus = MsgBus {
-            bc_tx: bc_tx,
+            bc_tx,
             id,
             handle: handle.clone(),
         };
@@ -113,6 +114,12 @@ impl MsgBus {
     ///
     pub fn handle(&self) -> &Handle {
         &self.handle
+    }
+}
+
+impl Default for MsgBus {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

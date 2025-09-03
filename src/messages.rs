@@ -62,6 +62,7 @@ pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
     // Shutdown,
     Advertise(HashSet<Advertisement>),
+    #[allow(dead_code)]
     Withdraw(Vec<Uuid>),
     // BusRider(EndpointId, Vec<u8>),
 }

@@ -134,7 +134,7 @@ async fn main() {
     //     .init();
     let name = env::args().skip(1).next().unwrap();
 
-    let mut bus = MsgBus::new();
+    let bus = MsgBus::new();
     let handle = bus.handle().clone();
     let bus: ShutdownWithCtrlC = bus.into();
 

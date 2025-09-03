@@ -1,10 +1,8 @@
-use std::any::{Any, TypeId};
 use std::collections::HashSet;
 use std::{error::Error, marker::PhantomData};
 
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
 use tracing::info;
 use uuid::Uuid;
 
@@ -182,7 +180,7 @@ impl Handle {
                     from: None,
                     payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
                 })
-                .map_err(|e| MsgBusHandleError::SendError(e)),
+                .map_err(MsgBusHandleError::SendError),
 
             None => Err(MsgBusHandleError::NoRoute),
         }
@@ -233,7 +231,7 @@ impl Handle {
                 from: None,
                 payload: Payload::BusRider(payload),
             })
-            .map_err(|e| MsgBusHandleError::SendError(e))?;
+            .map_err(MsgBusHandleError::SendError)?;
 
         match rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().ok_or(

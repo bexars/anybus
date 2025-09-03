@@ -43,6 +43,7 @@ impl From<&RoutingTable> for ForwardingTable {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     Remote(UnboundedSender<NodeMessage>),
@@ -226,7 +227,8 @@ impl PartialEq for Route {
 
 impl PartialOrd for Route {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cost.cmp(&other.cost))
+        // Some(self.cost.cmp(&other.cost))
+        Some(self.cmp(other))
     }
 }
 
@@ -248,6 +250,7 @@ pub(crate) enum RouteKind {
 
 /// Used to control how the route is advertised
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum Realm {
     Process,
     Userspace,
@@ -255,10 +258,10 @@ pub(crate) enum Realm {
     Global,
 }
 
-struct PeerGroup {
-    id: PeerGroupId,
-    peers: Vec<Uuid>,
-}
+// struct PeerGroup {
+//     id: PeerGroupId,
+//     peers: Vec<Uuid>,
+// }
 
 #[derive(Debug, Error)]
 pub(super) enum RouteTableError {

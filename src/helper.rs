@@ -65,18 +65,16 @@ impl From<MsgBus> for ShutdownWithCtrlC {
 
 #[cfg(feature = "tokio")]
 async fn watch_ctrlc(mut rx: Receiver<()>, mut msg_bus: MsgBus) {
-    loop {
-        select! {
-            _ = &mut rx => {
-                msg_bus.shutdown();
-                break;
-            },
-            _ = tokio::signal::ctrl_c() => {
-                println!("Ctrl-C received.  Shutting down");
-                msg_bus.shutdown();
-                break;
-            }
+    select! {
+        _ = &mut rx => {
+            msg_bus.shutdown();
+
+        },
+        _ = tokio::signal::ctrl_c() => {
+            println!("Ctrl-C received.  Shutting down");
+            msg_bus.shutdown();
 
         }
+
     }
 }

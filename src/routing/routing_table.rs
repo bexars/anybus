@@ -26,6 +26,7 @@ impl RoutingTable {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(super) struct RouteEntry {
     pub(crate) endpoint: EndpointId,
     pub(crate) routes: SortedVec<Route>,

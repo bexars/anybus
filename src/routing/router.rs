@@ -14,12 +14,13 @@ use crate::{
     messages::{BrokerMsg, BusControlMsg, ClientMessage, NodeMessage},
     routing::{
         Advertisement, EndpointId, ForwardTo, ForwardingTable, NodeId, Realm, Route, RouteKind,
-        RouteTableError, routing_table::RoutingTable,
+        routing_table::RoutingTable,
     },
 };
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
 
+#[allow(dead_code)]
 pub(crate) struct Router {
     forward_table: ForwardingTable,
     route_table: RoutingTable,
@@ -124,7 +125,7 @@ enum State {
     RegisterRoute(EndpointId, Route),
     RouteChange, // Notify peers of route changes
     Shutdown,
-    HandleError(RouteTableError),
+    // HandleError(RouteTableError),
 }
 
 impl State {
@@ -251,7 +252,7 @@ impl State {
                         }
                         return Some(Listen);
                     }
-                    BrokerMsg::RemovePeerEndpoints(uuid, uuids) => todo!(),
+                    BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => todo!(),
                 }
             }
 
@@ -286,7 +287,7 @@ impl State {
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
-                for (_u, forward_to) in &router.forward_table.table {
+                for forward_to in router.forward_table.table.values() {
                     match forward_to {
                         ForwardTo::Local(tx) => {
                             let _ = tx.send(ClientMessage::Shutdown);
@@ -326,12 +327,10 @@ impl State {
                 router.send_route_updates();
 
                 return Some(Listen);
-            }
-
-            // ####### HandleError ##################################################
-            HandleError(e) => {
-                todo!()
-            }
+            } // ####### HandleError ##################################################
+              // HandleError(_e) => {
+              //     todo!()
+              // }
         };
         #[allow(unreachable_code)]
         // unreachable!();
@@ -340,6 +339,7 @@ impl State {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct PeerInfo {
     peer_id: NodeId,
     peer_tx: UnboundedSender<NodeMessage>,
