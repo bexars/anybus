@@ -1,7 +1,10 @@
 # Current Needs
 * DONE - IPC needs to restart rendezvous service
 * DONE - Listen on your own port for conns
-* Connect to other ports and share known peers
+* DONE - Connect to other ports and share known peers
+* Add and withdraw routes outside of peer up/down
+* rpc across nodes
+* subscribe()
 * Delinting and TODO cleanup
 
 

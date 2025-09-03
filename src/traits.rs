@@ -1,16 +1,19 @@
 use std::any::Any;
 
+use dyn_clone::DynClone;
 use erased_serde::Serialize;
 use uuid::Uuid;
 
 /// Any message handled by [MsgBus] must have these properties
 ///
 ///
-pub trait BusRider: Any + Serialize + Send + Sync + std::fmt::Debug + 'static {}
+pub trait BusRider: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static {}
+
+dyn_clone::clone_trait_object!(BusRider);
 
 /// Blanket implementation for any type that has the correct traits
 ///
-impl<T: Any + Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
+impl<T: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
 
 /// Trait for ease of sending over the bus without the client needing to know the UUID of the default receiver
 pub trait BusRiderWithUuid: BusRider {

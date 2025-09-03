@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sorted_vec::partial::SortedVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use tokio::sync::{mpsc::UnboundedSender, watch};
@@ -162,6 +162,8 @@ pub(crate) struct RouteTableController {
     routes_watch_rx: RoutesWatchRx,
     #[allow(dead_code)] //TODO
     uuid: Uuid,
+    received_routes: HashMap<Uuid, HashSet<Advertisement>>,
+    sent_routes: HashMap<Uuid, HashSet<Advertisement>>,
 }
 
 impl RouteTableController {
@@ -173,6 +175,8 @@ impl RouteTableController {
             routes_watch_tx: tx,
             routes_watch_rx: rx,
             uuid,
+            received_routes: HashMap::new(),
+            sent_routes: HashMap::new(),
         }
     }
 
@@ -233,8 +237,8 @@ impl RouteTableController {
     //     self.routes.peers.get(&uuid).cloned()
     // }
 
-    pub(crate) fn get_advertisements(&self) -> Vec<Advertisement> {
-        let mut ads = Vec::new();
+    pub(crate) fn get_advertisements(&self) -> HashSet<Advertisement> {
+        let mut ads = HashSet::new();
         for (uuid, nexthop) in self.routes.nexthops.iter() {
             match nexthop {
                 Nexthop::Anycast(sorted_vec) => {
@@ -244,7 +248,7 @@ impl RouteTableController {
                             cost,
                         } = dest
                         {
-                            ads.push(Advertisement::Anycast(*uuid, *cost));
+                            ads.insert(Advertisement::Anycast(*uuid, *cost));
                         }
                     }
                 }
@@ -255,7 +259,7 @@ impl RouteTableController {
                         dest_type: DestinationType::Local(_),
                     } = unicast_dest
                     {
-                        ads.push(Advertisement::UnicastDatagram(*uuid))
+                        ads.insert(Advertisement::UnicastDatagram(*uuid));
                     }
                 }
             }
@@ -266,27 +270,79 @@ impl RouteTableController {
     pub(crate) fn add_peer_advertisements(
         &mut self,
         remote_uuid: Uuid,
-        advertisements: Vec<Advertisement>,
+        advertisements: HashSet<Advertisement>,
     ) {
-        {
-            for ad in advertisements {
-                match ad {
-                    Advertisement::UnicastDatagram(uuid) => {
-                        let dest = UnicastDest {
-                            unicast_type: UnicastType::Datagram,
-                            dest_type: DestinationType::Remote(remote_uuid),
-                        };
-                        let _ = self.add_unicast(uuid, dest);
-                    }
-                    Advertisement::Anycast(uuid, cost) => {
-                        let dest = AnycastDest {
-                            cost,
-                            dest_type: DestinationType::Remote(remote_uuid),
-                        };
-                        let _ = self.add_anycast(uuid, dest);
-                    }
+        let received_routes = self
+            .received_routes
+            .entry(remote_uuid)
+            .or_insert_with(HashSet::new);
+        let diff = advertisements
+            .difference(received_routes)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        received_routes.extend(diff.iter().cloned());
+
+        for ad in diff {
+            match ad {
+                Advertisement::UnicastDatagram(uuid) => {
+                    let dest = UnicastDest {
+                        unicast_type: UnicastType::Datagram,
+                        dest_type: DestinationType::Remote(remote_uuid),
+                    };
+                    let _ = self.add_unicast(uuid, dest);
+                }
+                Advertisement::Anycast(uuid, cost) => {
+                    let dest = AnycastDest {
+                        cost,
+                        dest_type: DestinationType::Remote(remote_uuid),
+                    };
+                    let _ = self.add_anycast(uuid, dest);
                 }
             }
+        }
+    }
+
+    pub(crate) fn remove_peer_advertisements(&mut self, peer_id: Uuid, deletes: Vec<Uuid>) {
+        self.received_routes
+            .get_mut(&peer_id)
+            .unwrap()
+            .retain(|ad| {
+                !deletes.iter().any(|del| match ad {
+                    Advertisement::UnicastDatagram(uuid) => *uuid == *del,
+                    Advertisement::Anycast(uuid, _cost) => *uuid == *del,
+                })
+            });
+
+        let mut dirty = false;
+        for uuid in deletes {
+            if let Some(nexthop) = self.routes.nexthops.get_mut(&uuid) {
+                match nexthop {
+                    Nexthop::Broadcast(_) => {}
+                    Nexthop::Anycast(v) => {
+                        v.retain(|dest| match &dest.dest_type {
+                            DestinationType::Remote(remote_uuid) => *remote_uuid != peer_id,
+                            DestinationType::Local(_) => true,
+                        });
+                        if v.is_empty() {
+                            self.routes.nexthops.remove(&uuid);
+                            dirty = true;
+                        }
+                    }
+                    Nexthop::Unicast(unicast_dest) => match &unicast_dest.dest_type {
+                        DestinationType::Remote(remote_uuid) => {
+                            if *remote_uuid == peer_id {
+                                self.routes.nexthops.remove(&uuid);
+                                dirty = true;
+                            }
+                        }
+                        DestinationType::Local(_) => {}
+                    },
+                }
+            }
+        }
+        if dirty {
+            _ = self.update_watchers();
         }
     }
 
@@ -310,7 +366,7 @@ impl RouteTableController {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Advertisement {
     UnicastDatagram(Uuid),
     Anycast(Uuid, u16),
@@ -327,7 +383,6 @@ pub(crate) enum UnicastType {
 #[derive(Debug, Clone)]
 pub(crate) enum DestinationType {
     Local(UnboundedSender<ClientMessage>),
-    #[allow(dead_code)] //TODO
     Remote(Uuid),
 }
 

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use tokio::sync::{
     mpsc::UnboundedSender,
     oneshot::{self},
@@ -5,32 +7,35 @@ use tokio::sync::{
 use uuid::Uuid;
 
 use crate::{
-    route_table::{Advertisement, UnicastType},
+    // route_table::{Advertisement, UnicastType},
+    routing::{Advertisement, EndpointId, Packet, Route, UnicastType, WirePacket},
     traits::BusRider,
 };
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
-    RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
-    RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
+    // RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
+    // RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
+    RegisterRoute(Uuid, Route),
     Subscribe(Uuid, UnboundedSender<ClientMessage>),
     DeadLink(Uuid),
     RegisterPeer(Uuid, UnboundedSender<NodeMessage>),
     UnRegisterPeer(Uuid),
-    AddPeerEndpoints(Uuid, Vec<Advertisement>),
+    AddPeerEndpoints(Uuid, HashSet<Advertisement>),
+    RemovePeerEndpoints(Uuid, Vec<Uuid>),
 }
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum ClientMessage {
-    Message(Uuid, Box<dyn BusRider>),
-    Bytes(Uuid, Vec<u8>),
-    Rpc {
-        to: Uuid,
-        reply_to: oneshot::Sender<Box<dyn BusRider>>,
-        msg: Box<dyn BusRider>,
-    },
-
+    // Message(Uuid, Box<dyn BusRider>),
+    // Bytes(Uuid, Vec<u8>),
+    // Rpc {
+    //     to: Uuid,
+    //     reply_to: oneshot::Sender<Box<dyn BusRider>>,
+    //     msg: Box<dyn BusRider>,
+    // },
+    Message(Packet),
     //TODO Make subset of this error
     FailedRegistration(Uuid, String),
     SuccessfulRegistration(Uuid),
@@ -58,7 +63,9 @@ pub enum RegistrationStatus {
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
 #[derive(Debug)]
 pub(crate) enum NodeMessage {
-    BusRider(Uuid, Vec<u8>),
+    WirePacket(WirePacket),
     // Shutdown,
-    Advertise(Vec<Advertisement>),
+    Advertise(HashSet<Advertisement>),
+    Withdraw(Vec<Uuid>),
+    BusRider(EndpointId, Vec<u8>),
 }

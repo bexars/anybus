@@ -16,13 +16,13 @@ use tokio::{
         watch,
     },
 };
-use tracing::trace;
+use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::{
-    Handle, Peer,
+    Handle,
     messages::BusControlMsg,
-    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc::IpcPeer},
+    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, Peer, ipc::IpcPeer},
     spawn,
 };
 
@@ -66,7 +66,7 @@ impl IpcManager {
     pub(crate) async fn start(mut self) {
         let mut state = Some(Box::new(Creation {}) as Box<dyn State>);
         while let Some(old_state) = state.take() {
-            trace!("Entering: {:?}", &old_state);
+            debug!("Entering: {:?}", &old_state);
             state = old_state.next(&mut self).await;
         }
     }

@@ -7,10 +7,13 @@ use std::{
 // use msgbus::helper::ShutdownWithCtrlC;
 use msgbus::{Handle, MsgBus, bus_uuid};
 use tokio;
+
+use tracing_subscriber;
+
 // use msgbus_macro::bus_uuid;
 // use uuid::Uuid;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 #[bus_uuid("018dce05-972c-7c2d-a5a1-579b828f7610")]
 
 enum ChatMessage {
@@ -120,13 +123,15 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
 // #[cfg(target_family = "unix")]
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .event_format(
-            tracing_subscriber::fmt::format()
-                .with_file(true)
-                .with_line_number(true),
-        )
-        .init();
+    tracing_subscriber::fmt::init();
+
+    // tracing_subscriber::fmt()
+    //     .event_format(
+    //         tracing_subscriber::fmt::format()
+    //             .with_file(true)
+    //             .with_line_number(true),
+    //     )
+    //     .init();
     let name = env::args().skip(1).next().unwrap();
 
     // let (bus, handle) = MsgBus::new();

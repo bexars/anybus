@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+use crate::routing::Payload;
+
 /// Errors returned by [BusListener::recv()](crate::BusListener::recv())
 #[derive(Error, Debug)]
 
@@ -41,7 +43,7 @@ pub enum MsgBusHandleError {
     /// Send failed for unknown reason.  Original message is returned in the error
     #[error("Unable to send.  The passed Message is returned within this error")]
     // SendError(Box<dyn BusRider>),
-    SendError,
+    SendError(Payload),
     /// The destination [Uuid](uuid::Uuid) is unknown
     #[error("Route not found for that UUID")]
     // NoRoute(Box<dyn BusRider>),

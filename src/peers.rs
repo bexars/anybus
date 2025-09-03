@@ -1,6 +1,7 @@
 mod ipc;
 mod ipc_manager;
 use core::fmt;
+use std::collections::HashSet;
 
 pub(crate) use ipc_manager::IpcManager;
 
@@ -8,7 +9,14 @@ use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
 use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
+
+use crate::{
+    Handle,
+    messages::NodeMessage,
+    routing::{Advertisement, WirePacket},
+};
 
 type IpcPeerStream = AsyncBincodeStream<
     interprocess::local_socket::tokio::Stream,
@@ -16,8 +24,6 @@ type IpcPeerStream = AsyncBincodeStream<
     IpcMessage,
     AsyncDestination,
 >;
-
-use crate::route_table::Advertisement;
 
 /// Helper trait to convert Uuid to a 'interprocess' Name<>
 trait NameHelper {
@@ -28,6 +34,30 @@ impl NameHelper for Uuid {
         format!("msgbus.ipc.{}", self)
             .to_ns_name::<GenericNamespaced>()
             .unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Peer {
+    pub(crate) peer_id: Uuid,
+    pub(crate) our_id: Uuid,
+    pub(crate) rx: UnboundedReceiver<NodeMessage>,
+    pub(crate) handle: Handle,
+}
+
+impl Peer {
+    pub(crate) fn new(
+        peer_id: Uuid,
+        our_id: Uuid,
+        handle: Handle,
+        rx: UnboundedReceiver<NodeMessage>,
+    ) -> Self {
+        Self {
+            peer_id,
+            our_id,
+            rx,
+            handle,
+        }
     }
 }
 
@@ -52,7 +82,9 @@ enum IpcMessage {
     NeighborRemoved(Uuid),   //Node/Peer ID
     BusRider(Uuid, Vec<u8>), // Destination ID
     CloseConnection,
-    Advertise(Vec<Advertisement>),
+    Advertise(HashSet<Advertisement>),
+    Withdraw(Vec<Uuid>),
+    Packet(WirePacket),
     IAmMaster,
 }
 
@@ -73,6 +105,8 @@ impl fmt::Debug for IpcMessage {
             IpcMessage::CloseConnection => write!(f, "CloseConnection"),
             IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
             IpcMessage::IAmMaster => write!(f, "IAmMaster"),
+            IpcMessage::Withdraw(uuids) => write!(f, "Withdraw ({:?})", uuids),
+            IpcMessage::Packet(_wire_packet) => write!(f, "Packet(..)"),
         }
     }
 }

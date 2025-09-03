@@ -11,13 +11,13 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    Peer,
     messages::NodeMessage,
-    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
+    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, Peer},
+    routing::Address,
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -56,7 +56,7 @@ impl IpcPeer {
     pub(crate) async fn start(mut self) {
         let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
         while let Some(old_state) = state.take() {
-            trace!("Entering: {:?}", &old_state);
+            debug!("Entering: {:?}", &old_state);
             state = old_state.next(&mut self).await;
         }
     }
@@ -160,6 +160,12 @@ struct NodeMessageReceived {
 impl State for NodeMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
+            NodeMessage::WirePacket(packet) => {
+                match state_machine.stream.send(IpcMessage::Packet(packet)).await {
+                    Ok(_) => Some(Box::new(WaitForMessages {})),
+                    Err(e) => Some(Box::new(HandleError { error: e.into() })),
+                }
+            }
             NodeMessage::BusRider(uuid, vec) => {
                 match state_machine
                     .stream
@@ -171,8 +177,16 @@ impl State for NodeMessageReceived {
                 }
             }
             NodeMessage::Advertise(vec) => {
-                _ = state_machine.stream.send(IpcMessage::Advertise(vec)).await;
-                Some(Box::new(WaitForMessages {}))
+                match state_machine.stream.send(IpcMessage::Advertise(vec)).await {
+                    Ok(()) => Some(Box::new(WaitForMessages {})),
+                    Err(e) => b(HandleError { error: e.into() }),
+                }
+            }
+            NodeMessage::Withdraw(uuids) => {
+                match state_machine.stream.send(IpcMessage::Withdraw(uuids)).await {
+                    Ok(()) => Some(Box::new(WaitForMessages {})),
+                    Err(e) => b(HandleError { error: e.into() }),
+                }
             }
         }
     }
@@ -218,15 +232,21 @@ struct IpcMessageReceived {
 impl State for IpcMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
-            IpcMessage::Hello(_uuid) => {} //TODO implement heartbeat checks?
+            IpcMessage::Hello(_uuid) => {}
             IpcMessage::KnownPeers(uuids) => {
                 _ = state_machine
                     .ipc_command
                     .send(IpcCommand::LearnedPeers(uuids));
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
+            IpcMessage::Packet(wire_packet) => {
+                state_machine.peer.handle.send_packet(wire_packet);
+            }
             IpcMessage::BusRider(uuid, items) => {
-                _ = state_machine.peer.handle.send_bytes(uuid, items);
+                _ = state_machine
+                    .peer
+                    .handle
+                    .send_to_uuid(Address::Local(uuid), items);
             }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
             IpcMessage::Advertise(ads) => {
@@ -237,7 +257,12 @@ impl State for IpcMessageReceived {
             }
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
-                // b(WaitForMessages {})
+            }
+            IpcMessage::Withdraw(uuids) => {
+                state_machine
+                    .peer
+                    .handle
+                    .remove_peer_endpoints(state_machine.peer.our_id, uuids);
             }
         }
         Some(Box::new(WaitForMessages {}))
