@@ -68,7 +68,7 @@ impl Router {
         self.routes_watch_rx.clone()
     }
 
-    fn send_advertisements(&self) {
+    fn send_route_updates(&self) {
         trace!("Peers: {:?}", self.peers);
         for (peer_id, peer_info) in self.peers.iter() {
             trace!("routing table:{:?}", self.route_table.table);
@@ -131,10 +131,13 @@ impl State {
     async fn next(self, router: &mut Router) -> Option<State> {
         use State::*;
         match self {
+            // ####### Start ##################################################
             Start => {
                 info!("Router started");
                 return Some(Listen);
             }
+
+            // ####### Listen ##################################################
             Listen => {
                 select! {
                     _= router.bus_control_rx.changed() => {
@@ -163,93 +166,96 @@ impl State {
                     }
                 }
             }
-            HandleBrokerMsg(broker_msg) => match broker_msg {
-                // BrokerMsg::RegisterAnycast(uuid, unbounded_sender) => todo!(),
-                // BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => todo!(),
-                BrokerMsg::RegisterRoute(endpoint_id, route) => {
-                    return Some(RegisterRoute(endpoint_id, route));
-                }
-                BrokerMsg::Subscribe(_uuid, _unbounded_sender) => todo!(),
-                BrokerMsg::DeadLink(endpoint_id) => {
-                    router.route_table.table.retain(|_, route_entry| {
-                        let before = route_entry.routes.len();
-                        route_entry.routes.retain(|route| match &route.via {
-                            ForwardTo::Local(tx) => !tx.is_closed(),
-                            ForwardTo::Remote(tx) => !tx.is_closed(),
-                            ForwardTo::Broadcast(_forward_tos) => true,
+
+            // ####### HandleBrokerMsg ##################################################
+            HandleBrokerMsg(broker_msg) => {
+                //
+                match broker_msg {
+                    // BrokerMsg::RegisterAnycast(uuid, unbounded_sender) => todo!(),
+                    // BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => todo!(),
+                    BrokerMsg::RegisterRoute(endpoint_id, route) => {
+                        return Some(RegisterRoute(endpoint_id, route));
+                    }
+                    BrokerMsg::Subscribe(_uuid, _unbounded_sender) => todo!(),
+                    BrokerMsg::DeadLink(endpoint_id) => {
+                        router.route_table.table.retain(|_, route_entry| {
+                            let before = route_entry.routes.len();
+                            route_entry.routes.retain(|route| match &route.via {
+                                ForwardTo::Local(tx) => !tx.is_closed(),
+                                ForwardTo::Remote(tx) => !tx.is_closed(),
+                                ForwardTo::Broadcast(_forward_tos) => true,
+                            });
+                            let after = route_entry.routes.len();
+                            if before != after {
+                                trace!(
+                                    "Removed {} dead routes for endpoint {}",
+                                    before - after,
+                                    endpoint_id
+                                );
+                            }
+                            !route_entry.routes.is_empty()
                         });
-                        let after = route_entry.routes.len();
-                        if before != after {
-                            trace!(
-                                "Removed {} dead routes for endpoint {}",
-                                before - after,
-                                endpoint_id
-                            );
+                        return Some(RouteChange);
+                    }
+                    BrokerMsg::RegisterPeer(uuid, unbounded_sender) => {
+                        if router.peers.contains_key(&uuid) {
+                            // Peer already registered, ignore
+                            trace!("Peer {} already registered", uuid);
+                            return Some(Listen);
                         }
-                        !route_entry.routes.is_empty()
-                    });
-                    return Some(RouteChange);
-                }
-                BrokerMsg::RegisterPeer(uuid, unbounded_sender) => {
-                    if router.peers.contains_key(&uuid) {
-                        // Peer already registered, ignore
-                        trace!("Peer {} already registered", uuid);
+                        let route = Route {
+                            kind: RouteKind::Node,
+                            via: ForwardTo::Remote(unbounded_sender.clone()),
+                            learned_from: uuid,
+                            realm: Realm::Process,
+                            cost: 0,
+                        };
+                        router.route_table.add_route(uuid, route).unwrap();
+                        let peer_info = PeerInfo::new(uuid, unbounded_sender);
+                        router.peers.insert(uuid, peer_info);
+                        router.send_route_updates();
+                        trace!("Registered new peer {}", uuid);
                         return Some(Listen);
                     }
-                    let route = Route {
-                        kind: RouteKind::Node,
-                        via: ForwardTo::Remote(unbounded_sender.clone()),
-                        learned_from: uuid,
-                        realm: Realm::Process,
-                        cost: 0,
-                    };
-                    router.route_table.add_route(uuid, route).unwrap();
-                    let peer_info = PeerInfo::new(uuid, unbounded_sender);
-                    router.peers.insert(uuid, peer_info);
-                    router.send_advertisements();
-
-                    // router.peers.insert(uuid, peer_info);
-
-                    trace!("Registered new peer {}", uuid);
-                    return Some(Listen);
-                }
-                BrokerMsg::UnRegisterPeer(uuid) => {
-                    router.route_table.table.retain(|_, route_entry| {
-                        route_entry
-                            .routes
-                            .retain(|route| route.learned_from != uuid);
-                        !route_entry.routes.is_empty()
-                    });
-                    router.peers.remove(&uuid);
-                    Some(RouteChange)
-                }
-                BrokerMsg::AddPeerEndpoints(uuid, hash_set) => {
-                    if let Some(peer) = router.peers.get_mut(&uuid) {
-                        for ad in hash_set {
-                            let route = Route {
-                                kind: ad.kind,
-                                via: ForwardTo::Remote(peer.peer_tx.clone()),
-                                learned_from: uuid,
-                                realm: Realm::Process,
-                                cost: ad.cost + 16,
-                            };
-
-                            peer.received_routes.insert(ad.endpoint_id, route.clone());
-                            _ = router.route_table.add_route(ad.endpoint_id, route);
-                            trace!(
-                                "Added route for endpoint {} via peer {}",
-                                ad.endpoint_id, uuid
-                            );
-                        }
-                        return Some(RouteChange);
-                    } else {
-                        trace!("Peer {} not found for AddPeerEndpoints", uuid);
+                    BrokerMsg::UnRegisterPeer(uuid) => {
+                        router.route_table.table.retain(|_, route_entry| {
+                            route_entry
+                                .routes
+                                .retain(|route| route.learned_from != uuid);
+                            !route_entry.routes.is_empty()
+                        });
+                        router.peers.remove(&uuid);
+                        Some(RouteChange)
                     }
-                    return Some(Listen);
-                }
-                BrokerMsg::RemovePeerEndpoints(uuid, uuids) => todo!(),
-            },
+                    BrokerMsg::AddPeerEndpoints(uuid, hash_set) => {
+                        if let Some(peer) = router.peers.get_mut(&uuid) {
+                            for ad in hash_set {
+                                let route = Route {
+                                    kind: ad.kind,
+                                    via: ForwardTo::Remote(peer.peer_tx.clone()),
+                                    learned_from: uuid,
+                                    realm: Realm::Process,
+                                    cost: ad.cost + 16,
+                                };
 
+                                peer.received_routes.insert(ad.endpoint_id, route.clone());
+                                _ = router.route_table.add_route(ad.endpoint_id, route);
+                                trace!(
+                                    "Added route for endpoint {} via peer {}",
+                                    ad.endpoint_id, uuid
+                                );
+                            }
+                            return Some(RouteChange);
+                        } else {
+                            trace!("Peer {} not found for AddPeerEndpoints", uuid);
+                        }
+                        return Some(Listen);
+                    }
+                    BrokerMsg::RemovePeerEndpoints(uuid, uuids) => todo!(),
+                }
+            }
+
+            // ####### RegisterRoute ##################################################
             RegisterRoute(endpoint_id, route) => {
                 let forward_to = route.via.clone();
                 return match router.route_table.add_route(endpoint_id, route) {
@@ -276,6 +282,8 @@ impl State {
                     }
                 };
             }
+
+            // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
                 for (_u, forward_to) in &router.forward_table.table {
@@ -307,16 +315,20 @@ impl State {
                     });
                 None
             }
+
+            // ####### RouteChange ##################################################
             RouteChange => {
                 let new_forward_table = ForwardingTable::from(&router.route_table);
 
                 router.forward_table = new_forward_table;
                 let _ = router.routes_watch_tx.send(router.forward_table.clone());
                 // Notify peers of route changes
-                router.send_advertisements();
+                router.send_route_updates();
 
                 return Some(Listen);
             }
+
+            // ####### HandleError ##################################################
             HandleError(e) => {
                 todo!()
             }
