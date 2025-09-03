@@ -6,7 +6,7 @@ use std::any::Any;
 use erased_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::{mpsc::UnboundedSender, oneshot, watch::error::SendError};
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
@@ -154,7 +154,7 @@ impl From<EndpointId> for Address {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Payload {
+pub enum Payload {
     BusRider(Box<dyn crate::traits::BusRider>),
     Bytes(Vec<u8>),
 }
@@ -178,7 +178,7 @@ impl From<Payload> for Vec<u8> {
                 let mut v = Vec::new();
                 let cbor = &mut serde_cbor::Serializer::new(serde_cbor::ser::IoWrite::new(&mut v));
                 let mut cbor: Box<dyn Serializer> = Box::new(<dyn Serializer>::erase(cbor));
-                br.erased_serialize(&mut cbor);
+                _ = br.erased_serialize(&mut cbor);
                 drop(cbor);
                 v
             }

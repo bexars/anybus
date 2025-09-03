@@ -11,7 +11,7 @@ use tokio::{
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{
@@ -166,16 +166,16 @@ impl State for NodeMessageReceived {
                     Err(e) => Some(Box::new(HandleError { error: e.into() })),
                 }
             }
-            NodeMessage::BusRider(uuid, vec) => {
-                match state_machine
-                    .stream
-                    .send(IpcMessage::BusRider(uuid, vec))
-                    .await
-                {
-                    Ok(_) => Some(Box::new(WaitForMessages {})),
-                    Err(e) => Some(Box::new(HandleError { error: e.into() })),
-                }
-            }
+            // NodeMessage::BusRider(uuid, vec) => {
+            //     match state_machine
+            //         .stream
+            //         .send(IpcMessage::BusRider(uuid, vec))
+            //         .await
+            //     {
+            //         Ok(_) => Some(Box::new(WaitForMessages {})),
+            //         Err(e) => Some(Box::new(HandleError { error: e.into() })),
+            //     }
+            // }
             NodeMessage::Advertise(vec) => {
                 match state_machine.stream.send(IpcMessage::Advertise(vec)).await {
                     Ok(()) => Some(Box::new(WaitForMessages {})),

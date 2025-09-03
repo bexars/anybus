@@ -2,7 +2,6 @@ use std::any::{Any, TypeId};
 use std::collections::HashSet;
 use std::{error::Error, marker::PhantomData};
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -11,12 +10,12 @@ use uuid::Uuid;
 
 use crate::bus_listener::BusListener;
 use crate::errors::MsgBusHandleError;
-use crate::errors::{self, ReceiveError};
+use crate::errors::ReceiveError;
 #[cfg(feature = "ipc")]
 use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage, RegistrationStatus};
 use crate::routing::router::RoutesWatchRx;
-use crate::routing::{Address, Advertisement, EndpointId, Packet, Payload, Route, WirePacket};
+use crate::routing::{Address, Advertisement, Packet, Payload, Route, WirePacket};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 

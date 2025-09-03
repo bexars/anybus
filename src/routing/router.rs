@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use sorted_vec::SortedVec;
 use tokio::{
     select,
     sync::{
@@ -14,8 +13,8 @@ use uuid::Uuid;
 use crate::{
     messages::{BrokerMsg, BusControlMsg, ClientMessage, NodeMessage},
     routing::{
-        Advertisement, EndpointId, ForwardTo, ForwardingTable, NodeId, PeerGroupId, Realm, Route,
-        RouteKind, RouteTableError, routing_table::RoutingTable,
+        Advertisement, EndpointId, ForwardTo, ForwardingTable, NodeId, Realm, Route, RouteKind,
+        RouteTableError, routing_table::RoutingTable,
     },
 };
 
@@ -170,7 +169,7 @@ impl State {
                 BrokerMsg::RegisterRoute(endpoint_id, route) => {
                     return Some(RegisterRoute(endpoint_id, route));
                 }
-                BrokerMsg::Subscribe(uuid, unbounded_sender) => todo!(),
+                BrokerMsg::Subscribe(_uuid, _unbounded_sender) => todo!(),
                 BrokerMsg::DeadLink(endpoint_id) => {
                     router.route_table.table.retain(|_, route_entry| {
                         let before = route_entry.routes.len();

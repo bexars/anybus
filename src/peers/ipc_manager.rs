@@ -16,7 +16,7 @@ use tokio::{
         watch,
     },
 };
-use tracing::{debug, trace};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::{

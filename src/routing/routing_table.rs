@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use sorted_vec::SortedVec;
 use uuid::Uuid;
 
-use crate::routing::{Advertisement, EndpointId, Route, RouteKind, RouteTableError};
+use crate::routing::{EndpointId, Route, RouteKind, RouteTableError};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RoutingTable {

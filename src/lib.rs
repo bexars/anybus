@@ -15,8 +15,7 @@ pub use handle::RpcResponse;
 pub use helper::spawn;
 pub use messages::RegistrationStatus;
 use tokio::sync::watch::Sender;
-use tracing::debug;
-use tracing::{error, info};
+
 pub use traits::*;
 mod bus_listener;
 mod handle;
@@ -33,11 +32,7 @@ mod peers;
 
 use tokio::{
     // stream:: StreamExt,
-    select,
-    sync::{
-        mpsc::UnboundedReceiver,
-        watch::{self, Receiver},
-    },
+    sync::watch::{self},
 };
 
 // use std::sync::mpsc::{Receiver, Sender};
@@ -51,8 +46,7 @@ pub mod errors;
 
 pub use msgbus_macro::bus_uuid;
 
-use crate::messages::{BrokerMsg, ClientMessage};
-use crate::messages::{BusControlMsg, NodeMessage};
+use crate::messages::BusControlMsg;
 // use crate::route_table::AnycastDest;
 // use crate::route_table::DestinationType;
 // use crate::route_table::RouteTableController;
@@ -62,10 +56,6 @@ use crate::routing::router::Router;
 /// Reference to a foreign instance of [MsgBus]
 /// * Could be in the same process, just a different MsgBus instance
 #[derive(Debug)]
-pub(crate) struct Node {
-    id: Uuid,
-}
-
 // #[derive(Debug, Clone)]
 // // #[allow(dead_code)] //TODO
 // pub(crate) struct PeerHandle {

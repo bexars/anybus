@@ -1,15 +1,11 @@
 use std::collections::HashSet;
 
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    oneshot::{self},
-};
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
     // route_table::{Advertisement, UnicastType},
-    routing::{Advertisement, EndpointId, Packet, Route, UnicastType, WirePacket},
-    traits::BusRider,
+    routing::{Advertisement, Packet, Route, WirePacket},
 };
 
 #[allow(dead_code)]
@@ -67,5 +63,5 @@ pub(crate) enum NodeMessage {
     // Shutdown,
     Advertise(HashSet<Advertisement>),
     Withdraw(Vec<Uuid>),
-    BusRider(EndpointId, Vec<u8>),
+    // BusRider(EndpointId, Vec<u8>),
 }
