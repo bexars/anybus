@@ -12,7 +12,7 @@
 pub use bus_listener::BusListener;
 pub use errors::ReceiveError;
 // pub use handle::RpcResponse;
-pub use helper::ShutdownWithCtrlC;
+// pub use helper::ShutdownWithCtrlC;
 pub use helper::spawn;
 
 pub use messages::RegistrationStatus;
@@ -114,6 +114,11 @@ impl MsgBus {
     ///
     pub fn handle(&self) -> &Handle {
         &self.handle
+    }
+
+    /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the MsgBus system
+    pub fn shutdown_with_ctrlc(&self) {
+        _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 }
 

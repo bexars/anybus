@@ -7,12 +7,9 @@ use std::future::Future;
 use dioxus::core::Task;
 #[cfg(feature = "tokio")]
 use tokio::task::JoinHandle;
-use tokio::{
-    select,
-    sync::oneshot::{Receiver, Sender},
-};
 
-use crate::MsgBus;
+#[cfg(feature = "tokio")]
+use crate::Handle;
 // use tokio::{
 //     select,
 //     sync::oneshot::{Receiver, Sender},
@@ -40,41 +37,33 @@ where
 /// Wrapper struct for handling Ctrl-C input from the terminal.  Receiving Ctrl-C will trigger this to call [BusControlHandle::shutdown()]
 ///
 /// * Unix users should mind the caveat from the Tokio implementation of [tokio::signal::ctrl_c]
-#[cfg(feature = "tokio")]
-pub struct ShutdownWithCtrlC {
-    tx: Sender<()>,
-}
+// #[cfg(feature = "tokio")]
+// pub struct ShutdownWithCtrlC {
+//     tx: Sender<()>,
+// }
+
+// #[cfg(feature = "tokio")]
+// impl ShutdownWithCtrlC {
+//     /// Programatically trigger a shutdown of the [crate::MsgBus] system.  This passes through to [crate::BusControlHandle::shutdown()]
+//     pub fn shutdown(self) {
+//         let _ = self.tx.send(());
+//     }
+// }
+
+// impl From<MsgBus> for ShutdownWithCtrlC {
+//     fn from(msgbus: MsgBus) -> Self {
+//         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+//         let this = Self { tx };
+
+//         tokio::spawn(watch_ctrlc(rx, msgbus.handle().clone()));
+//         this
+//     }
+// }
 
 #[cfg(feature = "tokio")]
-impl ShutdownWithCtrlC {
-    /// Programatically trigger a shutdown of the [crate::MsgBus] system.  This passes through to [crate::BusControlHandle::shutdown()]
-    pub fn shutdown(self) {
-        let _ = self.tx.send(());
-    }
-}
-
-impl From<MsgBus> for ShutdownWithCtrlC {
-    fn from(handle: MsgBus) -> Self {
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let this = Self { tx };
-
-        tokio::spawn(watch_ctrlc(rx, handle));
-        this
-    }
-}
-
-#[cfg(feature = "tokio")]
-async fn watch_ctrlc(mut rx: Receiver<()>, mut msg_bus: MsgBus) {
-    select! {
-        _ = &mut rx => {
-            msg_bus.shutdown();
-
-        },
-        _ = tokio::signal::ctrl_c() => {
-            println!("Ctrl-C received.  Shutting down");
-            msg_bus.shutdown();
-
-        }
-
+pub(crate) async fn watch_ctrlc(handle: Handle) {
+    if let Ok(_) = tokio::signal::ctrl_c().await {
+        println!("Ctrl-C received.  Shutting down");
+        handle.shutdown();
     }
 }

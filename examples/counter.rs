@@ -5,7 +5,7 @@ use std::{
 };
 
 // use msgbus::helper::ShutdownWithCtrlC;
-use msgbus::{Handle, MsgBus, ShutdownWithCtrlC, bus_uuid};
+use msgbus::{Handle, MsgBus, bus_uuid};
 use tokio;
 
 use tracing_subscriber;
@@ -134,9 +134,10 @@ async fn main() {
     //     .init();
     let name = env::args().skip(1).next().unwrap();
 
-    let bus = MsgBus::new();
+    let mut bus = MsgBus::new();
+    bus.shutdown_with_ctrlc();
     let handle = bus.handle().clone();
-    let bus: ShutdownWithCtrlC = bus.into();
+    // let bus: ShutdownWithCtrlC = bus.into();
 
     // #[cfg(target_family = "unix")]
     // let bus = ShutdownWithCtrlC::from(bus);

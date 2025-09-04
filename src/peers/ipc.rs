@@ -166,16 +166,6 @@ impl State for NodeMessageReceived {
                     Err(e) => Some(Box::new(HandleError { error: e.into() })),
                 }
             }
-            // NodeMessage::BusRider(uuid, vec) => {
-            //     match state_machine
-            //         .stream
-            //         .send(IpcMessage::BusRider(uuid, vec))
-            //         .await
-            //     {
-            //         Ok(_) => Some(Box::new(WaitForMessages {})),
-            //         Err(e) => Some(Box::new(HandleError { error: e.into() })),
-            //     }
-            // }
             NodeMessage::Advertise(vec) => {
                 match state_machine.stream.send(IpcMessage::Advertise(vec)).await {
                     Ok(()) => Some(Box::new(WaitForMessages {})),
@@ -185,6 +175,12 @@ impl State for NodeMessageReceived {
             NodeMessage::Withdraw(uuids) => {
                 match state_machine.stream.send(IpcMessage::Withdraw(uuids)).await {
                     Ok(()) => Some(Box::new(WaitForMessages {})),
+                    Err(e) => b(HandleError { error: e.into() }),
+                }
+            }
+            NodeMessage::Close => {
+                match state_machine.stream.send(IpcMessage::CloseConnection).await {
+                    Ok(()) => Some(Box::new(ClosePeer {})),
                     Err(e) => b(HandleError { error: e.into() }),
                 }
             }

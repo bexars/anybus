@@ -20,6 +20,7 @@ pub(crate) enum BrokerMsg {
     UnRegisterPeer(Uuid),
     AddPeerEndpoints(Uuid, HashSet<Advertisement>),
     RemovePeerEndpoints(Uuid, Vec<Uuid>),
+    Shutdown,
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -60,7 +61,7 @@ pub enum RegistrationStatus {
 #[derive(Debug)]
 pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
-    // Shutdown,
+    Close,
     Advertise(HashSet<Advertisement>),
     #[allow(dead_code)]
     Withdraw(Vec<Uuid>),

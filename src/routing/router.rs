@@ -141,7 +141,8 @@ impl State {
             // ####### Listen ##################################################
             Listen => {
                 select! {
-                    _= router.bus_control_rx.changed() => {
+                    res = router.bus_control_rx.changed() => {
+                        trace!("bus_control_rx.changed() = {:?}", res);
                         match *router.bus_control_rx.borrow() {
                             BusControlMsg::Run => {
                                 trace!("Router received Run");
@@ -226,7 +227,7 @@ impl State {
                             !route_entry.routes.is_empty()
                         });
                         router.peers.remove(&uuid);
-                        Some(RouteChange)
+                        return Some(RouteChange);
                     }
                     BrokerMsg::AddPeerEndpoints(uuid, hash_set) => {
                         if let Some(peer) = router.peers.get_mut(&uuid) {
@@ -253,6 +254,10 @@ impl State {
                         return Some(Listen);
                     }
                     BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => todo!(),
+                    BrokerMsg::Shutdown => {
+                        info!("Router shutting down");
+                        return Some(Shutdown);
+                    }
                 }
             }
 
@@ -287,16 +292,19 @@ impl State {
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
-                for forward_to in router.forward_table.table.values() {
-                    match forward_to {
-                        ForwardTo::Local(tx) => {
-                            let _ = tx.send(ClientMessage::Shutdown);
-                        }
-                        ForwardTo::Remote(_tx) => {
-                            // let _ = tx.send(NodeMessage::Shutdown);
-                        }
-                        ForwardTo::Broadcast(_forward_tos) => {}
-                    }
+                // for forward_to in router.forward_table.table.values() {
+                //     match forward_to {
+                //         ForwardTo::Local(tx) => {
+                //             let _ = tx.send(ClientMessage::Shutdown);
+                //         }
+                //         ForwardTo::Remote(tx) => {
+                //             // let _ = tx.send(NodeMessage::Close);
+                //         }
+                //         ForwardTo::Broadcast(_forward_tos) => {}
+                //     }
+                // }
+                for peer in router.peers.values() {
+                    _ = peer.peer_tx.send(NodeMessage::Close);
                 }
                 router
                     .route_table
@@ -314,7 +322,7 @@ impl State {
                                 ForwardTo::Broadcast(_forward_tos) => {}
                             });
                     });
-                None
+                return None;
             }
 
             // ####### RouteChange ##################################################
@@ -332,9 +340,10 @@ impl State {
               //     todo!()
               // }
         };
-        #[allow(unreachable_code)]
+        // #[allow(unreachable_code)]
         // unreachable!();
-        return None;
+        // error!("Fell through the brokermsg");
+        // return None;
     }
 }
 

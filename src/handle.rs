@@ -271,6 +271,10 @@ impl Handle {
     pub(crate) fn unregister_endpoint(&self, endpoint_id: Uuid) {
         _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
     }
+
+    pub(crate) fn shutdown(&self) {
+        let _ = self.tx.send(BrokerMsg::Shutdown);
+    }
 }
 
 // /// Represents a response to an RPC request.
