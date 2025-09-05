@@ -1,6 +1,5 @@
 #[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::HashSet;
-use std::error::Error;
 
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -14,6 +13,7 @@ use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::{Receiver, RpcReceiver};
 
+use crate::routing::Address;
 use crate::routing::router::RoutesWatchRx;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::routing::{Advertisement, NodeId, WirePacket};
@@ -141,11 +141,46 @@ impl Handle {
     }
 
     /// Placeholder - Not Implemented
-    fn _register_multicast<T: BusRider + DeserializeOwned>(
+    /// Similar to anycast but only one receiver can be registered at a time
+    pub async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
-        _uuid: Uuid,
-    ) -> Result<Receiver<T>, Box<dyn Error>> {
-        todo!()
+    ) -> Result<Receiver<T>, ReceiveError> {
+        let broadcast_id = T::MSGBUS_UUID.into();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let local_id = Uuid::now_v7().into();
+        let register_msg = BrokerMsg::RegisterRoute(
+            local_id,
+            Route {
+                kind: crate::routing::RouteKind::Unicast,
+                #[cfg(any(feature = "net", feature = "ipc"))]
+                realm: crate::routing::Realm::Process,
+                via: crate::routing::ForwardTo::Local(tx.clone()),
+                cost: 0,
+                #[cfg(any(feature = "net", feature = "ipc"))]
+                learned_from: Uuid::nil(),
+            },
+        );
+        info!("Send register_msg {:?}", register_msg);
+
+        self.tx.send(register_msg)?;
+        self.wait_for_registration(&mut rx, local_id).await?;
+
+        let broadcast_msg = BrokerMsg::RegisterRoute(
+            broadcast_id,
+            Route {
+                kind: crate::routing::RouteKind::Multicast,
+                #[cfg(any(feature = "net", feature = "ipc"))]
+                realm: crate::routing::Realm::Process,
+                via: crate::routing::ForwardTo::Broadcast(vec![Address::Endpoint(local_id)]),
+                cost: 0,
+                #[cfg(any(feature = "net", feature = "ipc"))]
+                learned_from: Uuid::nil(),
+            },
+        );
+        self.tx.send(broadcast_msg)?;
+        self.wait_for_registration(&mut rx, local_id).await?;
+
+        Ok(Receiver::new(local_id, rx, self.clone()))
     }
 
     #[cfg(any(feature = "net", feature = "ipc"))]
@@ -192,7 +227,6 @@ impl Handle {
     {
         let endpoint_id = T::MSGBUS_UUID.into();
         let payload = Box::new(payload);
-        let map = self.route_watch_rx.borrow();
         let response_uuid = Uuid::now_v7().into();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -222,6 +256,7 @@ impl Handle {
             return Err(MsgBusHandleError::SubscriptionFailed);
         }
         // let endpoint = map.lookup(&endpoint_id).ok_or(MsgBusHandleError::NoRoute)?;
+        let map = self.route_watch_rx.borrow();
 
         map.send(Packet {
             to: endpoint_id,
@@ -230,7 +265,7 @@ impl Handle {
             payload: Payload::BusRider(payload),
         })
         .map_err(MsgBusHandleError::SendError)?;
-
+        drop(map);
         match rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 MsgBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))

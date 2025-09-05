@@ -6,7 +6,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[example]]
 name = "counter"
-required-features = ["ipc", "tokio"]
+required-features = [ "tokio", "ipc"]
 
 
 [workspace]
@@ -67,3 +67,5 @@ dyn-clone = "1.0.20"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+# tokio = { version = "1.15", features = ["full", "tracing"] }
+# console-subscriber = "0.4.1"

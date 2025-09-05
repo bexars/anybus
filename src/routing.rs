@@ -7,6 +7,7 @@ use erased_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
+// use tracing::debug;
 use uuid::Uuid;
 
 #[cfg(any(feature = "net", feature = "ipc"))]
@@ -61,6 +62,7 @@ impl From<&Uuid> for EndpointId {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
+    node_id: NodeId,
 }
 
 impl ForwardingTable {
@@ -76,7 +78,8 @@ impl ForwardingTable {
     }
 
     fn inner_send(&self, endpoint_id: EndpointId, packet: impl Into<Packet>) -> Result<(), Packet> {
-        let packet = packet.into();
+        let mut packet = packet.into();
+        packet.from = Some(self.node_id.into());
         let forward_to = self.lookup(&endpoint_id);
         let forward_to = if let Some(ft) = forward_to {
             ft
@@ -150,7 +153,10 @@ impl From<&RoutingTable> for ForwardingTable {
                 table.insert(*endpoint_id, best_route.via.clone());
             }
         }
-        Self { table }
+        Self {
+            table,
+            node_id: value.node_id,
+        }
     }
 }
 
@@ -349,6 +355,16 @@ pub(crate) struct Route {
     pub(crate) kind: RouteKind,
 }
 
+impl Route {
+    pub(crate) fn add_broadcast(&mut self, other: Route) {
+        if let ForwardTo::Broadcast(ref mut list) = self.via {
+            if let ForwardTo::Broadcast(other_list) = other.via {
+                list.extend(other_list.into_iter());
+            }
+        }
+    }
+}
+
 impl PartialEq for Route {
     fn eq(&self, other: &Self) -> bool {
         self.cost == other.cost
@@ -374,7 +390,7 @@ impl Ord for Route {
 pub(crate) enum RouteKind {
     Unicast,
     Anycast,
-    Multicast(NodeId), // Multicast to a specific node
+    Multicast, // Multicast to a specific node
     Node,
 }
 
@@ -386,6 +402,7 @@ pub(crate) enum Realm {
     Userspace,
     LocalNet,
     Global,
+    BroadcastProxy(EndpointId),
 }
 
 // struct PeerGroup {
@@ -397,4 +414,6 @@ pub(crate) enum Realm {
 pub(super) enum RouteTableError {
     #[error("Route kind didn't match")]
     DifferentRouteKind(RouteKind),
+    #[error("Unicast route already exists")]
+    UnicastRouteExists,
 }

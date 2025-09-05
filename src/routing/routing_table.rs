@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use sorted_vec::SortedVec;
+use tracing::debug;
 
-use crate::routing::{EndpointId, Route, RouteKind, RouteTableError};
+use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
+    pub(crate) node_id: NodeId,
 }
 
 impl RoutingTable {
@@ -46,6 +48,22 @@ impl RouteEntry {
         if route.kind != self.kind {
             return Err((route, RouteTableError::DifferentRouteKind(self.kind)));
         }
+        if !self.routes.is_empty() && route.kind == RouteKind::Unicast {
+            return Err((route, RouteTableError::UnicastRouteExists));
+        }
+        if self.routes.is_empty() {
+            self.routes.insert(route);
+            return Ok(());
+        } else {
+            if self.kind == RouteKind::Multicast {
+                let mut orig = self.routes.pop().unwrap();
+                orig.add_broadcast(route.clone());
+                self.routes.push(orig);
+                debug!("Broadcast list update: {:?}", self.routes);
+                return Ok(());
+            }
+        }
+
         self.routes.insert(route);
         Ok(())
     }

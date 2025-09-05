@@ -61,6 +61,7 @@ impl MsgBus {}
 
 /// The main entry point into the MsgBus system.
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct MsgBus {
     bc_tx: Sender<BusControlMsg>,
     id: Uuid,
@@ -83,7 +84,7 @@ impl MsgBus {
 
         let handle = Handle { tx, route_watch_rx };
 
-        spawn(router.start());
+        let _router_task = spawn(router.start());
 
         let msg_bus = MsgBus {
             bc_tx,

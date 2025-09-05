@@ -6,6 +6,7 @@ use crate::{
     routing::EndpointId,
 };
 
+#[derive(Debug)]
 pub struct Receiver<T: crate::BusRider> {
     _pd: std::marker::PhantomData<T>,
     packet_receiver: PacketReceiver,

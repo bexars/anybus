@@ -6,6 +6,7 @@ use crate::{
     receivers::packet_receiver::PacketReceiver, routing::EndpointId,
 };
 
+#[derive(Debug)]
 pub struct RpcReceiver<T: crate::BusRiderRpc> {
     _pd: std::marker::PhantomData<T>,
     packet_receiver: PacketReceiver,
@@ -42,6 +43,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct RpcRequest<T>
 where
     T: BusRiderRpc,

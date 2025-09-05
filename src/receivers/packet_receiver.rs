@@ -6,6 +6,7 @@ use crate::{
     routing::{EndpointId, Packet},
 };
 
+#[derive(Debug)]
 pub(crate) struct PacketReceiver {
     pub(crate) endpoint_id: EndpointId,
     pub(crate) rx: UnboundedReceiver<ClientMessage>,

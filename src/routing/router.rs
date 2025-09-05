@@ -21,12 +21,15 @@ use crate::routing::{Realm, RouteKind};
 
 use crate::{
     messages::{BrokerMsg, BusControlMsg, ClientMessage},
-    routing::{EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable},
+    routing::{
+        Address, EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable,
+    },
 };
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
 
 // #[allow(dead_code)]
+#[derive(Debug)]
 pub(crate) struct Router {
     forward_table: ForwardingTable,
     route_table: RoutingTable,
@@ -59,7 +62,10 @@ impl Router {
             // sent_routes: HashMap::new(),
             bus_control_rx,
             broker_rx,
-            route_table: Default::default(),
+            route_table: RoutingTable {
+                table: HashMap::new(),
+                node_id: uuid,
+            },
             #[cfg(any(feature = "net", feature = "ipc"))]
             peers: HashMap::new(),
         }
@@ -116,7 +122,23 @@ impl Router {
                 peer_id,
                 advertisements.len()
             );
+            let withdrawn: HashSet<_> = peer_info
+                .advertised_routes
+                .difference(&peer_info.advertised_routes)
+                .cloned()
+                .collect();
             peer_info.advertised_routes = advertisements.clone();
+
+            if !withdrawn.is_empty() {
+                let length = withdrawn.len();
+                let msg = NodeMessage::Withdraw(withdrawn);
+
+                if let Err(e) = peer_info.peer_tx.send(msg) {
+                    trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
+                } else {
+                    trace!("Sent {} route withdrawals to peer {}", peer_id, length);
+                }
+            }
             if !advertisements.is_empty() {
                 let length = advertisements.len();
                 let msg = NodeMessage::Advertise(advertisements);
@@ -289,9 +311,24 @@ impl State {
                 let forward_to = route.via.clone();
                 return match router.route_table.add_route(endpoint_id, route) {
                     Ok(_) => {
-                        if let ForwardTo::Local(tx) = forward_to {
-                            _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                        };
+                        match forward_to {
+                            ForwardTo::Local(tx) => {
+                                _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                            }
+                            ForwardTo::Remote(_unbounded_sender) => {}
+                            ForwardTo::Broadcast(items) => match items[0] {
+                                Address::Endpoint(local_endpoint_id) => {
+                                    if let ForwardTo::Local(tx) =
+                                        router.forward_table.lookup(&local_endpoint_id).unwrap()
+                                    {
+                                        _ = tx.send(ClientMessage::SuccessfulRegistration(
+                                            endpoint_id,
+                                        ));
+                                    }
+                                }
+                                _ => {}
+                            },
+                        }
 
                         Some(RouteChange)
                     }
@@ -344,7 +381,12 @@ impl State {
                 let new_forward_table = ForwardingTable::from(&router.route_table);
 
                 router.forward_table = new_forward_table;
-                let _ = router.routes_watch_tx.send(router.forward_table.clone());
+                trace!("Updated forwarding table: Router: {:#?}", router);
+                let forward_table = router.forward_table.clone();
+                trace!("New forwarding table: {:#?}", forward_table);
+
+                let _ = router.routes_watch_tx.send(forward_table).unwrap();
+                trace!("Updated forwarding table: Router: {:#?}", router);
                 // Notify peers of route changes
                 #[cfg(any(feature = "net", feature = "ipc"))]
                 router.send_route_updates();

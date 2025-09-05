@@ -8,7 +8,7 @@ use std::{
 use msgbus::{Handle, MsgBus, bus_uuid};
 use tokio;
 
-use tracing_subscriber;
+// use tracing_subscriber;
 
 // use msgbus_macro::bus_uuid;
 // use uuid::Uuid;
@@ -127,7 +127,8 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
 #[cfg(feature = "tokio")]
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    // tracing_subscriber::fmt::init();
+    // console_subscriber::init();
 
     // tracing_subscriber::fmt()
     //     .event_format(
