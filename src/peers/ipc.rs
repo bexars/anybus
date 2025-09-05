@@ -172,8 +172,12 @@ impl State for NodeMessageReceived {
                     Err(e) => b(HandleError { error: e.into() }),
                 }
             }
-            NodeMessage::Withdraw(uuids) => {
-                match state_machine.stream.send(IpcMessage::Withdraw(uuids)).await {
+            NodeMessage::Withdraw(advertisements) => {
+                match state_machine
+                    .stream
+                    .send(IpcMessage::Withdraw(advertisements))
+                    .await
+                {
                     Ok(()) => Some(Box::new(WaitForMessages {})),
                     Err(e) => b(HandleError { error: e.into() }),
                 }
@@ -238,11 +242,8 @@ impl State for IpcMessageReceived {
             IpcMessage::Packet(wire_packet) => {
                 state_machine.peer.handle.send_packet(wire_packet);
             }
-            IpcMessage::BusRider(uuid, items) => {
-                _ = state_machine
-                    .peer
-                    .handle
-                    .send_to_uuid(Address::Local(uuid), items);
+            IpcMessage::BusRider(endpoint_id, items) => {
+                _ = state_machine.peer.handle.send_to_uuid(endpoint_id, items);
             }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
             IpcMessage::Advertise(ads) => {

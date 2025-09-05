@@ -20,15 +20,15 @@ use crate::{
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
 
-#[allow(dead_code)]
+// #[allow(dead_code)]
 pub(crate) struct Router {
     forward_table: ForwardingTable,
     route_table: RoutingTable,
     routes_watch_tx: Sender<ForwardingTable>,
     routes_watch_rx: Receiver<ForwardingTable>,
-    msgbus_id: Uuid,
-    received_routes: HashMap<Uuid, usize>,
-    sent_routes: HashMap<Uuid, usize>,
+    msgbus_id: NodeId,
+    // received_routes: HashMap<Uuid, usize>,
+    // sent_routes: HashMap<Uuid, usize>,
     bus_control_rx: Receiver<BusControlMsg>,
     broker_rx: UnboundedReceiver<BrokerMsg>,
     peers: HashMap<Uuid, PeerInfo>,
@@ -36,7 +36,7 @@ pub(crate) struct Router {
 
 impl Router {
     pub(crate) fn new(
-        uuid: Uuid,
+        uuid: NodeId,
         broker_rx: UnboundedReceiver<BrokerMsg>,
         bus_control_rx: Receiver<BusControlMsg>,
     ) -> Self {
@@ -47,8 +47,8 @@ impl Router {
             routes_watch_tx: tx,
             routes_watch_rx: rx,
             msgbus_id: uuid,
-            received_routes: HashMap::new(),
-            sent_routes: HashMap::new(),
+            // received_routes: HashMap::new(),
+            // sent_routes: HashMap::new(),
             bus_control_rx,
             broker_rx,
             route_table: Default::default(),
@@ -69,30 +69,32 @@ impl Router {
         self.routes_watch_rx.clone()
     }
 
-    fn send_route_updates(&self) {
+    fn send_route_updates(&mut self) {
         trace!("Peers: {:?}", self.peers);
-        for (peer_id, peer_info) in self.peers.iter() {
+        for (peer_id, peer_info) in self.peers.iter_mut() {
             trace!("routing table:{:?}", self.route_table.table);
             let mut advertisements = HashSet::new();
             for (uuid, route_entry) in self.route_table.table.iter() {
+                let mut advertisement = Advertisement {
+                    endpoint_id: *uuid,
+                    kind: route_entry.kind,
+                    cost: 0,
+                };
                 if let Some(best_route) = route_entry.best_route() {
+                    advertisement.cost = best_route.cost;
                     // Don't send routes back to the peer we learned them from
                     if best_route.learned_from == *peer_id {
                         continue;
                     }
-                    // Don't send routes the peer already knows about
-                    if peer_info.advertised_routes.contains_key(uuid) {
+                    // Don't send routes the peer already learned from us
+                    if peer_info.advertised_routes.contains(&advertisement) {
                         continue;
                     }
                     // Don't send local routes to peers
                     if best_route.realm == Realm::Process {
                         continue;
                     }
-                    advertisements.insert(Advertisement {
-                        endpoint_id: *uuid,
-                        kind: route_entry.kind,
-                        cost: best_route.cost,
-                    });
+                    advertisements.insert(advertisement);
                 }
             }
             trace!(
@@ -100,6 +102,7 @@ impl Router {
                 peer_id,
                 advertisements.len()
             );
+            peer_info.advertised_routes = advertisements.clone();
             if !advertisements.is_empty() {
                 let length = advertisements.len();
                 let msg = NodeMessage::Advertise(advertisements);
@@ -212,7 +215,7 @@ impl State {
                             realm: Realm::Process,
                             cost: 0,
                         };
-                        router.route_table.add_route(uuid, route).unwrap();
+                        router.route_table.add_route(uuid.into(), route).unwrap();
                         let peer_info = PeerInfo::new(uuid, unbounded_sender);
                         router.peers.insert(uuid, peer_info);
                         router.send_route_updates();
@@ -240,12 +243,13 @@ impl State {
                                     cost: ad.cost + 16,
                                 };
 
-                                peer.received_routes.insert(ad.endpoint_id, route.clone());
-                                _ = router.route_table.add_route(ad.endpoint_id, route);
+                                _ = router.route_table.add_route(ad.endpoint_id.clone(), route);
+
                                 trace!(
                                     "Added route for endpoint {} via peer {}",
                                     ad.endpoint_id, uuid
                                 );
+                                peer.received_routes.insert(ad);
                             }
                             return Some(RouteChange);
                         } else {
@@ -292,17 +296,6 @@ impl State {
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
-                // for forward_to in router.forward_table.table.values() {
-                //     match forward_to {
-                //         ForwardTo::Local(tx) => {
-                //             let _ = tx.send(ClientMessage::Shutdown);
-                //         }
-                //         ForwardTo::Remote(tx) => {
-                //             // let _ = tx.send(NodeMessage::Close);
-                //         }
-                //         ForwardTo::Broadcast(_forward_tos) => {}
-                //     }
-                // }
                 for peer in router.peers.values() {
                     _ = peer.peer_tx.send(NodeMessage::Close);
                 }
@@ -352,8 +345,8 @@ impl State {
 struct PeerInfo {
     peer_id: NodeId,
     peer_tx: UnboundedSender<NodeMessage>,
-    received_routes: HashMap<Uuid, Route>,
-    advertised_routes: HashMap<Uuid, Route>,
+    received_routes: HashSet<Advertisement>,
+    advertised_routes: HashSet<Advertisement>,
 }
 
 impl PeerInfo {
@@ -361,8 +354,8 @@ impl PeerInfo {
         Self {
             peer_id,
             peer_tx,
-            received_routes: HashMap::new(),
-            advertised_routes: HashMap::new(),
+            received_routes: Default::default(),
+            advertised_routes: Default::default(),
         }
     }
 }

@@ -2,18 +2,20 @@ use std::collections::HashSet;
 use std::{error::Error, marker::PhantomData};
 
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::bus_listener::BusListener;
 use crate::errors::MsgBusHandleError;
 use crate::errors::ReceiveError;
 #[cfg(feature = "ipc")]
 use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage, RegistrationStatus};
+use crate::receivers::{Receiver, RpcReceiver};
+#[cfg(feature = "ipc")]
+use crate::routing::NodeId;
 use crate::routing::router::RoutesWatchRx;
-use crate::routing::{Address, Advertisement, Packet, Payload, Route, WirePacket};
+use crate::routing::{Address, Advertisement, EndpointId, Packet, Payload, Route, WirePacket};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
@@ -31,17 +33,9 @@ impl Handle {
     pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
         // uuid: Uuid,
-    ) -> Result<BusListener<T>, ReceiveError> {
-        let uuid = T::MSGBUS_UUID;
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let mut bl = BusListener::<T> {
-            rx,
-            _pd: PhantomData,
-            registration_status: Default::default(),
-            handle: self.clone(),
-            endpoint_id: uuid,
-        };
+    ) -> Result<Receiver<T>, ReceiveError> {
+        let endpoint_id = T::MSGBUS_UUID.into();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
@@ -51,36 +45,53 @@ impl Handle {
             learned_from: Uuid::nil(),
         };
 
-        let register_msg = BrokerMsg::RegisterRoute(uuid, route);
+        let register_msg = BrokerMsg::RegisterRoute(endpoint_id, route);
         self.tx.send(register_msg)?;
         info!("Sent register_msg");
+        self.wait_for_registration(&mut rx, endpoint_id).await?;
+        return Ok(crate::receivers::Receiver::new(
+            endpoint_id,
+            rx,
+            self.clone(),
+        ));
+    }
 
-        let response = bl.wait_for_registration().await;
-        dbg!(&response);
-        match response {
-            RegistrationStatus::Pending => unreachable!(),
-            RegistrationStatus::Registered => Ok(bl),
-            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
+    async fn wait_for_registration(
+        &self,
+        rx: &mut UnboundedReceiver<ClientMessage>,
+        endpoint_id: EndpointId,
+    ) -> Result<(), ReceiveError> {
+        let registration_response = if let Some(msg) = rx.recv().await {
+            msg
+        } else {
+            return Err(ReceiveError::Shutdown);
+        };
+
+        match registration_response {
+            ClientMessage::Message(_packet) => {
+                drop(rx);
+                _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
+                Err(ReceiveError::RegistrationFailed(
+                    "Bad response from Bus".into(),
+                ))
+            }
+            ClientMessage::FailedRegistration(_uuid, reason) => {
+                Err(ReceiveError::RegistrationFailed(reason))
+            }
+            ClientMessage::Shutdown => Err(ReceiveError::Shutdown),
+            ClientMessage::SuccessfulRegistration(_uuid) => Ok(()),
         }
     }
 
     /// Similar to anycast but only one receiver can be registered at a time
     pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
-    ) -> Result<BusListener<T>, ReceiveError> {
-        let uuid = T::MSGBUS_UUID;
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let mut bl = BusListener::<T> {
-            rx,
-            _pd: PhantomData,
-            registration_status: Default::default(),
-            handle: self.clone(),
-            endpoint_id: uuid,
-        };
+    ) -> Result<Receiver<T>, ReceiveError> {
+        let endpoint_id = T::MSGBUS_UUID.into();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let register_msg = BrokerMsg::RegisterRoute(
-            uuid,
+            endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
                 realm: crate::routing::Realm::Userspace,
@@ -92,31 +103,21 @@ impl Handle {
         info!("Send register_msg {:?}", register_msg);
 
         self.tx.send(register_msg)?;
-
-        match bl.wait_for_registration().await {
-            RegistrationStatus::Pending => unreachable!(),
-            RegistrationStatus::Registered => Ok(bl),
-            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
-        }
+        self.wait_for_registration(&mut rx, endpoint_id).await?;
+        Ok(Receiver::new(endpoint_id, rx, self.clone()))
     }
 
     /// Register a RPC service with the broker.
     pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
         &mut self,
-    ) -> Result<BusListener<T>, ReceiveError> {
-        let uuid = T::MSGBUS_UUID;
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> Result<RpcReceiver<T>, ReceiveError> {
+        let endpoint_id = T::MSGBUS_UUID.into();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let mut bl = BusListener::<T> {
-            rx,
-            _pd: PhantomData,
-            registration_status: Default::default(),
-            handle: self.clone(),
-            endpoint_id: uuid,
-        };
+        // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
 
         let register_msg = BrokerMsg::RegisterRoute(
-            uuid,
+            endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
                 realm: crate::routing::Realm::Userspace,
@@ -128,62 +129,49 @@ impl Handle {
         info!("Send register_msg {:?}", register_msg);
 
         self.tx.send(register_msg)?;
-
-        match bl.wait_for_registration().await {
-            RegistrationStatus::Pending => unreachable!(),
-            RegistrationStatus::Registered => Ok(bl),
-            RegistrationStatus::Failed(msg) => Err(ReceiveError::RegistrationFailed(msg)),
-        }
+        self.wait_for_registration(&mut rx, endpoint_id).await?;
+        Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
     }
 
     /// Placeholder - Not Implemented
     fn _register_multicast<T: BusRider + DeserializeOwned>(
         &mut self,
         _uuid: Uuid,
-    ) -> Result<BusListener<T>, Box<dyn Error>> {
+    ) -> Result<Receiver<T>, Box<dyn Error>> {
         todo!()
     }
 
     pub(crate) fn send_packet(&self, packet: WirePacket) {
         let map = self.route_watch_rx.borrow();
-        let endpoint = if let Some(endpoint) = map.lookup(&packet.to) {
-            endpoint
-        } else {
-            return;
-        };
-        _ = endpoint.send(packet);
+
+        _ = map.send(packet);
     }
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), MsgBusHandleError> {
-        let endpoint_id = T::MSGBUS_UUID;
+        let endpoint_id: EndpointId = T::MSGBUS_UUID.into();
         self.send_to_uuid(endpoint_id, payload)
     }
 
     /// Sends a single [BusRider] message to the given [Address]
     pub fn send_to_uuid<T: BusRider>(
         &self,
-        address: impl Into<Address>,
+        endpoint_id: EndpointId,
         payload: T,
     ) -> Result<(), MsgBusHandleError> {
         let map = self.route_watch_rx.borrow();
-        let address = address.into();
-        let endpoint_id = match address {
-            Address::Local(uuid) => uuid,
-            Address::Remote(uuid, _uuid1) => uuid,
-        };
-        match map.lookup(&endpoint_id) {
-            Some(endpoint) => endpoint
-                .send(Packet {
-                    to: endpoint_id,
-                    reply_to: None,
-                    from: None,
-                    payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
-                })
-                .map_err(MsgBusHandleError::SendError),
-
-            None => Err(MsgBusHandleError::NoRoute),
-        }
+        // let address = address.into();
+        // let endpoint_id = match address {
+        //     Address::Endpoint(uuid) => uuid,
+        //     Address::Remote(uuid, _uuid1) => uuid,
+        // };
+        map.send(Packet {
+            to: endpoint_id,
+            reply_to: None,
+            from: None,
+            payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
+        })
+        .map_err(MsgBusHandleError::SendError)
     }
 
     /// Initiate an RPC request to a remote node
@@ -194,11 +182,10 @@ impl Handle {
     where
         for<'de> T::Response: serde::de::Deserialize<'de>,
     {
-        let u = T::MSGBUS_UUID;
+        let endpoint_id = T::MSGBUS_UUID.into();
         let payload = Box::new(payload);
         let map = self.route_watch_rx.borrow();
-        let endpoint = map.lookup(&u).ok_or(MsgBusHandleError::NoRoute)?;
-        let response_uuid = Uuid::now_v7();
+        let response_uuid = Uuid::now_v7().into();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -224,22 +211,22 @@ impl Handle {
         if returned_uuid != response_uuid {
             return Err(MsgBusHandleError::SubscriptionFailed);
         }
-        endpoint
-            .send(Packet {
-                to: u,
-                reply_to: Some(response_uuid),
-                from: None,
-                payload: Payload::BusRider(payload),
-            })
-            .map_err(MsgBusHandleError::SendError)?;
+        // let endpoint = map.lookup(&endpoint_id).ok_or(MsgBusHandleError::NoRoute)?;
+
+        map.send(Packet {
+            to: endpoint_id,
+            reply_to: Some(response_uuid),
+            from: None,
+            payload: Payload::BusRider(payload),
+        })
+        .map_err(MsgBusHandleError::SendError)?;
 
         match rx.recv().await {
-            Some(ClientMessage::Message(val)) => val.payload.reveal().ok_or(
-                MsgBusHandleError::ReceiveError("None received unexpectedly".into()),
-            ),
-            _ => Err(MsgBusHandleError::ReceiveError(
-                "None received unexpectedly".into(),
-            )),
+            Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
+                MsgBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
+            }),
+            None => Err(MsgBusHandleError::Shutdown),
+            _ => todo!(),
         }
     }
 
@@ -247,14 +234,14 @@ impl Handle {
         _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
     }
 
-    pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: Vec<Uuid>) {
+    pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
         _ = self
             .tx
             .send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes));
     }
 
     #[cfg(feature = "ipc")]
-    pub(crate) fn register_peer(&self, uuid: Uuid, tx: UnboundedSender<NodeMessage>) {
+    pub(crate) fn register_peer(&self, uuid: NodeId, tx: UnboundedSender<NodeMessage>) {
         use tracing::debug;
 
         match self.tx.send(BrokerMsg::RegisterPeer(uuid, tx)) {
@@ -264,11 +251,11 @@ impl Handle {
     }
 
     #[cfg(feature = "ipc")]
-    pub(crate) fn unregister_peer(&self, uuid: Uuid) {
+    pub(crate) fn unregister_peer(&self, uuid: NodeId) {
         _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
     }
 
-    pub(crate) fn unregister_endpoint(&self, endpoint_id: Uuid) {
+    pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
         _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
     }
 

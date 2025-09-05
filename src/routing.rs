@@ -1,7 +1,7 @@
 pub(crate) mod router;
 pub(crate) mod routing_table;
 
-use std::any::Any;
+use std::{any::Any, fmt::Display, ops::Deref};
 
 use erased_serde::Serializer;
 use serde::{Deserialize, Serialize};
@@ -11,13 +11,54 @@ use uuid::Uuid;
 
 use crate::{
     BusRider,
+    errors::{self, SendError},
     messages::{ClientMessage, NodeMessage},
     routing::routing_table::RoutingTable,
 };
 
-pub(crate) type EndpointId = Uuid;
+// pub(crate) type EndpointId = Uuid;
 pub(crate) type NodeId = Uuid;
 pub(crate) type PeerGroupId = Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EndpointId(Uuid);
+
+impl Display for EndpointId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Deref for EndpointId {
+    type Target = Uuid;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<EndpointId> for Uuid {
+    fn from(value: EndpointId) -> Self {
+        value.0
+    }
+}
+
+impl<'a> From<&'a EndpointId> for &'a Uuid {
+    fn from(value: &'a EndpointId) -> Self {
+        &value.0
+    }
+}
+impl From<Uuid> for EndpointId {
+    fn from(value: Uuid) -> Self {
+        EndpointId(value)
+    }
+}
+
+impl From<&Uuid> for EndpointId {
+    fn from(value: &Uuid) -> Self {
+        EndpointId(*value)
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ForwardingTable {
@@ -28,6 +69,78 @@ impl ForwardingTable {
     pub(crate) fn lookup(&self, endpoint_id: &EndpointId) -> Option<&ForwardTo> {
         self.table.get(endpoint_id)
     }
+
+    pub(crate) fn send(&self, packet: impl Into<Packet>) -> Result<(), SendError> {
+        let packet: Packet = packet.into();
+        let endpoint_id = packet.to;
+        self.inner_send(endpoint_id, packet)
+            .map_err(|p| SendError::NoRoute(p.payload))
+    }
+
+    fn inner_send(&self, endpoint_id: EndpointId, packet: impl Into<Packet>) -> Result<(), Packet> {
+        let packet = packet.into();
+        let forward_to = self.lookup(&endpoint_id);
+        let forward_to = if let Some(ft) = forward_to {
+            ft
+        } else {
+            return Err(packet);
+        };
+        // let packet: Packet = packet.into();
+        match forward_to {
+            ForwardTo::Local(tx) => tx.send(ClientMessage::Message(packet)).map_err(|e| {
+                if let ClientMessage::Message(packet) = e.0 {
+                    packet
+                } else {
+                    unreachable!("Tried to send non-message to client")
+                }
+            }),
+            ForwardTo::Remote(tx) => tx
+                .send(NodeMessage::WirePacket(packet.into()))
+                .map_err(|e| {
+                    if let NodeMessage::WirePacket(packet) = e.0 {
+                        packet.into()
+                    } else {
+                        unreachable!("Tried to send non-message to client")
+                    }
+                }),
+            ForwardTo::Broadcast(addresses) => {
+                // let packet:Packet = packet;
+                for address in addresses {
+                    match address {
+                        Address::Endpoint(ep) => {
+                            self.inner_send(*ep, packet.clone())?;
+                        }
+                        Address::Remote(_ep, node) => {
+                            self.inner_send(node.into(), packet.clone())?
+                        }
+                    }
+                    // ft.send(packet.clone())?;
+                }
+                Ok(())
+            }
+        }
+    }
+    // fn broadcast(
+    //     &self,
+    //     packet: impl Into<WirePacket>,
+    //     destination_id: Uuid,
+    // ) -> Result<(), Box<dyn std::error::Error>> {
+    //     match self {
+    //         ForwardTo::Local(tx) => tx
+    //             .send(ClientMessage::Message(packet.into()))
+    //             .map_err(|e| e.into()),
+    //         ForwardTo::Remote(tx) => tx
+    //             .send(NodeMessage::WirePacket(packet.into()))
+    //             .map_err(|e| e.into()),
+    //         ForwardTo::Broadcast(forward_tos) => {
+    //             let packet = packet.into();
+    //             for ft in forward_tos {
+    //                 ft.broadcast(packet.clone(), destination_id)?;
+    //             }
+    //             Ok(())
+    //         }
+    //     }
+    // }
 }
 
 impl From<&RoutingTable> for ForwardingTable {
@@ -47,38 +160,39 @@ impl From<&RoutingTable> for ForwardingTable {
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     Remote(UnboundedSender<NodeMessage>),
-    Broadcast(Vec<ForwardTo>), // List of Node IDs to broadcast to including myself
+    // Node(NodeId),
+    Broadcast(Vec<Address>), // List of Node IDs to broadcast to including myself
 }
 
 impl ForwardTo {
-    pub(crate) fn send(&self, packet: impl Into<Packet>) -> Result<(), Payload> {
-        let packet: Packet = packet.into();
-        match self {
-            ForwardTo::Local(tx) => tx.send(ClientMessage::Message(packet)).map_err(|e| {
-                if let ClientMessage::Message(packet) = e.0 {
-                    packet.payload
-                } else {
-                    unreachable!("Tried to send non-message to client")
-                }
-            }),
-            ForwardTo::Remote(tx) => tx
-                .send(NodeMessage::WirePacket(packet.into()))
-                .map_err(|e| {
-                    if let NodeMessage::WirePacket(packet) = e.0 {
-                        packet.payload.into()
-                    } else {
-                        unreachable!("Tried to send non-message to client")
-                    }
-                }),
-            ForwardTo::Broadcast(forward_tos) => {
-                // let packet:Packet = packet;
-                for ft in forward_tos {
-                    ft.send(packet.clone())?;
-                }
-                Ok(())
-            }
-        }
-    }
+    // pub(crate) fn _send(&self, packet: impl Into<Packet>) -> Result<(), Payload> {
+    //     let packet: Packet = packet.into();
+    //     match self {
+    //         ForwardTo::Local(tx) => tx.send(ClientMessage::Message(packet)).map_err(|e| {
+    //             if let ClientMessage::Message(packet) = e.0 {
+    //                 packet.payload
+    //             } else {
+    //                 unreachable!("Tried to send non-message to client")
+    //             }
+    //         }),
+    //         ForwardTo::Remote(tx) => tx
+    //             .send(NodeMessage::WirePacket(packet.into()))
+    //             .map_err(|e| {
+    //                 if let NodeMessage::WirePacket(packet) = e.0 {
+    //                     packet.payload.into()
+    //                 } else {
+    //                     unreachable!("Tried to send non-message to client")
+    //                 }
+    //             }),
+    //         ForwardTo::Broadcast(forward_tos) => {
+    //             // let packet:Packet = packet;
+    //             for ft in forward_tos {
+    //                 ft.send(packet.clone())?;
+    //             }
+    //             Ok(())
+    //         }
+    //     }
+    // }
     // fn broadcast(
     //     &self,
     //     packet: impl Into<WirePacket>,
@@ -144,13 +258,13 @@ impl From<Packet> for WirePacket {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Address {
-    Local(EndpointId),
-    Remote(EndpointId, Uuid), // EndpointId, NodeId
+    Endpoint(EndpointId),
+    Remote(EndpointId, NodeId), // EndpointId, NodeId
 }
 
 impl From<EndpointId> for Address {
     fn from(value: EndpointId) -> Self {
-        Address::Local(value)
+        Address::Endpoint(value)
     }
 }
 
@@ -158,17 +272,22 @@ impl From<EndpointId> for Address {
 pub enum Payload {
     BusRider(Box<dyn crate::traits::BusRider>),
     Bytes(Vec<u8>),
+    // Packet(Box<Packet>), // For internal use only
 }
 
 impl Payload {
-    pub(crate) fn reveal<T: BusRider + for<'de> Deserialize<'de>>(self) -> Option<T> {
+    pub(crate) fn reveal<T: BusRider + for<'de> Deserialize<'de>>(self) -> Result<T, Self> {
         match self {
-            Payload::BusRider(br) => (br as Box<dyn Any>).downcast::<T>().ok().map(|b| *b),
+            Payload::BusRider(br) => {
+                let res = (br as Box<dyn Any>).downcast::<T>().map(|b| *b);
+                res.map_err(|e| e.into())
+            }
             Payload::Bytes(bytes) => {
                 let result = serde_cbor::from_slice(&bytes);
-                result.ok()
+                result.map_err(|_| bytes.into())
             }
         }
+        // result.ok_or(self)
     }
 }
 
@@ -195,6 +314,15 @@ impl From<Vec<u8>> for Payload {
     }
 }
 
+impl From<Box<dyn Any>> for Payload {
+    fn from(value: Box<dyn Any>) -> Self {
+        match value.downcast::<Box<dyn crate::traits::BusRider>>() {
+            Ok(b) => Payload::BusRider(*b),
+            Err(_) => panic!("Tried to convert non-BusRider Box<dyn Any> into Payload"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)] //TODO
 pub(crate) enum UnicastType {
@@ -215,7 +343,7 @@ pub(crate) struct Route {
     pub(crate) via: ForwardTo,
     pub(crate) cost: u16,
     pub(crate) realm: Realm,
-    pub(crate) learned_from: PeerGroupId, // (0 for local)
+    pub(crate) learned_from: NodeId, // (0 for local)
     pub(crate) kind: RouteKind,
 }
 
@@ -244,7 +372,7 @@ impl Ord for Route {
 pub(crate) enum RouteKind {
     Unicast,
     Anycast,
-    Multicast,
+    Multicast(NodeId), // Multicast to a specific node
     Node,
 }
 

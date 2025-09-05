@@ -3,23 +3,20 @@ use std::collections::HashSet;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{
-    // route_table::{Advertisement, UnicastType},
-    routing::{Advertisement, Packet, Route, WirePacket},
-};
+use crate::routing::{Advertisement, EndpointId, NodeId, Packet, Route, WirePacket};
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
     // RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
     // RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
-    RegisterRoute(Uuid, Route),
-    Subscribe(Uuid, UnboundedSender<ClientMessage>),
-    DeadLink(Uuid),
-    RegisterPeer(Uuid, UnboundedSender<NodeMessage>),
-    UnRegisterPeer(Uuid),
-    AddPeerEndpoints(Uuid, HashSet<Advertisement>),
-    RemovePeerEndpoints(Uuid, Vec<Uuid>),
+    RegisterRoute(EndpointId, Route),
+    Subscribe(EndpointId, UnboundedSender<ClientMessage>),
+    DeadLink(EndpointId),
+    RegisterPeer(NodeId, UnboundedSender<NodeMessage>),
+    UnRegisterPeer(NodeId),
+    AddPeerEndpoints(NodeId, HashSet<Advertisement>),
+    RemovePeerEndpoints(NodeId, HashSet<Advertisement>),
     Shutdown,
 }
 #[allow(dead_code)]
@@ -34,8 +31,8 @@ pub(crate) enum ClientMessage {
     // },
     Message(Packet),
     //TODO Make subset of this error
-    FailedRegistration(Uuid, String),
-    SuccessfulRegistration(Uuid),
+    FailedRegistration(EndpointId, String),
+    SuccessfulRegistration(EndpointId),
     Shutdown,
 }
 
@@ -64,6 +61,6 @@ pub(crate) enum NodeMessage {
     Close,
     Advertise(HashSet<Advertisement>),
     #[allow(dead_code)]
-    Withdraw(Vec<Uuid>),
+    Withdraw(HashSet<Advertisement>),
     // BusRider(EndpointId, Vec<u8>),
 }

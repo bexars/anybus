@@ -80,16 +80,18 @@ impl ChatListener {
                 Ok(msg) => println!("Chatlistener msg: {msg}"),
                 Err(e) => {
                     match e {
-                        msgbus::errors::ReceiveError::ConnectionClosed => {
+                        msgbus::ReceiveError::ConnectionClosed => {
                             println!("Chatlistener connection closed")
                         }
-                        msgbus::errors::ReceiveError::RegistrationFailed(_) => {
+                        msgbus::ReceiveError::RegistrationFailed(_) => {
                             println!("Registration failed")
                         }
-                        msgbus::errors::ReceiveError::Shutdown => {
+                        msgbus::ReceiveError::Shutdown => {
                             println!("Chatlistener received shutdown");
                             return;
                         }
+                        msgbus::ReceiveError::DeserializationError(_payload) => todo!(),
+                        msgbus::ReceiveError::RpcNoReplyTo => unreachable!(),
                     }
                     eprintln!("{e}");
                     break;
@@ -135,7 +137,7 @@ async fn main() {
     let name = env::args().skip(1).next().unwrap();
 
     let mut bus = MsgBus::new();
-    bus.shutdown_with_ctrlc();
+    // bus.shutdown_with_ctrlc();
     let handle = bus.handle().clone();
     // let bus: ShutdownWithCtrlC = bus.into();
 

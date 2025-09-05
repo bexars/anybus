@@ -1,5 +1,7 @@
 //!  Collection of [Error]s returned by various subsystems
 
+use std::fmt::Display;
+
 use thiserror::Error;
 
 use crate::routing::Payload;
@@ -15,8 +17,12 @@ pub enum ReceiveError {
     #[error("Unable to register, possibly already registered as subscribe address")]
     RegistrationFailed(String),
     /// The system is shutting down now
+    #[error("Unable to deserialize message payload")]
+    DeserializationError(Payload),
     #[error("System shutdown requested")]
     Shutdown,
+    #[error("RPC message sent without a reply_to address")]
+    RpcNoReplyTo,
 }
 
 impl From<futures::channel::mpsc::SendError> for ReceiveError {
@@ -43,7 +49,7 @@ pub enum MsgBusHandleError {
     /// Send failed for unknown reason.  Original message is returned in the error
     #[error("Unable to send.  The passed Message is returned within this error")]
     // SendError(Box<dyn BusRider>),
-    SendError(Payload),
+    SendError(SendError),
     /// The destination [Uuid](uuid::Uuid) is unknown
     #[error("Route not found for that UUID")]
     // NoRoute(Box<dyn BusRider>),
@@ -60,11 +66,11 @@ pub enum MsgBusHandleError {
     Shutdown,
     /// Error in the receive calls
     #[error("Error in the RPC response")]
-    ReceiveError(String),
+    ReceiveError(ReceiveError),
 }
 
-impl From<tokio::sync::oneshot::error::RecvError> for MsgBusHandleError {
-    fn from(value: tokio::sync::oneshot::error::RecvError) -> Self {
-        MsgBusHandleError::ReceiveError(value.to_string())
-    }
+#[derive(Error, Debug)]
+pub enum SendError {
+    #[error("No Route to Endpoint")]
+    NoRoute(Payload),
 }

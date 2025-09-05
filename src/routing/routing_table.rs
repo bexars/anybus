@@ -34,7 +34,7 @@ pub(super) struct RouteEntry {
 }
 
 impl RouteEntry {
-    pub(crate) fn new(endpoint_id: Uuid, kind: RouteKind) -> Self {
+    pub(crate) fn new(endpoint_id: EndpointId, kind: RouteKind) -> Self {
         let routes = SortedVec::new();
         Self {
             endpoint: endpoint_id,
