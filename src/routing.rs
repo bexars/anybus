@@ -11,14 +11,13 @@ use uuid::Uuid;
 
 use crate::{
     BusRider,
-    errors::{self, SendError},
+    errors::SendError,
     messages::{ClientMessage, NodeMessage},
     routing::routing_table::RoutingTable,
 };
 
 // pub(crate) type EndpointId = Uuid;
 pub(crate) type NodeId = Uuid;
-pub(crate) type PeerGroupId = Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EndpointId(Uuid);

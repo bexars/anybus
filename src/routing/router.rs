@@ -26,6 +26,7 @@ pub(crate) struct Router {
     route_table: RoutingTable,
     routes_watch_tx: Sender<ForwardingTable>,
     routes_watch_rx: Receiver<ForwardingTable>,
+    #[allow(dead_code)]
     msgbus_id: NodeId,
     // received_routes: HashMap<Uuid, usize>,
     // sent_routes: HashMap<Uuid, usize>,

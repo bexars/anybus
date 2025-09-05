@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::{error::Error, marker::PhantomData};
+use std::error::Error;
 
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -10,12 +10,12 @@ use crate::errors::MsgBusHandleError;
 use crate::errors::ReceiveError;
 #[cfg(feature = "ipc")]
 use crate::messages::NodeMessage;
-use crate::messages::{BrokerMsg, ClientMessage, RegistrationStatus};
+use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::{Receiver, RpcReceiver};
 #[cfg(feature = "ipc")]
 use crate::routing::NodeId;
 use crate::routing::router::RoutesWatchRx;
-use crate::routing::{Address, Advertisement, EndpointId, Packet, Payload, Route, WirePacket};
+use crate::routing::{Advertisement, EndpointId, Packet, Payload, Route, WirePacket};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
@@ -69,7 +69,6 @@ impl Handle {
 
         match registration_response {
             ClientMessage::Message(_packet) => {
-                drop(rx);
                 _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
                 Err(ReceiveError::RegistrationFailed(
                     "Bad response from Bus".into(),

@@ -1,7 +1,5 @@
 //!  Collection of [Error]s returned by various subsystems
 
-use std::fmt::Display;
-
 use thiserror::Error;
 
 use crate::routing::Payload;
@@ -19,9 +17,11 @@ pub enum ReceiveError {
     /// The system is shutting down now
     #[error("Unable to deserialize message payload")]
     DeserializationError(Payload),
+    /// The system is shutting down now
     #[error("System shutdown requested")]
     Shutdown,
-    #[error("RPC message sent without a reply_to address")]
+    /// Error in the receive calls
+    #[error("RPC message received without a reply_to address")]
     RpcNoReplyTo,
 }
 
@@ -70,7 +70,9 @@ pub enum MsgBusHandleError {
 }
 
 #[derive(Error, Debug)]
+/// SendError returned by [MsgBusHandle::send()]
 pub enum SendError {
+    /// No route found in forwarding table
     #[error("No Route to Endpoint")]
     NoRoute(Payload),
 }

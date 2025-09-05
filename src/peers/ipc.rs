@@ -17,7 +17,6 @@ use uuid::Uuid;
 use crate::{
     messages::NodeMessage,
     peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, Peer},
-    routing::Address,
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {

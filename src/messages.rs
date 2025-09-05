@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::routing::{Advertisement, EndpointId, NodeId, Packet, Route, WirePacket};
 
