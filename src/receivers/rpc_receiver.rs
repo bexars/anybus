@@ -70,7 +70,7 @@ where
         self.payload.take()
     }
 
-    pub fn respond(self, response: T::Response) -> Result<(), MsgBusHandleError> {
+    pub fn reply(self, response: T::Response) -> Result<(), MsgBusHandleError> {
         self.handle
             .send_to_uuid(self.response_endpoint_id, response)
         // .map_err(|payload| MsgBusHandleError::SendError(payload))

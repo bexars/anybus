@@ -182,7 +182,8 @@ impl State {
                 select! {
                     res = router.bus_control_rx.changed() => {
                         trace!("bus_control_rx.changed() = {:?}", res);
-                        match *router.bus_control_rx.borrow() {
+                        if res.is_err() { return Some(Shutdown)}
+                        match *router.bus_control_rx.borrow_and_update() {
                             BusControlMsg::Run => {
                                 trace!("Router received Run");
                             }
@@ -381,12 +382,12 @@ impl State {
                 let new_forward_table = ForwardingTable::from(&router.route_table);
 
                 router.forward_table = new_forward_table;
-                trace!("Updated forwarding table: Router: {:#?}", router);
+                // trace!("Updated forwarding table: Router: {:#?}", router);
                 let forward_table = router.forward_table.clone();
                 trace!("New forwarding table: {:#?}", forward_table);
 
                 let _ = router.routes_watch_tx.send(forward_table).unwrap();
-                trace!("Updated forwarding table: Router: {:#?}", router);
+                // trace!("Updated forwarding table: Router: {:#?}", router);
                 // Notify peers of route changes
                 #[cfg(any(feature = "net", feature = "ipc"))]
                 router.send_route_updates();

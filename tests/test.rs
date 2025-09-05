@@ -33,14 +33,6 @@ struct RpcResponse {
     pub value: i32,
 }
 
-#[allow(dead_code)]
-fn setup() -> (Handle, Handle) {
-    let mb1 = msgbus::MsgBus::new();
-
-    let mb2 = msgbus::MsgBus::new();
-    (mb1.handle().clone(), mb2.handle().clone())
-}
-
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_message_sending() {
@@ -120,7 +112,7 @@ async fn test_anycast_local_two_registration_allowed() {
 }
 
 #[cfg(feature = "tokio")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::test]
 async fn test_rpc_local() {
     // tracing_subscriber::fmt::init();
     // console_subscriber::init();
@@ -140,7 +132,7 @@ async fn test_rpc_local() {
         let response = RpcResponse {
             value: (msg.value as i32) * 20,
         };
-        request.respond(response).unwrap();
+        request.reply(response).unwrap();
     });
     // dbg!("MsgBus: {:?}", &mb1);
 
