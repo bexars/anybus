@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[example]]
+name = "counter"
+required-features = ["ipc", "tokio"]
 
 
 [workspace]
@@ -12,10 +15,10 @@ members = ["msgbus-macro"]
 
 [features]
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["ipc", "tokio"]
+default = ["ipc","tokio"]
 dioxus = ["dep:dioxus"]
-ipc = ["tokio", "dep:interprocess", "dep:async-bincode"]
-net = ["tokio/rt", "tokio/net"]
+ipc = [ "dep:interprocess", "dep:async-bincode"]
+net = ["tokio/rt", "tokio/net",  "dep:async-bincode", "dep:interprocess"]
 
 [dependencies]
 tokio = { version = "1", features = [
@@ -64,8 +67,3 @@ dyn-clone = "1.0.20"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
-
-
-[[example]]
-name = "counter"
-required_features = ["ipc", "tokio"]

@@ -1,21 +1,27 @@
+#[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::{HashMap, HashSet};
 
+#[cfg(any(feature = "net", feature = "ipc"))]
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     select,
     sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::UnboundedReceiver,
         watch::{self, Receiver, Sender},
     },
 };
 use tracing::{info, trace};
+#[cfg(any(feature = "net", feature = "ipc"))]
 use uuid::Uuid;
 
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Advertisement, NodeMessage};
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Realm, RouteKind};
+
 use crate::{
-    messages::{BrokerMsg, BusControlMsg, ClientMessage, NodeMessage},
-    routing::{
-        Advertisement, EndpointId, ForwardTo, ForwardingTable, NodeId, Realm, Route, RouteKind,
-        routing_table::RoutingTable,
-    },
+    messages::{BrokerMsg, BusControlMsg, ClientMessage},
+    routing::{EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable},
 };
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
@@ -32,6 +38,7 @@ pub(crate) struct Router {
     // sent_routes: HashMap<Uuid, usize>,
     bus_control_rx: Receiver<BusControlMsg>,
     broker_rx: UnboundedReceiver<BrokerMsg>,
+    #[cfg(any(feature = "net", feature = "ipc"))]
     peers: HashMap<Uuid, PeerInfo>,
 }
 
@@ -53,6 +60,7 @@ impl Router {
             bus_control_rx,
             broker_rx,
             route_table: Default::default(),
+            #[cfg(any(feature = "net", feature = "ipc"))]
             peers: HashMap::new(),
         }
     }
@@ -69,13 +77,18 @@ impl Router {
     pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
         self.routes_watch_rx.clone()
     }
+    #[cfg(any(feature = "net", feature = "ipc"))]
 
     fn send_route_updates(&mut self) {
         trace!("Peers: {:?}", self.peers);
         for (peer_id, peer_info) in self.peers.iter_mut() {
+            use std::collections::HashSet;
+
             trace!("routing table:{:?}", self.route_table.table);
             let mut advertisements = HashSet::new();
             for (uuid, route_entry) in self.route_table.table.iter() {
+                use crate::routing::Advertisement;
+
                 let mut advertisement = Advertisement {
                     endpoint_id: *uuid,
                     kind: route_entry.kind,
@@ -188,6 +201,7 @@ impl State {
                             let before = route_entry.routes.len();
                             route_entry.routes.retain(|route| match &route.via {
                                 ForwardTo::Local(tx) => !tx.is_closed(),
+                                #[cfg(any(feature = "net", feature = "ipc"))]
                                 ForwardTo::Remote(tx) => !tx.is_closed(),
                                 ForwardTo::Broadcast(_forward_tos) => true,
                             });
@@ -203,6 +217,7 @@ impl State {
                         });
                         return Some(RouteChange);
                     }
+                    #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::RegisterPeer(uuid, unbounded_sender) => {
                         if router.peers.contains_key(&uuid) {
                             // Peer already registered, ignore
@@ -223,6 +238,7 @@ impl State {
                         trace!("Registered new peer {}", uuid);
                         return Some(Listen);
                     }
+                    #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::UnRegisterPeer(uuid) => {
                         router.route_table.table.retain(|_, route_entry| {
                             route_entry
@@ -233,6 +249,7 @@ impl State {
                         router.peers.remove(&uuid);
                         return Some(RouteChange);
                     }
+                    #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::AddPeerEndpoints(uuid, hash_set) => {
                         if let Some(peer) = router.peers.get_mut(&uuid) {
                             for ad in hash_set {
@@ -258,6 +275,7 @@ impl State {
                         }
                         return Some(Listen);
                     }
+                    #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => todo!(),
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
@@ -297,6 +315,7 @@ impl State {
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 for peer in router.peers.values() {
                     _ = peer.peer_tx.send(NodeMessage::Close);
                 }
@@ -312,6 +331,7 @@ impl State {
                                 ForwardTo::Local(tx) => {
                                     let _ = tx.send(ClientMessage::Shutdown);
                                 }
+                                #[cfg(any(feature = "net", feature = "ipc"))]
                                 ForwardTo::Remote(_tx) => {}
                                 ForwardTo::Broadcast(_forward_tos) => {}
                             });
@@ -326,6 +346,7 @@ impl State {
                 router.forward_table = new_forward_table;
                 let _ = router.routes_watch_tx.send(router.forward_table.clone());
                 // Notify peers of route changes
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 router.send_route_updates();
 
                 return Some(Listen);
@@ -343,12 +364,14 @@ impl State {
 
 #[derive(Debug)]
 #[allow(dead_code)]
+#[cfg(any(feature = "net", feature = "ipc"))]
 struct PeerInfo {
     peer_id: NodeId,
     peer_tx: UnboundedSender<NodeMessage>,
     received_routes: HashSet<Advertisement>,
     advertised_routes: HashSet<Advertisement>,
 }
+#[cfg(any(feature = "net", feature = "ipc"))]
 
 impl PeerInfo {
     fn new(peer_id: NodeId, peer_tx: UnboundedSender<NodeMessage>) -> Self {

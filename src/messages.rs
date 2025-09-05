@@ -1,8 +1,11 @@
+#[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::HashSet;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::routing::{Advertisement, EndpointId, NodeId, Packet, Route, WirePacket};
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Advertisement, NodeId, WirePacket};
+use crate::routing::{EndpointId, Packet, Route};
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -12,9 +15,13 @@ pub(crate) enum BrokerMsg {
     RegisterRoute(EndpointId, Route),
     Subscribe(EndpointId, UnboundedSender<ClientMessage>),
     DeadLink(EndpointId),
+    #[cfg(any(feature = "net", feature = "ipc"))]
     RegisterPeer(NodeId, UnboundedSender<NodeMessage>),
+    #[cfg(any(feature = "net", feature = "ipc"))]
     UnRegisterPeer(NodeId),
+    #[cfg(any(feature = "net", feature = "ipc"))]
     AddPeerEndpoints(NodeId, HashSet<Advertisement>),
+    #[cfg(any(feature = "net", feature = "ipc"))]
     RemovePeerEndpoints(NodeId, HashSet<Advertisement>),
     Shutdown,
 }
@@ -53,6 +60,7 @@ pub enum RegistrationStatus {
     Failed(String),
 }
 
+#[cfg(any(feature = "net", feature = "ipc"))]
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
 #[derive(Debug)]
 pub(crate) enum NodeMessage {

@@ -9,11 +9,10 @@ use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::messages::NodeMessage;
 use crate::{
-    BusRider,
-    errors::SendError,
-    messages::{ClientMessage, NodeMessage},
-    routing::routing_table::RoutingTable,
+    BusRider, errors::SendError, messages::ClientMessage, routing::routing_table::RoutingTable,
 };
 
 // pub(crate) type EndpointId = Uuid;
@@ -93,6 +92,7 @@ impl ForwardingTable {
                     unreachable!("Tried to send non-message to client")
                 }
             }),
+            #[cfg(any(feature = "net", feature = "ipc"))]
             ForwardTo::Remote(tx) => tx
                 .send(NodeMessage::WirePacket(packet.into()))
                 .map_err(|e| {
@@ -158,8 +158,8 @@ impl From<&RoutingTable> for ForwardingTable {
 #[allow(dead_code)]
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
+    #[cfg(any(feature = "net", feature = "ipc"))]
     Remote(UnboundedSender<NodeMessage>),
-    // Node(NodeId),
     Broadcast(Vec<Address>), // List of Node IDs to broadcast to including myself
 }
 
@@ -330,6 +330,7 @@ pub(crate) enum UnicastType {
     RpcResponse,
 }
 
+#[cfg(any(feature = "net", feature = "ipc"))]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Advertisement {
     pub(crate) kind: RouteKind,
@@ -341,7 +342,9 @@ pub(crate) struct Advertisement {
 pub(crate) struct Route {
     pub(crate) via: ForwardTo,
     pub(crate) cost: u16,
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) realm: Realm,
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) learned_from: NodeId, // (0 for local)
     pub(crate) kind: RouteKind,
 }

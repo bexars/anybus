@@ -114,6 +114,7 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
             from: name.clone(),
             text: payload.into(),
         }) {}
+        #[cfg(feature = "tokio")]
         tokio::time::sleep(Duration::from_secs(1)).await;
         count -= 1;
         if count < 0 {
@@ -123,6 +124,7 @@ async fn countdown(handle: Handle, name: String, mut count: isize) {
 }
 
 // #[cfg(target_family = "unix")]
+#[cfg(feature = "tokio")]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();

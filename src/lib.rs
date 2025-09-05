@@ -29,9 +29,10 @@ mod receivers;
 mod routing;
 mod traits;
 pub use handle::Handle;
+#[cfg(feature = "ipc")]
 use peers::IpcManager;
 
-#[cfg(any(feature = "ipc", feature = "net"))]
+#[cfg(feature = "ipc")]
 mod peers;
 
 use tokio::{
@@ -117,6 +118,7 @@ impl MsgBus {
         &self.handle
     }
 
+    #[cfg(feature = "tokio")]
     /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the MsgBus system
     pub fn shutdown_with_ctrlc(&self) {
         _ = spawn(helper::watch_ctrlc(self.handle.clone()));

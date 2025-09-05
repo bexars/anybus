@@ -1,3 +1,4 @@
+#[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::HashSet;
 use std::error::Error;
 
@@ -8,14 +9,15 @@ use uuid::Uuid;
 
 use crate::errors::MsgBusHandleError;
 use crate::errors::ReceiveError;
-#[cfg(feature = "ipc")]
+#[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::{Receiver, RpcReceiver};
-#[cfg(feature = "ipc")]
-use crate::routing::NodeId;
+
 use crate::routing::router::RoutesWatchRx;
-use crate::routing::{Advertisement, EndpointId, Packet, Payload, Route, WirePacket};
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Advertisement, NodeId, WirePacket};
+use crate::routing::{EndpointId, Packet, Payload, Route};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
@@ -39,9 +41,11 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
+            #[cfg(any(feature = "net", feature = "ipc"))]
             realm: crate::routing::Realm::Userspace,
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
+            #[cfg(any(feature = "net", feature = "ipc"))]
             learned_from: Uuid::nil(),
         };
 
@@ -93,9 +97,11 @@ impl Handle {
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 realm: crate::routing::Realm::Userspace,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 learned_from: Uuid::nil(),
             },
         );
@@ -119,9 +125,11 @@ impl Handle {
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 realm: crate::routing::Realm::Userspace,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 learned_from: Uuid::nil(),
             },
         );
@@ -140,6 +148,7 @@ impl Handle {
         todo!()
     }
 
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) fn send_packet(&self, packet: WirePacket) {
         let map = self.route_watch_rx.borrow();
 
@@ -192,9 +201,11 @@ impl Handle {
             response_uuid,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 realm: crate::routing::Realm::Process,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
+                #[cfg(any(feature = "net", feature = "ipc"))]
                 learned_from: Uuid::nil(),
             },
         );
@@ -228,18 +239,18 @@ impl Handle {
             _ => todo!(),
         }
     }
-
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
         _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
     }
-
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
         _ = self
             .tx
             .send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes));
     }
 
-    #[cfg(feature = "ipc")]
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) fn register_peer(&self, uuid: NodeId, tx: UnboundedSender<NodeMessage>) {
         use tracing::debug;
 
@@ -249,7 +260,7 @@ impl Handle {
         }
     }
 
-    #[cfg(feature = "ipc")]
+    #[cfg(any(feature = "net", feature = "ipc"))]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
         _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
     }
@@ -258,6 +269,7 @@ impl Handle {
         _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
     }
 
+    #[cfg(feature = "tokio")]
     pub(crate) fn shutdown(&self) {
         let _ = self.tx.send(BrokerMsg::Shutdown);
     }
