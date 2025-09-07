@@ -18,7 +18,7 @@ impl<T: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static> Bu
 /// Trait for ease of sending over the bus without the client needing to know the UUID of the default receiver
 pub trait BusRiderWithUuid: BusRider {
     /// The default Uuid that will be used if not overridden during registration
-    const MSGBUS_UUID: Uuid;
+    const ANYBUS_UUID: Uuid;
 }
 
 /// Trait for denoting the type of a returned RPC response

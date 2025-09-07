@@ -77,7 +77,7 @@ enum IpcControl {
 /// Protocol messages for the IPC bus.
 #[derive(Serialize, Deserialize)]
 enum IpcMessage {
-    Hello(NodeId), //Our Msgbus ID
+    Hello(NodeId), //Our AnyBus ID
     KnownPeers(Vec<NodeId>),
     NeighborRemoved(NodeId),    //Node/Peer ID
     BusRider(Address, Vec<u8>), // Destination ID

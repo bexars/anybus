@@ -36,14 +36,14 @@ impl Handle {
     pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_anycast_inner(T::MSGBUS_UUID.into()).await
+        self.register_anycast_inner(T::ANYBUS_UUID.into()).await
     }
 
     async fn register_anycast_inner<T: BusRider + DeserializeOwned>(
         &mut self,
         endpoint_id: EndpointId,
     ) -> Result<Receiver<T>, ReceiveError> {
-        // let endpoint_id = T::MSGBUS_UUID.into();
+        // let endpoint_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let route = Route {
@@ -71,7 +71,7 @@ impl Handle {
     pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_unicast_inner(T::MSGBUS_UUID.into()).await
+        self.register_unicast_inner(T::ANYBUS_UUID.into()).await
     }
     /// Same as register_unicast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_unicast_uuid<T: BusRider + DeserializeOwned>(
@@ -110,7 +110,7 @@ impl Handle {
     pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
         &mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
-        let endpoint_id = T::MSGBUS_UUID.into();
+        let endpoint_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
@@ -139,7 +139,7 @@ impl Handle {
     pub async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        let broadcast_id = T::MSGBUS_UUID.into();
+        let broadcast_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let local_id = Uuid::now_v7().into();
         let register_msg = BrokerMsg::RegisterRoute(
@@ -214,7 +214,7 @@ impl Handle {
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), AnyBusHandleError> {
-        let address = T::MSGBUS_UUID.into();
+        let address = T::ANYBUS_UUID.into();
         self.send_to_uuid(address, payload)
     }
 
@@ -245,7 +245,7 @@ impl Handle {
         // _pd: std::marker::PhantomData<T>,
     ) -> Result<RequestHelper, AnyBusHandleError> {
         let response_uuid = Uuid::now_v7().into();
-        // let to_address = T::MSGBUS_UUID.into();
+        // let to_address = T::ANYBUS_UUID.into();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -301,7 +301,7 @@ impl Handle {
     // where
     //     for<'de> T::Response: serde::de::Deserialize<'de>,
     // {
-    //     let address = T::MSGBUS_UUID.into();
+    //     let address = T::ANYBUS_UUID.into();
     //     let payload = Box::new(payload);
     //     let response_uuid = Uuid::now_v7().into();
 
@@ -459,7 +459,7 @@ impl RequestHelper {
         let map = self.handle.route_watch_rx.borrow();
         let node_id = map.get_node_id();
         let payload = Box::new(payload);
-        let to_address: Address = T::MSGBUS_UUID.into();
+        let to_address: Address = T::ANYBUS_UUID.into();
 
         map.send(Packet {
             to: to_address,
@@ -493,7 +493,7 @@ impl RequestHelper {
         let to_address: Address = endpoint_id.into();
         let node_id = map.get_node_id();
         let payload = Box::new(payload);
-        // let address: Address = T::MSGBUS_UUID.into();
+        // let address: Address = T::ANYBUS_UUID.into();
 
         map.send(Packet {
             to: to_address,
