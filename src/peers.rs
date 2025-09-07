@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{
     Handle,
     messages::NodeMessage,
-    routing::{Address, Advertisement, EndpointId, NodeId, WirePacket},
+    routing::{Address, Advertisement, NodeId, WirePacket},
 };
 
 type IpcPeerStream = AsyncBincodeStream<

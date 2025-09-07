@@ -1,5 +1,5 @@
 mod common;
-use crate::common::{NumberMessage, setup};
+use crate::common::NumberMessage;
 // use tracing::info;
 
 #[cfg(feature = "tokio")]
@@ -55,7 +55,7 @@ async fn test_unicast_three_buses_with_drop() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_rpc_two_busses() {
-    use tokio::{task::yield_now, time};
+    use tokio::task::yield_now;
 
     // tracing_subscriber::fmt::init();
     let mb1 = msgbus::MsgBus::new();
@@ -88,7 +88,7 @@ async fn test_rpc_two_busses() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_anycast_two_busses_local_then_remote() {
-    use tokio::{task::yield_now, time};
+    use tokio::time;
 
     // tracing_subscriber::fmt::init();
     let mb1 = msgbus::MsgBus::new();
@@ -135,7 +135,7 @@ async fn test_multicast_several_busses() {
     let mb3 = msgbus::MsgBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb2.handle().clone();
-    let mut handle3 = mb3.handle().clone();
+    let handle3 = mb3.handle().clone();
     let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
     let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

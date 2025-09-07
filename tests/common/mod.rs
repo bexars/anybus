@@ -1,5 +1,4 @@
 use msgbus::BusRiderRpc;
-use msgbus::Handle;
 use msgbus::bus_uuid;
 use serde::{Deserialize, Serialize};
 // use std::time::Duration;
@@ -31,11 +30,4 @@ impl BusRiderRpc for RpcMessage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RpcResponse {
     pub value: i32,
-}
-
-pub fn setup() -> (Handle, Handle) {
-    let mb1 = msgbus::MsgBus::new();
-
-    let mb2 = msgbus::MsgBus::new();
-    (mb1.handle().clone(), mb2.handle().clone())
 }
