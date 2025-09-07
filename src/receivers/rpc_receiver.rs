@@ -2,8 +2,11 @@ use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    BusRiderRpc, Handle, ReceiveError, errors::MsgBusHandleError, messages::ClientMessage,
-    receivers::packet_receiver::PacketReceiver, routing::EndpointId,
+    BusRiderRpc, Handle, ReceiveError,
+    errors::MsgBusHandleError,
+    messages::ClientMessage,
+    receivers::packet_receiver::PacketReceiver,
+    routing::{Address, EndpointId},
 };
 
 #[derive(Debug)]
@@ -48,7 +51,7 @@ pub struct RpcRequest<T>
 where
     T: BusRiderRpc,
 {
-    response_endpoint_id: EndpointId,
+    response_endpoint_id: Address,
     payload: Option<T>,
     handle: Handle,
 }
@@ -57,7 +60,7 @@ impl<T> RpcRequest<T>
 where
     T: BusRiderRpc,
 {
-    pub fn new(response: EndpointId, payload: T, handle: Handle) -> RpcRequest<T> {
+    pub fn new(response: Address, payload: T, handle: Handle) -> RpcRequest<T> {
         Self {
             response_endpoint_id: response,
             payload: Some(payload),

@@ -61,11 +61,13 @@ impl RouteEntry {
                 self.routes.push(orig);
                 debug!("Broadcast list update: {:?}", self.routes);
                 return Ok(());
+            } else {
+                self.routes.insert(route);
+                return Ok(());
             }
         }
 
-        self.routes.insert(route);
-        Ok(())
+        // Ok(())
     }
 
     pub(crate) fn best_route(&self) -> Option<&Route> {

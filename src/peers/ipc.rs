@@ -239,7 +239,10 @@ impl State for IpcMessageReceived {
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
             IpcMessage::Packet(wire_packet) => {
-                state_machine.peer.handle.send_packet(wire_packet);
+                state_machine
+                    .peer
+                    .handle
+                    .send_packet(wire_packet, state_machine.peer.peer_id);
             }
             IpcMessage::BusRider(endpoint_id, items) => {
                 _ = state_machine.peer.handle.send_to_uuid(endpoint_id, items);

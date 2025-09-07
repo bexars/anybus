@@ -225,7 +225,7 @@ impl State {
                             route_entry.routes.retain(|route| match &route.via {
                                 ForwardTo::Local(tx) => !tx.is_closed(),
                                 #[cfg(any(feature = "net", feature = "ipc"))]
-                                ForwardTo::Remote(tx) => !tx.is_closed(),
+                                ForwardTo::Remote(tx, _) => !tx.is_closed(),
                                 ForwardTo::Broadcast(_forward_tos) => true,
                             });
                             let after = route_entry.routes.len();
@@ -249,7 +249,7 @@ impl State {
                         }
                         let route = Route {
                             kind: RouteKind::Node,
-                            via: ForwardTo::Remote(unbounded_sender.clone()),
+                            via: ForwardTo::Remote(unbounded_sender.clone(), uuid),
                             learned_from: uuid,
                             realm: Realm::Process,
                             cost: 0,
@@ -257,9 +257,10 @@ impl State {
                         router.route_table.add_route(uuid.into(), route).unwrap();
                         let peer_info = PeerInfo::new(uuid, unbounded_sender);
                         router.peers.insert(uuid, peer_info);
-                        router.send_route_updates();
                         trace!("Registered new peer {}", uuid);
-                        return Some(Listen);
+
+                        // router.send_route_updates();
+                        return Some(RouteChange);
                     }
                     #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::UnRegisterPeer(uuid) => {
@@ -273,13 +274,26 @@ impl State {
                         return Some(RouteChange);
                     }
                     #[cfg(any(feature = "net", feature = "ipc"))]
-                    BrokerMsg::AddPeerEndpoints(uuid, hash_set) => {
-                        if let Some(peer) = router.peers.get_mut(&uuid) {
+                    BrokerMsg::AddPeerEndpoints(peer_id, hash_set) => {
+                        if let Some(peer) = router.peers.get_mut(&peer_id) {
                             for ad in hash_set {
+                                use RouteKind as RK;
+
+                                let forward_to = match ad.kind {
+                                    RK::Unicast | RK::Anycast | RK::Node => {
+                                        ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
+                                    }
+                                    RouteKind::Multicast => {
+                                        let mut hs = HashSet::new();
+                                        hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
+                                        ForwardTo::Broadcast(hs)
+                                    }
+                                };
+
                                 let route = Route {
                                     kind: ad.kind,
-                                    via: ForwardTo::Remote(peer.peer_tx.clone()),
-                                    learned_from: uuid,
+                                    via: forward_to,
+                                    learned_from: peer_id,
                                     realm: Realm::Process,
                                     cost: ad.cost + 16,
                                 };
@@ -288,13 +302,13 @@ impl State {
 
                                 trace!(
                                     "Added route for endpoint {} via peer {}",
-                                    ad.endpoint_id, uuid
+                                    ad.endpoint_id, peer_id
                                 );
                                 peer.received_routes.insert(ad);
                             }
                             return Some(RouteChange);
                         } else {
-                            trace!("Peer {} not found for AddPeerEndpoints", uuid);
+                            trace!("Peer {} not found for AddPeerEndpoints", peer_id);
                         }
                         return Some(Listen);
                     }
@@ -316,19 +330,30 @@ impl State {
                             ForwardTo::Local(tx) => {
                                 _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
                             }
-                            ForwardTo::Remote(_unbounded_sender) => {}
-                            ForwardTo::Broadcast(items) => match items[0] {
-                                Address::Endpoint(local_endpoint_id) => {
-                                    if let ForwardTo::Local(tx) =
-                                        router.forward_table.lookup(&local_endpoint_id).unwrap()
-                                    {
-                                        _ = tx.send(ClientMessage::SuccessfulRegistration(
-                                            endpoint_id,
-                                        ));
+                            ForwardTo::Remote(_unbounded_sender, _node_id) => {
+                                panic!("Can't create remote endpoint locally")
+                            }
+                            ForwardTo::Broadcast(items) => {
+                                match items
+                                    .into_iter()
+                                    .next()
+                                    .expect("This should be set when this was created")
+                                {
+                                    Address::Endpoint(local_endpoint_id) => {
+                                        // this is all to lookup the right address to return Success to
+                                        if let ForwardTo::Local(tx) = router
+                                            .forward_table
+                                            .lookup(&local_endpoint_id.into())
+                                            .unwrap()
+                                        {
+                                            _ = tx.send(ClientMessage::SuccessfulRegistration(
+                                                endpoint_id,
+                                            ));
+                                        }
                                     }
+                                    _ => {}
                                 }
-                                _ => {}
-                            },
+                            }
                         }
 
                         Some(RouteChange)
@@ -370,7 +395,7 @@ impl State {
                                     let _ = tx.send(ClientMessage::Shutdown);
                                 }
                                 #[cfg(any(feature = "net", feature = "ipc"))]
-                                ForwardTo::Remote(_tx) => {}
+                                ForwardTo::Remote(_tx, _node_id) => {}
                                 ForwardTo::Broadcast(_forward_tos) => {}
                             });
                     });

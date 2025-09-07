@@ -1,12 +1,13 @@
 pub(crate) mod router;
 pub(crate) mod routing_table;
 
-use std::{any::Any, fmt::Display, ops::Deref};
+use std::{any::Any, collections::HashSet, fmt::Display, ops::Deref};
 
 use erased_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::trace;
 // use tracing::debug;
 use uuid::Uuid;
 
@@ -66,20 +67,64 @@ pub(crate) struct ForwardingTable {
 }
 
 impl ForwardingTable {
-    pub(crate) fn lookup(&self, endpoint_id: &EndpointId) -> Option<&ForwardTo> {
-        self.table.get(endpoint_id)
+    pub(crate) fn lookup(&self, address: &Address) -> Option<&ForwardTo> {
+        match address {
+            Address::Remote(eid, nid) => {
+                trace!(
+                    "Looking up remote address: {} on node {}",
+                    nid, self.node_id
+                );
+                // If the node ID is my own, just look up the endpoint ID
+                // Otherwise, look up the endpoint ID on the remote node
+                // If the node ID is not in the table, return None
+                let e = if nid == &self.node_id {
+                    *eid
+                } else {
+                    let eid: EndpointId = nid.into();
+                    eid
+                };
+                self.table.get(&e)
+            }
+            Address::Endpoint(eid) => self.table.get(eid),
+        }
+        // self.table.get(address)
+    }
+
+    pub(crate) fn get_node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    pub(crate) fn forward(&self, packet: WirePacket, from_peer: NodeId) {
+        let reverse_route = packet.from.map(|f| self.lookup(&f)).flatten();
+        if reverse_route.is_none() {
+            trace!("No reverse route for {:?}", packet);
+            return;
+        }
+        trace!("Reverse Route {:?} for {:?}", reverse_route, packet);
+        if let Some(ForwardTo::Remote(_, peer_id)) = reverse_route {
+            if *peer_id != from_peer {
+                trace!("Dropping due to RPF check");
+                return;
+            }
+        }
+        let endpoint_id = packet.to;
+        _ = self.inner_send(endpoint_id, packet.into());
     }
 
     pub(crate) fn send(&self, packet: impl Into<Packet>) -> Result<(), SendError> {
-        let packet: Packet = packet.into();
+        let mut packet: Packet = packet.into();
         let endpoint_id = packet.to;
-        self.inner_send(endpoint_id, packet)
-            .map_err(|p| SendError::NoRoute(p.payload))
+        let node_id: EndpointId = self.node_id.into();
+        packet.from = Some(node_id.into());
+
+        self.inner_send(endpoint_id, packet).map_err(|p| {
+            trace!("No route to endpoint_id: {}", endpoint_id);
+            SendError::NoRoute(p.payload)
+        })
     }
 
-    fn inner_send(&self, endpoint_id: EndpointId, packet: impl Into<Packet>) -> Result<(), Packet> {
-        let mut packet = packet.into();
-        packet.from = Some(self.node_id.into());
+    fn inner_send(&self, endpoint_id: Address, packet: Packet) -> Result<(), Packet> {
+        // let mut packet = packet.into();
         let forward_to = self.lookup(&endpoint_id);
         let forward_to = if let Some(ft) = forward_to {
             ft
@@ -96,7 +141,7 @@ impl ForwardingTable {
                 }
             }),
             #[cfg(any(feature = "net", feature = "ipc"))]
-            ForwardTo::Remote(tx) => tx
+            ForwardTo::Remote(tx, _node_id) => tx
                 .send(NodeMessage::WirePacket(packet.into()))
                 .map_err(|e| {
                     if let NodeMessage::WirePacket(packet) = e.0 {
@@ -108,14 +153,8 @@ impl ForwardingTable {
             ForwardTo::Broadcast(addresses) => {
                 // let packet:Packet = packet;
                 for address in addresses {
-                    match address {
-                        Address::Endpoint(ep) => {
-                            self.inner_send(*ep, packet.clone())?;
-                        }
-                        Address::Remote(_ep, node) => {
-                            self.inner_send(node.into(), packet.clone())?
-                        }
-                    }
+                    self.inner_send(*address, packet.clone())?;
+
                     // ft.send(packet.clone())?;
                 }
                 Ok(())
@@ -165,8 +204,8 @@ impl From<&RoutingTable> for ForwardingTable {
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(any(feature = "net", feature = "ipc"))]
-    Remote(UnboundedSender<NodeMessage>),
-    Broadcast(Vec<Address>), // List of Node IDs to broadcast to including myself
+    Remote(UnboundedSender<NodeMessage>, NodeId),
+    Broadcast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
 
 impl ForwardTo {
@@ -223,9 +262,9 @@ impl ForwardTo {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Packet {
-    pub(crate) to: EndpointId,
-    pub(crate) reply_to: Option<EndpointId>,
-    pub(crate) from: Option<EndpointId>,
+    pub(crate) to: Address,
+    pub(crate) reply_to: Option<Address>,
+    pub(crate) from: Option<Address>,
     pub(crate) payload: Payload,
 }
 
@@ -243,9 +282,9 @@ impl From<WirePacket> for Packet {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct WirePacket {
-    pub(crate) to: EndpointId,
-    pub(crate) reply_to: Option<EndpointId>,
-    pub(crate) from: Option<EndpointId>,
+    pub(crate) to: Address,
+    pub(crate) reply_to: Option<Address>,
+    pub(crate) from: Option<Address>,
     pub(crate) payload: Vec<u8>,
 }
 
@@ -261,7 +300,7 @@ impl From<Packet> for WirePacket {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum Address {
     Endpoint(EndpointId),
     Remote(EndpointId, NodeId), // EndpointId, NodeId
@@ -270,6 +309,21 @@ pub enum Address {
 impl From<EndpointId> for Address {
     fn from(value: EndpointId) -> Self {
         Address::Endpoint(value)
+    }
+}
+
+impl From<Uuid> for Address {
+    fn from(value: Uuid) -> Self {
+        Address::Endpoint(EndpointId(value))
+    }
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Address::Endpoint(eid) => write!(f, "Endpoint({})", eid),
+            Address::Remote(eid, nid) => write!(f, "Remote(eid:{}, nid:{})", eid, nid),
+        }
     }
 }
 
@@ -359,7 +413,9 @@ impl Route {
     pub(crate) fn add_broadcast(&mut self, other: Route) {
         if let ForwardTo::Broadcast(ref mut list) = self.via {
             if let ForwardTo::Broadcast(other_list) = other.via {
-                list.extend(other_list.into_iter());
+                other_list.into_iter().for_each(|a| {
+                    list.insert(a);
+                });
             }
         }
     }
@@ -390,7 +446,7 @@ impl Ord for Route {
 pub(crate) enum RouteKind {
     Unicast,
     Anycast,
-    Multicast, // Multicast to a specific node
+    Multicast,
     Node,
 }
 
@@ -402,7 +458,7 @@ pub(crate) enum Realm {
     Userspace,
     LocalNet,
     Global,
-    BroadcastProxy(EndpointId),
+    // BroadcastProxy(EndpointId),
 }
 
 // struct PeerGroup {

@@ -406,6 +406,7 @@ impl State for CreateIpcPeer {
 pub enum IpcManagerError {
     #[error("Error communicating with IPC peer: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error encoding IPC message: {0}")]
+    #[error("Error encoding IPC message")]
     EncodeError(#[from] bincode::error::EncodeError),
+    // EncodeError,
 }

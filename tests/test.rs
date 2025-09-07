@@ -137,7 +137,7 @@ async fn test_rpc_local() {
     // dbg!("MsgBus: {:?}", &mb1);
 
     let handle2 = mb1.handle().clone();
-    let response = handle2.request(RpcMessage { value: 5 }).await.unwrap();
+    let response = handle2.rpc_once(RpcMessage { value: 5 }).await.unwrap();
 
     assert_eq!(response.value, 100);
     drop(handle1);

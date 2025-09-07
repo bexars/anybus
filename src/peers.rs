@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{
     Handle,
     messages::NodeMessage,
-    routing::{Advertisement, EndpointId, NodeId, WirePacket},
+    routing::{Address, Advertisement, EndpointId, NodeId, WirePacket},
 };
 
 type IpcPeerStream = AsyncBincodeStream<
@@ -79,8 +79,8 @@ enum IpcControl {
 enum IpcMessage {
     Hello(NodeId), //Our Msgbus ID
     KnownPeers(Vec<NodeId>),
-    NeighborRemoved(NodeId),       //Node/Peer ID
-    BusRider(EndpointId, Vec<u8>), // Destination ID
+    NeighborRemoved(NodeId),    //Node/Peer ID
+    BusRider(Address, Vec<u8>), // Destination ID
     CloseConnection,
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
