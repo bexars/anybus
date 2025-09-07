@@ -30,7 +30,7 @@ pub fn bus_uuid(attr: TokenStream, mut item: TokenStream) -> TokenStream {
     let name = copy.into_iter().skip(1).next().unwrap().to_string();
     // println!("name: {}", name);
 
-    writeln!(buf, "impl msgbus::BusRider for {} {{", name).unwrap();
+    writeln!(buf, "impl anybus::BusRider for {} {{", name).unwrap();
     writeln!(buf, "fn default_uuid(&self) -> Uuid {{").unwrap();
     writeln!(buf, "{}::get_uuid()", name).unwrap();
     writeln!(buf, "}}").unwrap();
@@ -44,7 +44,7 @@ pub fn bus_uuid(attr: TokenStream, mut item: TokenStream) -> TokenStream {
 
 
 
-//     let new_stream:TokenStream = format!("impl msgbus::BusRider for {} {{\n
+//     let new_stream:TokenStream = format!("impl anybus::BusRider for {} {{\n
 //     fn default_uuid(&self) -> Uuid {{\n
 // {}::get_uuid(()\n}}\n{}", name, name, text).parse().unwrap();
 

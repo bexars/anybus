@@ -36,7 +36,7 @@ pub(crate) struct Router {
     routes_watch_tx: Sender<ForwardingTable>,
     routes_watch_rx: Receiver<ForwardingTable>,
     #[allow(dead_code)]
-    msgbus_id: NodeId,
+    anybus_id: NodeId,
     // received_routes: HashMap<Uuid, usize>,
     // sent_routes: HashMap<Uuid, usize>,
     bus_control_rx: Receiver<BusControlMsg>,
@@ -57,7 +57,7 @@ impl Router {
             forward_table,
             routes_watch_tx: tx,
             routes_watch_rx: rx,
-            msgbus_id: uuid,
+            anybus_id: uuid,
             // received_routes: HashMap::new(),
             // sent_routes: HashMap::new(),
             bus_control_rx,

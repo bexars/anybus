@@ -1,5 +1,5 @@
 [package]
-name = "msgbus"
+name = "anybus"
 version = "0.1.0"
 edition = "2024"
 resolver ="3"
@@ -11,7 +11,7 @@ required-features = [ "tokio", "ipc"]
 
 
 [workspace]
-members = ["msgbus-macro"]
+members = ["anybus-macro"]
 
 [workspace.dependencies]
 uuid = { version = "1.18.0", default-features = false, features = [
@@ -57,7 +57,7 @@ sorted-vec = "0.8.2"
 # binrw = "0.11.2"
 futures = { version = "0.3.28", default-features = false, features = ["std"] }
 # if-addrs = { version = "0.10.1", features = ["link-local"] }
-msgbus-macro = { path = "./msgbus-macro", version = "0.1.0" }
+anybus-macro = { path = "./anybus-macro", version = "0.1.0" }
 dioxus = { version = "0.7.0-rc.0", optional = true }
 # futures-channel = "0.3.31"
 async-watch = "0.3.1"

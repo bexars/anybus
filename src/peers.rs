@@ -31,7 +31,7 @@ trait NameHelper {
 }
 impl NameHelper for Uuid {
     fn to_name(&self) -> Name<'static> {
-        format!("msgbus.ipc.{}", self)
+        format!("anybus.ipc.{}", self)
             .to_ns_name::<GenericNamespaced>()
             .unwrap()
     }

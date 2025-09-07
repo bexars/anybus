@@ -9,8 +9,8 @@ async fn test_unicast_two_buses() {
 
     use tokio::time;
 
-    let mb1 = msgbus::MsgBus::new();
-    let mb2 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
+    let mb2 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
@@ -27,8 +27,8 @@ async fn test_unicast_three_buses_with_drop() {
 
     use tokio::time;
 
-    let mb1 = msgbus::MsgBus::new();
-    let mb2 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
+    let mb2 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
@@ -42,7 +42,7 @@ async fn test_unicast_three_buses_with_drop() {
     drop(listener1);
     time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let mb3 = msgbus::MsgBus::new();
+    let mb3 = anybus::AnyBus::new();
     let mut handle3 = mb3.handle().clone();
     let mut listener3 = handle3.register_unicast::<NumberMessage>().await.unwrap();
     time::sleep(std::time::Duration::from_millis(10)).await;
@@ -58,8 +58,8 @@ async fn test_rpc_two_busses() {
     use tokio::task::yield_now;
 
     // tracing_subscriber::fmt::init();
-    let mb1 = msgbus::MsgBus::new();
-    let mb2 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
+    let mb2 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_rpc::<common::RpcMessage>().await.unwrap();
@@ -91,8 +91,8 @@ async fn test_anycast_two_busses_local_then_remote() {
     use tokio::time;
 
     // tracing_subscriber::fmt::init();
-    let mb1 = msgbus::MsgBus::new();
-    let mb2 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
+    let mb2 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb2.handle().clone();
     let mut listener1 = handle1
@@ -130,9 +130,9 @@ async fn test_anycast_two_busses_local_then_remote() {
 async fn test_multicast_several_busses() {
     // tracing_subscriber::fmt::init();
 
-    let mb1 = msgbus::MsgBus::new();
-    let mb2 = msgbus::MsgBus::new();
-    let mb3 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
+    let mb2 = anybus::AnyBus::new();
+    let mb3 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb2.handle().clone();
     let handle3 = mb3.handle().clone();

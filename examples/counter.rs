@@ -4,13 +4,13 @@ use std::{
     time::Duration,
 };
 
-// use msgbus::helper::ShutdownWithCtrlC;
-use msgbus::{Handle, MsgBus, bus_uuid};
+// use anybus::helper::ShutdownWithCtrlC;
+use anybus::{AnyBus, Handle, bus_uuid};
 use tokio;
 
 // use tracing_subscriber;
 
-// use msgbus_macro::bus_uuid;
+// use anybus_macro::bus_uuid;
 // use uuid::Uuid;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -22,7 +22,7 @@ enum ChatMessage {
     Hello(String), // Name to display when joining
 }
 
-// impl msgbus::BusRider for ChatMessage {
+// impl anybus::BusRider for ChatMessage {
 //     fn default_uuid(&self) -> Uuid {
 //         ChatMessage::get_uuid()
 //     }
@@ -80,18 +80,18 @@ impl ChatListener {
                 Ok(msg) => println!("Chatlistener msg: {msg}"),
                 Err(e) => {
                     match e {
-                        msgbus::ReceiveError::ConnectionClosed => {
+                        anybus::ReceiveError::ConnectionClosed => {
                             println!("Chatlistener connection closed")
                         }
-                        msgbus::ReceiveError::RegistrationFailed(_) => {
+                        anybus::ReceiveError::RegistrationFailed(_) => {
                             println!("Registration failed")
                         }
-                        msgbus::ReceiveError::Shutdown => {
+                        anybus::ReceiveError::Shutdown => {
                             println!("Chatlistener received shutdown");
                             return;
                         }
-                        msgbus::ReceiveError::DeserializationError(_payload) => todo!(),
-                        msgbus::ReceiveError::RpcNoReplyTo => unreachable!(),
+                        anybus::ReceiveError::DeserializationError(_payload) => todo!(),
+                        anybus::ReceiveError::RpcNoReplyTo => unreachable!(),
                     }
                     eprintln!("{e}");
                     break;
@@ -139,7 +139,7 @@ async fn main() {
     //     .init();
     let name = env::args().skip(1).next().unwrap();
 
-    let mut bus = MsgBus::new();
+    let mut bus = AnyBus::new();
     // bus.shutdown_with_ctrlc();
     let handle = bus.handle().clone();
     // let bus: ShutdownWithCtrlC = bus.into();

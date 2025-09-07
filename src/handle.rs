@@ -7,7 +7,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::errors::MsgBusHandleError;
+use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::NodeMessage;
@@ -22,7 +22,7 @@ use crate::routing::{EndpointId, Packet, Payload, Route};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
-/// The handle for talking to the [MsgBus] instance that created it.  It can be cloned freely
+/// The handle for talking to the [AnyBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]
 pub struct Handle {
     pub(crate) tx: UnboundedSender<BrokerMsg>,
@@ -213,7 +213,7 @@ impl Handle {
     }
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
-    pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), MsgBusHandleError> {
+    pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), AnyBusHandleError> {
         let address = T::MSGBUS_UUID.into();
         self.send_to_uuid(address, payload)
     }
@@ -223,7 +223,7 @@ impl Handle {
         &self,
         address: Address,
         payload: T,
-    ) -> Result<(), MsgBusHandleError> {
+    ) -> Result<(), AnyBusHandleError> {
         let map = self.route_watch_rx.borrow();
         // let address = address.into();
         // let endpoint_id = match address {
@@ -236,14 +236,14 @@ impl Handle {
             from: None,
             payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
         })
-        .map_err(MsgBusHandleError::SendError)
+        .map_err(AnyBusHandleError::SendError)
     }
 
     /// Returns a helper that keeps open a response channel for multiple RPC requests
     pub async fn rpc_helper(
         &self,
         // _pd: std::marker::PhantomData<T>,
-    ) -> Result<RequestHelper, MsgBusHandleError> {
+    ) -> Result<RequestHelper, AnyBusHandleError> {
         let response_uuid = Uuid::now_v7().into();
         // let to_address = T::MSGBUS_UUID.into();
 
@@ -263,15 +263,15 @@ impl Handle {
         );
         self.tx
             .send(register_msg)
-            .map_err(|_| MsgBusHandleError::SubscriptionFailed)?;
+            .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
         let returned_uuid =
             if let Some(ClientMessage::SuccessfulRegistration(uuid)) = rx.recv().await {
                 uuid
             } else {
-                return Err(MsgBusHandleError::SubscriptionFailed);
+                return Err(AnyBusHandleError::SubscriptionFailed);
             };
         if returned_uuid != response_uuid {
-            return Err(MsgBusHandleError::SubscriptionFailed);
+            return Err(AnyBusHandleError::SubscriptionFailed);
         };
         Ok(RequestHelper::new(
             response_uuid,
@@ -285,7 +285,7 @@ impl Handle {
     pub async fn rpc_once<T: BusRiderRpc + BusRiderWithUuid>(
         &self,
         payload: T,
-    ) -> Result<T::Response, MsgBusHandleError>
+    ) -> Result<T::Response, AnyBusHandleError>
     where
         for<'de> T::Response: serde::de::Deserialize<'de>,
     {
@@ -297,7 +297,7 @@ impl Handle {
     // pub async fn rpc<T: BusRiderRpc + BusRiderWithUuid>(
     //     &self,
     //     payload: T,
-    // ) -> Result<T::Response, MsgBusHandleError>
+    // ) -> Result<T::Response, AnyBusHandleError>
     // where
     //     for<'de> T::Response: serde::de::Deserialize<'de>,
     // {
@@ -321,17 +321,17 @@ impl Handle {
     //     );
     //     self.tx
     //         .send(register_msg)
-    //         .map_err(|_| MsgBusHandleError::SubscriptionFailed)?;
+    //         .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
     //     let returned_uuid =
     //         if let Some(ClientMessage::SuccessfulRegistration(uuid)) = rx.recv().await {
     //             uuid
     //         } else {
-    //             return Err(MsgBusHandleError::SubscriptionFailed);
+    //             return Err(AnyBusHandleError::SubscriptionFailed);
     //         };
     //     if returned_uuid != response_uuid {
-    //         return Err(MsgBusHandleError::SubscriptionFailed);
+    //         return Err(AnyBusHandleError::SubscriptionFailed);
     //     }
-    //     // let endpoint = map.lookup(&endpoint_id).ok_or(MsgBusHandleError::NoRoute)?;
+    //     // let endpoint = map.lookup(&endpoint_id).ok_or(AnyBusHandleError::NoRoute)?;
     //     let map = self.route_watch_rx.borrow();
     //     let node_id = map.get_node_id();
     //     map.send(Packet {
@@ -340,13 +340,13 @@ impl Handle {
     //         from: None,
     //         payload: Payload::BusRider(payload),
     //     })
-    //     .map_err(MsgBusHandleError::SendError)?;
+    //     .map_err(AnyBusHandleError::SendError)?;
     //     drop(map);
     //     match rx.recv().await {
     //         Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
-    //             MsgBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
+    //             AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
     //         }),
-    //         None => Err(MsgBusHandleError::Shutdown),
+    //         None => Err(AnyBusHandleError::Shutdown),
     //         _ => todo!(),
     //     }
     // }
@@ -401,14 +401,14 @@ impl Handle {
 //     T: BusRiderRpc,
 // {
 //     /// A helper struct that waits for the RPC response and returns it.
-//     pub async fn recv(self) -> Result<T::Response, MsgBusHandleError> {
+//     pub async fn recv(self) -> Result<T::Response, AnyBusHandleError> {
 //         let rx = self.response;
 //         let payload = rx.await?;
 //         let payload: Box<T::Response> = (payload as Box<dyn Any>).downcast().unwrap();
 //         if TypeId::of::<T::Response>() == (*payload).type_id() {
 //             return Ok(*payload);
 //         };
-//         Err(MsgBusHandleError::ReceiveError(
+//         Err(AnyBusHandleError::ReceiveError(
 //             "TODO the correct error".into(),
 //         ))
 //         // Err("Bad payload".into())
@@ -452,7 +452,7 @@ impl RequestHelper {
     pub async fn request<T: BusRiderRpc + BusRiderWithUuid>(
         &mut self,
         payload: T,
-    ) -> Result<T::Response, MsgBusHandleError>
+    ) -> Result<T::Response, AnyBusHandleError>
     where
         for<'de> <T as BusRiderRpc>::Response: Deserialize<'de>,
     {
@@ -467,13 +467,13 @@ impl RequestHelper {
             from: None,
             payload: Payload::BusRider(payload),
         })
-        .map_err(MsgBusHandleError::SendError)?;
+        .map_err(AnyBusHandleError::SendError)?;
         drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
-                MsgBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
+                AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
             }),
-            None => Err(MsgBusHandleError::Shutdown),
+            None => Err(AnyBusHandleError::Shutdown),
             _ => todo!(),
         }
     }
@@ -485,7 +485,7 @@ impl RequestHelper {
         &mut self,
         payload: U,
         endpoint_id: Uuid,
-    ) -> Result<U::Response, MsgBusHandleError>
+    ) -> Result<U::Response, AnyBusHandleError>
     where
         for<'de> <U as BusRiderRpc>::Response: Deserialize<'de>,
     {
@@ -501,13 +501,13 @@ impl RequestHelper {
             from: None,
             payload: Payload::BusRider(payload),
         })
-        .map_err(MsgBusHandleError::SendError)?;
+        .map_err(AnyBusHandleError::SendError)?;
         drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
-                MsgBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
+                AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
             }),
-            None => Err(MsgBusHandleError::Shutdown),
+            None => Err(AnyBusHandleError::Shutdown),
             _ => todo!(),
         }
     }

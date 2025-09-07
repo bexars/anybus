@@ -1,5 +1,5 @@
-use msgbus::BusRiderRpc;
-use msgbus::bus_uuid;
+use anybus::BusRiderRpc;
+use anybus::bus_uuid;
 use serde::{Deserialize, Serialize};
 // use std::time::Duration;
 
@@ -35,7 +35,7 @@ struct RpcResponse {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_message_sending() {
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut listener = handle1.register_unicast().await.unwrap();
 
@@ -49,7 +49,7 @@ async fn test_unicast_local_message_sending() {
 #[should_panic]
 
 async fn test_unicast_local_one_registration_allowed() {
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let _listener = handle1.register_unicast::<NumberMessage>().await.unwrap();
     let mut handle2 = mb1.handle().clone();
@@ -62,7 +62,7 @@ async fn test_unicast_local_one_registration_allowed() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_two_handles() {
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let _listener = handle1.register_unicast::<NumberMessage>().await.unwrap();
     let _handle2 = mb1.handle().clone();
@@ -71,7 +71,7 @@ async fn test_unicast_local_two_handles() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_two_message_types_one_handle() {
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb1.handle().clone();
 
@@ -95,7 +95,7 @@ async fn test_unicast_local_two_message_types_one_handle() {
 async fn test_anycast_local_two_registration_allowed() {
     use tokio::select;
 
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut listener1 = handle1.register_anycast::<NumberMessage>().await.unwrap();
     let mut handle2 = mb1.handle().clone();
@@ -115,9 +115,9 @@ async fn test_anycast_local_two_registration_allowed() {
 async fn test_rpc_local() {
     // tracing_subscriber::fmt::init();
     // console_subscriber::init();
-    use msgbus::spawn;
+    use anybus::spawn;
 
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     // dbg!("Before Spawn: {:?}", &handle1);
     let mut listener1 = handle1.register_rpc().await.unwrap();
@@ -133,7 +133,7 @@ async fn test_rpc_local() {
         };
         request.reply(response).unwrap();
     });
-    // dbg!("MsgBus: {:?}", &mb1);
+    // dbg!("AnyBus: {:?}", &mb1);
 
     let handle2 = mb1.handle().clone();
     let response = handle2.rpc_once(RpcMessage { value: 5 }).await.unwrap();
@@ -146,7 +146,7 @@ async fn test_rpc_local() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_multicast_local_one_listener() {
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb1.handle().clone();
     let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
@@ -162,7 +162,7 @@ async fn test_multicast_local_two_listener() {
 
     // console_subscriber::init();
 
-    let mb1 = msgbus::MsgBus::new();
+    let mb1 = anybus::AnyBus::new();
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb1.handle().clone();
     let handle3 = mb1.handle().clone();

@@ -49,31 +49,31 @@ use uuid::Uuid;
 mod common;
 pub mod errors;
 
-pub use msgbus_macro::bus_uuid;
+pub use anybus_macro::bus_uuid;
 
 use crate::messages::BusControlMsg;
 
 use crate::routing::router::Router;
 
-impl MsgBus {}
+impl AnyBus {}
 
 // type RoutesWatchRx = watch::Receiver<Routes>;
 
-/// The main entry point into the MsgBus system.
+/// The main entry point into the AnyBus system.
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct MsgBus {
+pub struct AnyBus {
     bc_tx: Sender<BusControlMsg>,
     id: Uuid,
     handle: Handle,
 }
 
-impl MsgBus {
-    /// This starts and runs the MsgBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
+impl AnyBus {
+    /// This starts and runs the AnyBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
     /// used for normal interaction with the system
     ///
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> MsgBus {
+    pub fn new() -> AnyBus {
         let id = Uuid::now_v7();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -86,7 +86,7 @@ impl MsgBus {
 
         let _router_task = spawn(router.start());
 
-        let msg_bus = MsgBus {
+        let msg_bus = AnyBus {
             bc_tx,
             id,
             handle: handle.clone(),
@@ -101,9 +101,9 @@ impl MsgBus {
         msg_bus
     }
 
-    /// Passes the shutdown command to the MsgBus system and all local listeners.  Immediately withdraws all advertisements from the network.
+    /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
     ///
-    /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this MsgBus
+    /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this AnyBus
     ///
     pub fn shutdown(&mut self) {
         self.bc_tx
@@ -112,7 +112,7 @@ impl MsgBus {
             .ok();
     }
 
-    /// Returns a Handle for clients to interact with the MsgBus system.
+    /// Returns a Handle for clients to interact with the AnyBus system.
     /// Expected to be cloned and sent to other parts of your program
     ///
     pub fn handle(&self) -> &Handle {
@@ -120,18 +120,18 @@ impl MsgBus {
     }
 
     #[cfg(feature = "tokio")]
-    /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the MsgBus system
+    /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the AnyBus system
     pub fn shutdown_with_ctrlc(&self) {
         _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 }
 
-impl Default for MsgBus {
+impl Default for AnyBus {
     fn default() -> Self {
         Self::new()
     }
 }
 
-// pub struct ShutdownMsgBusHandle {
+// pub struct ShutdownAnyBusHandle {
 //     bc_tx: Sender<BusControlMsg>,
 // }

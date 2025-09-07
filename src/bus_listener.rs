@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     Handle, ReceiveError,
-    errors::MsgBusHandleError,
+    errors::AnyBusHandleError,
     messages::{ClientMessage, RegistrationStatus},
     routing::{EndpointId, Packet},
     traits::{BusRider, BusRiderRpc},
@@ -177,8 +177,8 @@ where
         self.payload.take()
     }
 
-    pub fn respond(self, response: T::Response) -> Result<(), MsgBusHandleError> {
+    pub fn respond(self, response: T::Response) -> Result<(), AnyBusHandleError> {
         self.handle.send_to_uuid(self.response, response)
-        // .map_err(|payload| MsgBusHandleError::SendError(payload))
+        // .map_err(|payload| AnyBusHandleError::SendError(payload))
     }
 }

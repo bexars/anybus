@@ -44,18 +44,18 @@ where
 
 // #[cfg(feature = "tokio")]
 // impl ShutdownWithCtrlC {
-//     /// Programatically trigger a shutdown of the [crate::MsgBus] system.  This passes through to [crate::BusControlHandle::shutdown()]
+//     /// Programatically trigger a shutdown of the [crate::AnyBus] system.  This passes through to [crate::BusControlHandle::shutdown()]
 //     pub fn shutdown(self) {
 //         let _ = self.tx.send(());
 //     }
 // }
 
-// impl From<MsgBus> for ShutdownWithCtrlC {
-//     fn from(msgbus: MsgBus) -> Self {
+// impl From<AnyBus> for ShutdownWithCtrlC {
+//     fn from(anybus: AnyBus) -> Self {
 //         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 //         let this = Self { tx };
 
-//         tokio::spawn(watch_ctrlc(rx, msgbus.handle().clone()));
+//         tokio::spawn(watch_ctrlc(rx, anybus.handle().clone()));
 //         this
 //     }
 // }

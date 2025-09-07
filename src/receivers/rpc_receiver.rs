@@ -3,7 +3,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     BusRiderRpc, Handle, ReceiveError,
-    errors::MsgBusHandleError,
+    errors::AnyBusHandleError,
     messages::ClientMessage,
     receivers::packet_receiver::PacketReceiver,
     routing::{Address, EndpointId},
@@ -73,9 +73,9 @@ where
         self.payload.take()
     }
 
-    pub fn reply(self, response: T::Response) -> Result<(), MsgBusHandleError> {
+    pub fn reply(self, response: T::Response) -> Result<(), AnyBusHandleError> {
         self.handle
             .send_to_uuid(self.response_endpoint_id, response)
-        // .map_err(|payload| MsgBusHandleError::SendError(payload))
+        // .map_err(|payload| AnyBusHandleError::SendError(payload))
     }
 }
