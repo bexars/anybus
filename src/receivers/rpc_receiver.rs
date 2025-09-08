@@ -9,6 +9,7 @@ use crate::{
     routing::{Address, EndpointId},
 };
 
+/// A RpcReceiver receives RPC messages sent to the registered endpoint.
 #[derive(Debug)]
 pub struct RpcReceiver<T: crate::BusRiderRpc> {
     _pd: std::marker::PhantomData<T>,
@@ -46,6 +47,8 @@ where
     }
 }
 
+/// An RpcRequest is returned by an RpcReceiver when an RPC message is received.  It contains the payload
+/// and the address to send the response to.
 #[derive(Debug)]
 pub struct RpcRequest<T>
 where
@@ -60,7 +63,7 @@ impl<T> RpcRequest<T>
 where
     T: BusRiderRpc,
 {
-    pub fn new(response: Address, payload: T, handle: Handle) -> RpcRequest<T> {
+    fn new(response: Address, payload: T, handle: Handle) -> RpcRequest<T> {
         Self {
             response_endpoint_id: response,
             payload: Some(payload),
@@ -73,6 +76,7 @@ where
         self.payload.take()
     }
 
+    /// Replies to the address in the request and ensures type correctness
     pub fn reply(self, response: T::Response) -> Result<(), AnyBusHandleError> {
         self.handle
             .send_to_uuid(self.response_endpoint_id, response)

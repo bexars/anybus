@@ -7,13 +7,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::routing::{Advertisement, NodeId, WirePacket};
 use crate::routing::{EndpointId, Packet, Route};
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
-    // RegisterAnycast(Uuid, UnboundedSender<ClientMessage>),
-    // RegisterUnicast(Uuid, UnboundedSender<ClientMessage>, UnicastType),
     RegisterRoute(EndpointId, Route),
-    Subscribe(EndpointId, UnboundedSender<ClientMessage>),
     DeadLink(EndpointId),
     #[cfg(any(feature = "net", feature = "ipc"))]
     RegisterPeer(NodeId, UnboundedSender<NodeMessage>),
@@ -25,7 +21,7 @@ pub(crate) enum BrokerMsg {
     RemovePeerEndpoints(NodeId, HashSet<Advertisement>),
     Shutdown,
 }
-#[allow(dead_code)]
+
 #[derive(Debug)]
 pub(crate) enum ClientMessage {
     // Message(Uuid, Box<dyn BusRider>),
@@ -48,18 +44,6 @@ pub(crate) enum BusControlMsg {
     Shutdown,
 }
 
-/// Shows the status of a registration attempt.
-#[derive(Debug, Default, Clone)]
-pub enum RegistrationStatus {
-    /// Initial state
-    #[default]
-    Pending,
-    /// Registration successful
-    Registered,
-    /// Registration failed
-    Failed(String),
-}
-
 #[cfg(any(feature = "net", feature = "ipc"))]
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
 #[derive(Debug)]
@@ -67,7 +51,6 @@ pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
     Close,
     Advertise(HashSet<Advertisement>),
-    #[allow(dead_code)]
     Withdraw(HashSet<Advertisement>),
     // BusRider(EndpointId, Vec<u8>),
 }

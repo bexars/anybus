@@ -15,20 +15,27 @@ pub use errors::ReceiveError;
 // pub use helper::ShutdownWithCtrlC;
 pub use helper::spawn;
 
-pub use messages::RegistrationStatus;
+// pub use messages::RegistrationStatus;
 use tokio::sync::watch::Sender;
 
 use tracing::trace;
 pub use traits::*;
 // mod bus_listener;
 mod handle;
-mod helper;
+pub use handle::Handle;
+pub use handle::RequestHelper;
+/// Helper functions for working with the AnyBus system (Currently just spawn() )
+pub mod helper;
 mod messages;
 mod receivers;
+pub use receivers::Receiver;
+pub use receivers::RpcReceiver;
+pub use receivers::RpcRequest;
+// pub use routing::Address;
+// pub use routing::EndpointId;
 // mod route_table;
 mod routing;
 mod traits;
-pub use handle::Handle;
 #[cfg(feature = "ipc")]
 use peers::IpcManager;
 

@@ -200,7 +200,6 @@ impl From<&RoutingTable> for ForwardingTable {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(any(feature = "net", feature = "ipc"))]
@@ -382,14 +381,6 @@ impl From<Box<dyn Any>> for Payload {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] //TODO
-pub(crate) enum UnicastType {
-    Datagram,
-    Rpc,
-    RpcResponse,
-}
-
 #[cfg(any(feature = "net", feature = "ipc"))]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Advertisement {
@@ -460,11 +451,6 @@ pub(crate) enum Realm {
     Global,
     // BroadcastProxy(EndpointId),
 }
-
-// struct PeerGroup {
-//     id: PeerGroupId,
-//     peers: Vec<Uuid>,
-// }
 
 #[derive(Debug, Error)]
 pub(super) enum RouteTableError {

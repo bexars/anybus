@@ -12,8 +12,9 @@ use crate::errors::ReceiveError;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage};
-use crate::receivers::{Receiver, RpcReceiver};
+use crate::receivers::Receiver;
 
+use crate::receivers::RpcReceiver;
 use crate::routing::Address;
 use crate::routing::router::RoutesWatchRx;
 #[cfg(any(feature = "net", feature = "ipc"))]
@@ -30,13 +31,21 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// Registers an anycast style of listener to the given Uuid and type T that will return a [BusListener] for receiving
+    /// Registers an anycast style of listener to the given Uuid and type T that will return a [Receiver] for receiving
     /// messages sent to the [Uuid].  Anycast allows multiple listeners to be registered and the lowest cost route will
     /// be used to deliver the message.
     pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_anycast_inner(T::ANYBUS_UUID.into()).await
+    }
+
+    /// Same as register_anycast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
+    pub async fn register_anycast_uuid<T: BusRider + DeserializeOwned>(
+        &mut self,
+        endpoint_id: Uuid,
+    ) -> Result<Receiver<T>, ReceiveError> {
+        self.register_anycast_inner(endpoint_id.into()).await
     }
 
     async fn register_anycast_inner<T: BusRider + DeserializeOwned>(
@@ -111,6 +120,22 @@ impl Handle {
         &mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = T::ANYBUS_UUID.into();
+        self.register_rpc_inner(endpoint_id).await
+    }
+
+    /// Register a RPC service with the given Uuid as the endpoint
+    pub async fn register_rpc_uuid<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+        &mut self,
+        endpoint_id: Uuid,
+    ) -> Result<RpcReceiver<T>, ReceiveError> {
+        let endpoint_id = endpoint_id.into();
+        self.register_rpc_inner(endpoint_id).await
+    }
+
+    async fn register_rpc_inner<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+        &mut self,
+        endpoint_id: EndpointId,
+    ) -> Result<RpcReceiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
@@ -134,12 +159,27 @@ impl Handle {
         Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
     }
 
-    /// Placeholder - Not Implemented
-    /// Similar to anycast but only one receiver can be registered at a time
+    /// Multicast registration, all receivers will get a copy of the message
     pub async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
+        self.register_multicast_inner(broadcast_id).await
+    }
+
+    /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
+    pub async fn register_multicast_uuid<T: BusRider + DeserializeOwned>(
+        &mut self,
+        broadcast_id: Uuid,
+    ) -> Result<Receiver<T>, ReceiveError> {
+        let broadcast_id = broadcast_id.into();
+        self.register_multicast_inner(broadcast_id).await
+    }
+    async fn register_multicast_inner<T: BusRider + DeserializeOwned>(
+        &mut self,
+        broadcast_id: EndpointId,
+    ) -> Result<Receiver<T>, ReceiveError> {
+        // let broadcast_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let local_id = Uuid::now_v7().into();
         let register_msg = BrokerMsg::RegisterRoute(
@@ -386,47 +426,8 @@ impl Handle {
     }
 }
 
-// /// Represents a response to an RPC request.
-// #[derive(Debug)]
-// pub struct RpcResponse<T>
-// where
-//     T: BusRiderRpc,
-// {
-//     response: oneshot::Receiver<Box<dyn BusRider>>,
-//     phantom: PhantomData<T>,
-// }
-
-// impl<T> RpcResponse<T>
-// where
-//     T: BusRiderRpc,
-// {
-//     /// A helper struct that waits for the RPC response and returns it.
-//     pub async fn recv(self) -> Result<T::Response, AnyBusHandleError> {
-//         let rx = self.response;
-//         let payload = rx.await?;
-//         let payload: Box<T::Response> = (payload as Box<dyn Any>).downcast().unwrap();
-//         if TypeId::of::<T::Response>() == (*payload).type_id() {
-//             return Ok(*payload);
-//         };
-//         Err(AnyBusHandleError::ReceiveError(
-//             "TODO the correct error".into(),
-//         ))
-//         // Err("Bad payload".into())
-//     }
-// }
-
-// impl<T> RpcResponse<T>
-// where
-//     T: BusRiderRpc,
-// {
-//     pub(crate) fn new(response: oneshot::Receiver<Box<dyn BusRider>>) -> RpcResponse<T> {
-//         Self {
-//             response,
-//             phantom: PhantomData::<T>,
-//         }
-//     }
-// }
-
+/// A helper struct that keeps a response channel open for multiple RPC requests
+#[derive(Debug)]
 pub struct RequestHelper {
     response_endpoint_id: EndpointId,
     // to_address: Address,
@@ -449,6 +450,7 @@ impl RequestHelper {
         }
     }
 
+    /// Request using an object with [BusRiderWithUuid] implemented
     pub async fn request<T: BusRiderRpc + BusRiderWithUuid>(
         &mut self,
         payload: T,
@@ -478,6 +480,7 @@ impl RequestHelper {
         }
     }
 
+    /// A request using user provided Uuid
     pub async fn request_to_uuid<
         // T: BusRiderRpc + BusRiderWithUuid,
         U: BusRiderRpc,

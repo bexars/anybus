@@ -6,6 +6,7 @@ use crate::{
     routing::EndpointId,
 };
 
+/// A Receiver receives messages sent to the registered endpoint.
 #[derive(Debug)]
 pub struct Receiver<T: crate::BusRider> {
     _pd: std::marker::PhantomData<T>,

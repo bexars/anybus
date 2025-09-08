@@ -20,25 +20,24 @@ impl RoutingTable {
         let kind = route.kind;
         self.table
             .entry(endpoint_id)
-            .or_insert_with(|| RouteEntry::new(endpoint_id, kind))
+            .or_insert_with(|| RouteEntry::new(kind))
             .add_route(route)?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(super) struct RouteEntry {
-    pub(crate) endpoint: EndpointId,
+    // pub(crate) endpoint_id: EndpointId,
     pub(crate) routes: SortedVec<Route>,
     pub(crate) kind: RouteKind,
 }
 
 impl RouteEntry {
-    pub(crate) fn new(endpoint_id: EndpointId, kind: RouteKind) -> Self {
+    pub(crate) fn new(kind: RouteKind) -> Self {
         let routes = SortedVec::new();
         Self {
-            endpoint: endpoint_id,
+            // endpoint_id,
             routes,
             kind,
         }

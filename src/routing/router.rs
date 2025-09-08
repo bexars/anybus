@@ -28,7 +28,6 @@ use crate::{
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
 
-// #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct Router {
     forward_table: ForwardingTable,
@@ -218,7 +217,6 @@ impl State {
                     BrokerMsg::RegisterRoute(endpoint_id, route) => {
                         return Some(RegisterRoute(endpoint_id, route));
                     }
-                    BrokerMsg::Subscribe(_uuid, _unbounded_sender) => todo!(),
                     BrokerMsg::DeadLink(endpoint_id) => {
                         router.route_table.table.retain(|_, route_entry| {
                             let before = route_entry.routes.len();
@@ -431,8 +429,8 @@ impl State {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 #[cfg(any(feature = "net", feature = "ipc"))]
+#[allow(dead_code)]
 struct PeerInfo {
     peer_id: NodeId,
     peer_tx: UnboundedSender<NodeMessage>,
