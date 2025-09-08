@@ -8,7 +8,7 @@ use crate::routing::Payload;
 #[derive(Error, Debug)]
 
 pub enum ReceiveError {
-    /// There are no senders left which means the [MsgBus](crate::MsgBus) has force closed this connection, most likely during shutdown
+    /// There are no senders left which means the [AnyBus](crate::AnyBus) has force closed this connection, most likely during shutdown
     #[error("Connection closed, possible shutdown")]
     ConnectionClosed,
     /// Error when registering a Uuid that is already exclusively registered.  i.e. register_anycast() on an existing Unicast, or Multicast Uuid
@@ -43,9 +43,9 @@ impl<E> From<tokio::sync::mpsc::error::SendError<E>> for ReceiveError {
     }
 }
 
-/// Errors from various parts of MsgBus
+/// Errors from various parts of AnyBus
 #[derive(Error, Debug)]
-pub enum MsgBusHandleError {
+pub enum AnyBusHandleError {
     /// Send failed for unknown reason.  Original message is returned in the error
     #[error("Unable to send.  The passed Message is returned within this error")]
     // SendError(Box<dyn BusRider>),
@@ -58,7 +58,7 @@ pub enum MsgBusHandleError {
     /// Not implemented yet
     #[error("Unable to subscribe, possibly already subscribed as register address")]
     SubscriptionFailed,
-    // /// There are no senders left which means the [MsgBus] has force closed this connection, most likely during shutdown
+    // /// There are no senders left which means the [AnyBus] has force closed this connection, most likely during shutdown
     // #[error("Connection closed, possible shutdown")]
     // ConnectionClosed,
     /// The system is shutting down now
@@ -70,7 +70,7 @@ pub enum MsgBusHandleError {
 }
 
 #[derive(Error, Debug)]
-/// SendError returned by [MsgBusHandle::send()]
+/// SendError returned by [AnyBusHandle::send()]
 pub enum SendError {
     /// No route found in forwarding table
     #[error("No Route to Endpoint")]

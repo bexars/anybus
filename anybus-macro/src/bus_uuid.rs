@@ -20,8 +20,8 @@ pub(crate) fn bus_uuid_impl(attr: TokenStream, item: TokenStream) -> TokenStream
 
     let addon: TokenStream = quote!(
 
-        impl msgbus::BusRiderWithUuid for #ident {
-            const MSGBUS_UUID: uuid::Uuid = uuid::Uuid::from_u128(#uuid_u128_str);
+        impl ::anybus::BusRiderWithUuid for #ident {
+            const ANYBUS_UUID: uuid::Uuid = uuid::Uuid::from_u128(#uuid_u128_str);
         }
 
     )

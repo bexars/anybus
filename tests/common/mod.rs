@@ -1,5 +1,5 @@
-use msgbus::BusRiderRpc;
-use msgbus::bus_uuid;
+use anybus::BusRiderRpc;
+use anybus::bus_uuid;
 use serde::{Deserialize, Serialize};
 // use std::time::Duration;
 
