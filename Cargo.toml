@@ -3,6 +3,12 @@ name = "msgbus"
 version = "0.1.0"
 edition = "2024"
 resolver ="3"
+repository = "https://github.com/bexars/anybus"
+license = "MIT"
+authors = ["Matt Bradbury <matt@bexars.com"]
+categories = ["networking", "asynchronous"]
+keywords    = ["messaging", "ipc", "networking", "async", "dioxus"]
+description = "A serverless message bus for communicating between Rust applications easily (only IPC currently)"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[example]]
