@@ -10,8 +10,8 @@ description = "Procedural macros for Anybus"
 
 [dependencies]
 syn = { version = "2", features = ["full"] }
-quote = "*"
-proc-macro2 = "*"
+quote = "1"
+proc-macro2 = "1"
 uuid = {workspace= true}
 darling = "0.21.0"
 
