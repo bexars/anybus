@@ -30,7 +30,7 @@ mod messages;
 mod receivers;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
-pub use receivers::RpcRequest;
+pub use receivers::rpc_receiver::RpcRequest;
 // pub use routing::Address;
 // pub use routing::EndpointId;
 // mod route_table;

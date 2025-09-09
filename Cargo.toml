@@ -9,7 +9,7 @@ authors = ["Matt Bradbury <matt@bexars.com"]
 categories = ["network-programming", "asynchronous"]
 keywords    = ["messaging", "ipc", "networking", "async", "dioxus"]
 description = "A serverless message bus for communicating between Rust applications easily (only IPC currently)"
-
+rust-version = "1.86"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[example]]
 name = "counter"
@@ -28,7 +28,7 @@ uuid = { version = "1.18.0", default-features = false, features = [
 
 [features]
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["ipc","tokio"]
+default = ["tokio","ipc"]
 dioxus = ["dep:dioxus"]
 ipc = [ "dep:interprocess", "dep:async-bincode"]
 net = ["tokio/rt", "tokio/net",  "dep:async-bincode", "dep:interprocess"]
@@ -76,6 +76,18 @@ bincode = { version = "2.0.1", no-default-features = true }
 dyn-clone = "1.0.20"
 
 [dev-dependencies]
-# tracing-subscriber = "0.3"
+color-eyre = "0.6.5"
+crossterm = { version = "0.28.0", features = ["event-stream", "serde"] }
+futures = "0.3.28"
+ratatui = "0.29.0"
+serde = "1.0"
+serde_derive = "1.0.219"
+signal-hook = "0.3.18"
+tokio = "1"
+tokio-util = "0.7.16"
+tui-scrollview = "0.5.1"
+tui-textarea = "0.7.0"
+tracing-subscriber = "0.3"
+tracing-appender = "0.2.3"
 # tokio = { version = "1.15", features = ["full", "tracing"] }
 # console-subscriber = "0.4.1"

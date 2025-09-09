@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, panic::Location, sync::Arc};
 
 use async_bincode::tokio::AsyncBincodeStream;
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ use tokio::{
         watch,
     },
 };
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::{
@@ -135,13 +135,10 @@ impl State for HandShake {
         let peer_id = match hello {
             Some(Ok(IpcMessage::Hello(uuid))) => uuid,
             _ => {
-                return b(HandleError {
-                    error: std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Did not receive Hello from peer",
-                    )
-                    .into(),
-                });
+                return b(HandleError::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Did not receive Hello from peer",
+                )));
             }
         };
         b(CreateIpcPeer {
@@ -177,7 +174,10 @@ impl State for StartRendezvous {
         };
         state.rendezvous_listener = match listener_opts.create_tokio() {
             Ok(rl) => Some(rl),
-            Err(e) => return b(HandleError::new(e)),
+            Err(e) => {
+                debug!("Failed to create rendezvous listener: {}", e);
+                return b(HandleError::new(e));
+            }
         };
         b(AnnounceMaster {})
     }
@@ -196,6 +196,7 @@ impl State for AnnounceMaster {
             .iter()
             .map(|(id, tx)| (id, tx.send(IpcControl::IAmMaster)))
             .filter_map(|(id, res)| if res.is_err() { Some(id) } else { None });
+
         b(Listen {})
     }
 }
@@ -287,12 +288,15 @@ impl State for StartListener {
 #[derive(Debug)]
 struct HandleError {
     error: IpcManagerError,
+    location: &'static Location<'static>,
 }
 
 impl HandleError {
+    #[track_caller]
     fn new(error: impl Into<IpcManagerError>) -> Self {
         Self {
             error: error.into(),
+            location: Location::caller(),
         }
     }
 }
@@ -300,7 +304,12 @@ impl HandleError {
 #[async_trait]
 impl State for HandleError {
     async fn next(self: Box<Self>, _state: &mut IpcManager) -> Option<Box<dyn State>> {
-        eprintln!("IPC Manager error: {:?}", self.error);
+        error!(
+            "IPC Manager error: {:?} {}:{}",
+            self.error,
+            self.location.file(),
+            self.location.line()
+        );
         b(Listen {})
     }
 }

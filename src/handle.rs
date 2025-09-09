@@ -205,7 +205,7 @@ impl Handle {
                 kind: crate::routing::RouteKind::Multicast,
                 #[cfg(any(feature = "net", feature = "ipc"))]
                 realm: crate::routing::Realm::Global,
-                via: crate::routing::ForwardTo::Broadcast(HashSet::from([Address::Endpoint(
+                via: crate::routing::ForwardTo::Multicast(HashSet::from([Address::Endpoint(
                     local_id,
                 )])),
                 cost: 0,

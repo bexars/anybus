@@ -224,7 +224,7 @@ impl State {
                                 ForwardTo::Local(tx) => !tx.is_closed(),
                                 #[cfg(any(feature = "net", feature = "ipc"))]
                                 ForwardTo::Remote(tx, _) => !tx.is_closed(),
-                                ForwardTo::Broadcast(_forward_tos) => true,
+                                ForwardTo::Multicast(_forward_tos) => true,
                             });
                             let after = route_entry.routes.len();
                             if before != after {
@@ -284,14 +284,17 @@ impl State {
                                     RouteKind::Multicast => {
                                         let mut hs = HashSet::new();
                                         hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
-                                        ForwardTo::Broadcast(hs)
+                                        ForwardTo::Multicast(hs)
                                     }
                                 };
-
+                                let learned_from = match ad.kind {
+                                    RK::Unicast | RK::Node | RK::Anycast => peer_id,
+                                    RK::Multicast => Uuid::nil().into(),
+                                };
                                 let route = Route {
                                     kind: ad.kind,
                                     via: forward_to,
-                                    learned_from: peer_id,
+                                    learned_from,
                                     realm: Realm::Process,
                                     cost: ad.cost + 16,
                                 };
@@ -311,7 +314,7 @@ impl State {
                         return Some(Listen);
                     }
                     #[cfg(any(feature = "net", feature = "ipc"))]
-                    BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => todo!(),
+                    BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => return Some(Listen),
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);
@@ -331,7 +334,7 @@ impl State {
                             ForwardTo::Remote(_unbounded_sender, _node_id) => {
                                 panic!("Can't create remote endpoint locally")
                             }
-                            ForwardTo::Broadcast(items) => {
+                            ForwardTo::Multicast(items) => {
                                 match items
                                     .into_iter()
                                     .next()
@@ -394,7 +397,7 @@ impl State {
                                 }
                                 #[cfg(any(feature = "net", feature = "ipc"))]
                                 ForwardTo::Remote(_tx, _node_id) => {}
-                                ForwardTo::Broadcast(_forward_tos) => {}
+                                ForwardTo::Multicast(_forward_tos) => {}
                             });
                     });
                 return None;

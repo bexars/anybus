@@ -150,10 +150,12 @@ impl ForwardingTable {
                         unreachable!("Tried to send non-message to client")
                     }
                 }),
-            ForwardTo::Broadcast(addresses) => {
+            ForwardTo::Multicast(addresses) => {
                 // let packet:Packet = packet;
                 for address in addresses {
-                    self.inner_send(*address, packet.clone())?;
+                    // TODO Currently ignoring errors when broadcasting
+                    // Should we collect and return them all?
+                    _ = self.inner_send(*address, packet.clone());
 
                     // ft.send(packet.clone())?;
                 }
@@ -204,7 +206,7 @@ pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(any(feature = "net", feature = "ipc"))]
     Remote(UnboundedSender<NodeMessage>, NodeId),
-    Broadcast(HashSet<Address>), // List of Node IDs to broadcast to including myself
+    Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
 
 impl ForwardTo {
@@ -402,8 +404,8 @@ pub(crate) struct Route {
 
 impl Route {
     pub(crate) fn add_broadcast(&mut self, other: Route) {
-        if let ForwardTo::Broadcast(ref mut list) = self.via {
-            if let ForwardTo::Broadcast(other_list) = other.via {
+        if let ForwardTo::Multicast(ref mut list) = self.via {
+            if let ForwardTo::Multicast(other_list) = other.via {
                 other_list.into_iter().for_each(|a| {
                     list.insert(a);
                 });
