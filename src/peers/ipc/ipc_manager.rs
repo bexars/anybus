@@ -22,7 +22,9 @@ use uuid::Uuid;
 use crate::{
     Handle,
     messages::BusControlMsg,
-    peers::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, Peer, ipc::IpcPeer},
+    peers::ipc::{
+        IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, Peer, ipc_peer::IpcPeer,
+    },
     spawn,
 };
 
