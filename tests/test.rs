@@ -143,39 +143,39 @@ async fn test_rpc_local() {
     drop(handle2);
 }
 
-#[cfg(feature = "tokio")]
-#[tokio::test]
-async fn test_multicast_local_one_listener() {
-    let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
-    let handle2 = mb1.handle().clone();
-    let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
-    handle2.send(NumberMessage { value: 100 }).unwrap();
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
-}
+// #[cfg(feature = "tokio")]
+// #[tokio::test]
+// async fn test_multicast_local_one_listener() {
+//     let mb1 = anybus::AnyBus::new();
+//     let mut handle1 = mb1.handle().clone();
+//     let handle2 = mb1.handle().clone();
+//     let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
+//     handle2.send(NumberMessage { value: 100 }).unwrap();
+//     let msg: NumberMessage = listener1.recv().await.unwrap();
+//     assert_eq!(msg.value, 100);
+// }
 
-#[cfg(feature = "tokio")]
-#[tokio::test]
-async fn test_multicast_local_two_listener() {
-    use tracing::debug;
+// #[cfg(feature = "tokio")]
+// #[tokio::test]
+// async fn test_multicast_local_two_listener() {
+//     use tracing::debug;
 
-    // console_subscriber::init();
+//     // console_subscriber::init();
 
-    let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
-    let mut handle2 = mb1.handle().clone();
-    let handle3 = mb1.handle().clone();
-    let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
-    let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
-    debug!("Sending message");
-    handle3.send(NumberMessage { value: 100 }).unwrap();
-    debug!("Sent message");
-    debug!("Listener1: {:#?}", listener1);
-    let msg: NumberMessage = listener2.recv().await.unwrap();
-    debug!("Received first message {:?}", msg);
+//     let mb1 = anybus::AnyBus::new();
+//     let mut handle1 = mb1.handle().clone();
+//     let mut handle2 = mb1.handle().clone();
+//     let handle3 = mb1.handle().clone();
+//     let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
+//     let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
+//     debug!("Sending message");
+//     handle3.send(NumberMessage { value: 100 }).unwrap();
+//     debug!("Sent message");
+//     debug!("Listener1: {:#?}", listener1);
+//     let msg: NumberMessage = listener2.recv().await.unwrap();
+//     debug!("Received first message {:?}", msg);
 
-    assert_eq!(msg.value, 100);
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
-}
+//     assert_eq!(msg.value, 100);
+//     let msg: NumberMessage = listener1.recv().await.unwrap();
+//     assert_eq!(msg.value, 100);
+// }

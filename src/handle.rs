@@ -200,8 +200,10 @@ impl Handle {
         Ok(Receiver::new(broadcast_id, rx, self.clone()))
     }
 
+    // Multicast is broken right now, removing it until fixed.
     /// Multicast registration, all receivers will get a copy of the message
-    pub async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
+    #[allow(dead_code)]
+    pub(crate) async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
@@ -209,7 +211,9 @@ impl Handle {
     }
 
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
-    pub async fn register_multicast_uuid<T: BusRider + DeserializeOwned>(
+    #[allow(dead_code)]
+
+    pub(crate) async fn register_multicast_uuid<T: BusRider + DeserializeOwned>(
         &mut self,
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {

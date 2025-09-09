@@ -125,80 +125,80 @@ async fn test_anycast_two_busses_local_then_remote() {
     assert_eq!(msg.value, "Hello, World!");
 }
 
-#[cfg(feature = "tokio")]
-#[tokio::test]
-async fn test_multicast_several_busses() {
-    // tracing_subscriber::fmt::init();
+// #[cfg(feature = "tokio")]
+// #[tokio::test]
+// async fn test_multicast_several_busses() {
+//     // tracing_subscriber::fmt::init();
 
-    let mb1 = anybus::AnyBus::new();
-    let mb2 = anybus::AnyBus::new();
-    let mb3 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
-    let mut handle2 = mb2.handle().clone();
-    let handle3 = mb3.handle().clone();
-    let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
-    let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    handle1.send(NumberMessage { value: 42 }).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+//     let mb1 = anybus::AnyBus::new();
+//     let mb2 = anybus::AnyBus::new();
+//     let mb3 = anybus::AnyBus::new();
+//     let mut handle1 = mb1.handle().clone();
+//     let mut handle2 = mb2.handle().clone();
+//     let handle3 = mb3.handle().clone();
+//     let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
+//     let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
+//     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+//     handle1.send(NumberMessage { value: 42 }).unwrap();
+//     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    handle2.send(NumberMessage { value: 100 }).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+//     handle2.send(NumberMessage { value: 100 }).unwrap();
+//     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    handle3.send(NumberMessage { value: 7 }).unwrap();
+//     handle3.send(NumberMessage { value: 7 }).unwrap();
 
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 42);
-    let msg: NumberMessage = listener2.recv().await.unwrap();
-    assert_eq!(msg.value, 42);
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
+//     let msg: NumberMessage = listener1.recv().await.unwrap();
+//     assert_eq!(msg.value, 42);
+//     let msg: NumberMessage = listener2.recv().await.unwrap();
+//     assert_eq!(msg.value, 42);
+//     let msg: NumberMessage = listener1.recv().await.unwrap();
+//     assert_eq!(msg.value, 100);
 
-    let msg: NumberMessage = listener2.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 7);
-    let msg: NumberMessage = listener2.recv().await.unwrap();
-    assert_eq!(msg.value, 7);
-}
+//     let msg: NumberMessage = listener2.recv().await.unwrap();
+//     assert_eq!(msg.value, 100);
+//     let msg: NumberMessage = listener1.recv().await.unwrap();
+//     assert_eq!(msg.value, 7);
+//     let msg: NumberMessage = listener2.recv().await.unwrap();
+//     assert_eq!(msg.value, 7);
+// }
 
-#[cfg(feature = "tokio")]
-#[tokio::test]
-async fn test_multicast_several_bus_drop() {
-    use tracing::info;
+// #[cfg(feature = "tokio")]
+// #[tokio::test]
+// async fn test_multicast_several_bus_drop() {
+//     use tracing::info;
 
-    // tracing_subscriber::fmt::init();
+//     // tracing_subscriber::fmt::init();
 
-    let mut mb1 = anybus::AnyBus::new();
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+//     let mut mb1 = anybus::AnyBus::new();
+//     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let mb2 = anybus::AnyBus::new();
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+//     let mb2 = anybus::AnyBus::new();
+//     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let mb3 = anybus::AnyBus::new();
+//     let mb3 = anybus::AnyBus::new();
 
-    let mut handle1 = mb1.handle().clone();
-    let mut handle2 = mb2.handle().clone();
-    let _handle3 = mb3.handle().clone();
-    let listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
-    let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
-    // let mut Listener3 = handle3.register_multicast::<NumberMessage>().await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-    handle2.send(NumberMessage { value: 42 }).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-    tokio::task::yield_now().await;
-    tokio::task::yield_now().await;
-    mb1.shutdown();
-    // drop(handle1);
-    drop(listener1);
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    handle2.send(NumberMessage { value: 100 }).unwrap();
-    let msg = listener2.recv().await.unwrap();
-    assert_eq!(msg.value, 42);
-    info!("Passed the first assert");
-    let msg = listener2.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
-    drop(mb1);
-    drop(mb2);
-    drop(mb3);
-}
+//     let mut handle1 = mb1.handle().clone();
+//     let mut handle2 = mb2.handle().clone();
+//     let _handle3 = mb3.handle().clone();
+//     let listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
+//     let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
+//     // let mut Listener3 = handle3.register_multicast::<NumberMessage>().await.unwrap();
+//     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+//     handle2.send(NumberMessage { value: 42 }).unwrap();
+//     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+//     tokio::task::yield_now().await;
+//     tokio::task::yield_now().await;
+//     mb1.shutdown();
+//     // drop(handle1);
+//     drop(listener1);
+//     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+//     handle2.send(NumberMessage { value: 100 }).unwrap();
+//     let msg = listener2.recv().await.unwrap();
+//     assert_eq!(msg.value, 42);
+//     info!("Passed the first assert");
+//     let msg = listener2.recv().await.unwrap();
+//     assert_eq!(msg.value, 100);
+//     drop(mb1);
+//     drop(mb2);
+//     drop(mb3);
+// }
