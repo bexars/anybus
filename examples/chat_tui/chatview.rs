@@ -1,5 +1,4 @@
-use ratatui::{layout::Size, prelude::*, widgets::*};
-use std::iter;
+use ratatui::{layout::Size, prelude::*};
 use tui_scrollview::{ScrollView, ScrollViewState};
 
 #[derive(Debug, Default)]
@@ -11,7 +10,7 @@ impl StatefulWidget for ChatViewWidget {
     type State = ScrollViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
+        // let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
         // let [title, body] = layout.areas(area);
 
         // self.title().render(title, buf);

@@ -1,4 +1,6 @@
 mod chatview;
+use std::collections::HashMap;
+
 use anybus::bus_uuid;
 use chatview::ChatViewWidget;
 use color_eyre::Result;
@@ -13,7 +15,7 @@ async fn main() -> color_eyre::Result<()> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::TRACE)
         .init();
     color_eyre::install()?;
     // let mut terminal = ratatui::init();
@@ -59,6 +61,7 @@ struct App {
     id: Uuid,
     nickname: String,
     bus: anybus::AnyBus,
+    chat_members: HashMap<String, User>,
 }
 
 impl Default for App {
@@ -69,8 +72,9 @@ impl Default for App {
             history: ChatViewWidget::default(),
             scroll_state: tui_scrollview::ScrollViewState::default(),
             id: Uuid::now_v7(),
-            nickname: "User".to_string(),
+            nickname: "Anonymous".to_string(),
             bus: anybus::AnyBus::new(),
+            chat_members: HashMap::new(),
         }
     }
 }
@@ -86,9 +90,18 @@ impl App {
             .bus
             .handle()
             .clone()
-            .register_multicast()
+            .register_broadcast()
             .await
             .unwrap();
+
+        let mut dm_listener = self
+            .bus
+            .handle()
+            .clone()
+            .register_anycast_uuid::<DirectMessage>(self.id)
+            .await
+            .unwrap();
+
         loop {
             tui.draw(|f| {
                 // Deref allows calling `tui.terminal.draw`
@@ -97,12 +110,18 @@ impl App {
 
             select! {
                 Ok(msg) = chat_listener.recv() => {
-                    let mut maybe_action = self.process_msg(msg);
+                    let mut maybe_action = self.process_anybusmsg(msg);
                     while let Some(action) = maybe_action {
                         maybe_action = self.update(action);
                     }
+                }
 
-
+                Ok(msg) = dm_listener.recv() => {
+                    let dm = format!("(DM) {}: {}", msg.from.nickname, msg.message);
+                    let mut maybe_action = Some(Action::AddMessage(dm));
+                    while let Some(action) = maybe_action {
+                        maybe_action = self.update(action);
+                    }
                 }
                 Some(evt) = tui.next() => {
                     // `tui.next().await` blocks till next event
@@ -135,20 +154,76 @@ impl App {
             Action::ProcessInput => {
                 let lines = self.input.lines();
                 let message = lines.join("\n");
-                // self.history
-                //     .content
-                //     .extend(lines.iter().map(|s| s.to_string()));
-                // // self.history.content.push('\n');
-                // self.scroll_state.scroll_to_bottom();
+                let message = message.trim();
+                if message.is_empty() {
+                    return None;
+                }
+
+                if message.starts_with('/') {
+                    let mut parts = message.splitn(2, ' ');
+                    let command = parts.next().unwrap_or("");
+                    let argument = parts.next().unwrap_or("");
+                    match command {
+                        "/nick" => {
+                            if !argument.is_empty() {
+                                self.nickname = argument.to_string();
+                                self.history
+                                    .content
+                                    .push(format!("* You are now known as {}", self.nickname));
+                            } else {
+                                self.history
+                                    .content
+                                    .push("* Usage: /nick <new_nickname>".to_string());
+                            }
+                        }
+                        "/dm" => {
+                            let mut arg_parts = argument.splitn(2, ' ');
+                            let target_nick = arg_parts.next().unwrap_or("");
+                            let dm_message = arg_parts.next().unwrap_or("");
+                            if target_nick.is_empty() || dm_message.is_empty() {
+                                self.history
+                                    .content
+                                    .push("* Usage: /dm <nickname> <message>".to_string());
+                            } else if let Some(target_user) = self.chat_members.get(target_nick) {
+                                let dm = DirectMessage {
+                                    from: User {
+                                        nickname: self.nickname.clone(),
+                                        id: self.id,
+                                    },
+                                    message: dm_message.to_string(),
+                                };
+                                if self.bus.handle().send_to_uuid(target_user.id, dm).is_err() {
+                                    return Action::Quit.into();
+                                };
+                                self.history.content.push(format!(
+                                    "* (DM to {}): {}",
+                                    target_user.nickname, dm_message
+                                ));
+                            } else {
+                                self.history
+                                    .content
+                                    .push(format!("* No such user: {}", target_nick));
+                            }
+                        }
+                        _ => {
+                            self.history
+                                .content
+                                .push(format!("* Unknown command: {}", command));
+                        }
+                    }
+                    self.input = TextArea::default();
+                    return None;
+                }
+
                 if self
                     .bus
                     .handle()
                     .send(ChatMessage::Chat(
                         User {
-                            nickname: "Anonymous".into(),
+                            nickname: self.nickname.clone(),
                             id: self.id,
                         },
-                        message,
+                        message.into(),
                     ))
                     .is_err()
                 {
@@ -173,9 +248,11 @@ impl App {
         }
     }
 
-    fn process_msg(&mut self, msg: ChatMessage) -> Option<Action> {
+    fn process_anybusmsg(&mut self, msg: ChatMessage) -> Option<Action> {
         match msg {
             ChatMessage::Chat(user, message) => {
+                self.chat_members
+                    .insert(user.nickname.clone(), user.clone());
                 let chat_msg = format!("{}: {}", user.nickname, message);
                 Some(Action::AddMessage(chat_msg))
             }

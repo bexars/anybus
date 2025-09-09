@@ -79,7 +79,7 @@ where
     /// Replies to the address in the request and ensures type correctness
     pub fn reply(self, response: T::Response) -> Result<(), AnyBusHandleError> {
         self.handle
-            .send_to_uuid(self.response_endpoint_id, response)
+            .send_to_address(self.response_endpoint_id, response)
         // .map_err(|payload| AnyBusHandleError::SendError(payload))
     }
 }

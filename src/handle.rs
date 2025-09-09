@@ -184,10 +184,10 @@ impl Handle {
         let broadcast_msg = BrokerMsg::RegisterRoute(
             broadcast_id,
             Route {
-                kind: crate::routing::RouteKind::Multicast,
+                kind: crate::routing::RouteKind::Broadcast,
                 #[cfg(any(feature = "net", feature = "ipc"))]
                 realm: crate::routing::Realm::Global,
-                via: crate::routing::ForwardTo::Local(tx),
+                via: crate::routing::ForwardTo::Broadcast(vec![tx]),
 
                 cost: 0,
                 #[cfg(any(feature = "net", feature = "ipc"))]
@@ -296,11 +296,22 @@ impl Handle {
     /// Sends a single [BusRider] message to the associated UUID in the trait.
     pub fn send<T: BusRiderWithUuid>(&self, payload: T) -> Result<(), AnyBusHandleError> {
         let address = T::ANYBUS_UUID.into();
-        self.send_to_uuid(address, payload)
+        self.send_to_address(address, payload)
+    }
+
+    /// Sends a single [BusRider] message to the given [Uuid]
+
+    pub fn send_to_uuid<T: BusRider>(
+        &self,
+        address: Uuid,
+        payload: T,
+    ) -> Result<(), AnyBusHandleError> {
+        let address = address.into();
+        self.send_to_address(address, payload)
     }
 
     /// Sends a single [BusRider] message to the given [Address]
-    pub fn send_to_uuid<T: BusRider>(
+    pub(crate) fn send_to_address<T: BusRider>(
         &self,
         address: Address,
         payload: T,

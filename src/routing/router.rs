@@ -85,7 +85,7 @@ impl Router {
         for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
             use std::collections::HashSet;
 
-            trace!("routing table:{:?}", self.route_table.table);
+            trace!("routing table:{:#?}", self.route_table.table);
             let mut advertisements = HashSet::new();
             for (uuid, route_entry) in self.route_table.table.iter() {
                 use crate::routing::Advertisement;
@@ -96,7 +96,7 @@ impl Router {
                     cost: 0,
                 };
                 if let Some(best_route) = route_entry.best_route() {
-                    advertisement.cost = best_route.cost;
+                    advertisement.cost = best_route.cost + 5;
                     // Don't send routes back to the peer we learned them from
                     if best_route.learned_from == *peer_id {
                         continue;
@@ -122,8 +122,14 @@ impl Router {
                 .difference(&peer_info.advertised_routes)
                 .cloned()
                 .collect();
-            peer_info.advertised_routes = advertisements.clone();
-
+            // peer_info.advertised_routes = advertisements.clone();
+            let ads: Vec<_> = advertisements
+                .difference(&peer_info.advertised_routes)
+                .cloned()
+                .collect();
+            for ad in ads {
+                peer_info.advertised_routes.insert(ad);
+            }
             if !withdrawn.is_empty() {
                 let length = withdrawn.len();
                 let msg = NodeMessage::Withdraw(withdrawn);

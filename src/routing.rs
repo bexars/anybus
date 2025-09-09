@@ -168,10 +168,16 @@ impl ForwardingTable {
                 Ok(())
             }
             ForwardTo::Broadcast(senders) => {
+                trace!(
+                    "Broadcasting packet to {} clients and {} peers",
+                    senders.len(),
+                    self.peers.len()
+                );
                 for tx in senders {
                     _ = tx.send(ClientMessage::Message(packet.clone()));
                 }
-                for (_nid, tx) in self.peers.iter() {
+                for (nid, tx) in self.peers.iter() {
+                    trace!("Broadcasting to peer {}", nid);
                     _ = tx.send(NodeMessage::WirePacket(packet.clone().into()));
                 }
 
