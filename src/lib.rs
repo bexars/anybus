@@ -79,8 +79,13 @@ impl AnyBus {
     /// This starts and runs the AnyBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
     /// used for normal interaction with the system
     ///
-    #[allow(clippy::new_ret_no_self)]
+    // #[allow(clippy::new_ret_no_self)]
+    //
     pub fn new() -> AnyBus {
+        Self::build(&AnyBusBuilder::default())
+    }
+
+    fn build(options: &AnyBusBuilder) -> AnyBus {
         let id = Uuid::now_v7();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -99,8 +104,20 @@ impl AnyBus {
             handle: handle.clone(),
         };
 
+        #[cfg(feature = "ws")]
+        if let Some(ws_options) = &options.ws_listener_options {
+            let ws_listener = crate::peers::WebsocketManager::new(
+                id,
+                handle.clone(),
+                bc_rx.clone(),
+                (*ws_options).clone(),
+            );
+
+            spawn(ws_listener.start());
+        }
+
         #[cfg(feature = "ipc")]
-        {
+        if options.enable_ipc {
             let manager = IpcManager::new("anybus.ipc".into(), handle, bc_rx, id);
             spawn(manager.start());
         };
@@ -142,3 +159,64 @@ impl Default for AnyBus {
 // pub struct ShutdownAnyBusHandle {
 //     bc_tx: Sender<BusControlMsg>,
 // }
+
+/// AnyBusBuilder is a builder pattern for constructing an AnyBus instance with options
+#[derive(Debug, Default)]
+pub struct AnyBusBuilder {
+    enable_ctrlc_shutdown: bool,
+    #[cfg(feature = "ipc")]
+    enable_ipc: bool,
+    #[cfg(feature = "ws")]
+    ws_listener_options: Option<crate::peers::WsListenerOptions>,
+}
+impl AnyBusBuilder {
+    /// Creates a new AnyBusBuilder with default options
+    pub fn new() -> Self {
+        Self {
+            enable_ctrlc_shutdown: false,
+            #[cfg(feature = "ipc")]
+            enable_ipc: true,
+            #[cfg(feature = "ws")]
+            ws_listener_options: None,
+        }
+    }
+
+    /// Enables or disables the Ctrl-C shutdown feature.  Default is disabled.
+    ///
+    /// If enabled, when the user presses Ctrl-C in the terminal, the AnyBus system will be shutdown cleanly
+    ///
+    pub fn enable_ctrlc_shutdown(mut self, enable: bool) -> Self {
+        self.enable_ctrlc_shutdown = enable;
+        self
+    }
+
+    /// Enables or disables the IPC peer discovery and messaging feature.  Default is enabled.
+    ///
+    /// If disabled, this AnyBus instance will not be able to discover or communicate with other local AnyBus instances using IPC
+    ///
+    #[cfg(feature = "ipc")]
+    pub fn enable_ipc(mut self, enable: bool) -> Self {
+        self.enable_ipc = enable;
+        self
+    }
+
+    /// Sets the WebSocket listener options.  If set, a WebSocket listener will be started with these options.
+    ///
+    /// If not set, no WebSocket listener will be started.
+    ///
+    #[cfg(feature = "ws")]
+    pub fn ws_listener_options(mut self, options: crate::peers::WsListenerOptions) -> Self {
+        self.ws_listener_options = Some(options);
+        self
+    }
+
+    /// Builds and starts the AnyBus instance with the specified options.  Returns the AnyBus instance.
+    ///
+    pub fn run(self) -> AnyBus {
+        let anybus = AnyBus::build(&self);
+        if self.enable_ctrlc_shutdown {
+            anybus.shutdown_with_ctrlc();
+        }
+        anybus
+    }
+}
