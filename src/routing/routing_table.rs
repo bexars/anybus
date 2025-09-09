@@ -1,14 +1,19 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use sorted_vec::SortedVec;
-use tracing::debug;
+use tracing::{debug, trace};
+use uuid::Uuid;
 
-use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
+use crate::routing::{
+    Address, Advertisement, EndpointId, ForwardTo, NodeId, Realm, Route, RouteKind,
+    RouteTableError, router::PeerInfo,
+};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
+    #[cfg(any(feature = "net", feature = "ipc"))]
+    pub(crate) peers: HashMap<Uuid, PeerInfo>,
 }
 
 impl RoutingTable {
@@ -24,18 +29,74 @@ impl RoutingTable {
             .add_route(route)?;
         Ok(())
     }
+
+    pub(crate) fn add_peer_endpoints(
+        &mut self,
+        peer_id: Uuid,
+        advertisements: HashSet<Advertisement>,
+    ) -> Option<usize> {
+        let mut routes_to_add = Vec::new();
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // let peer_tx = peer.peer_tx.clone();
+            for ad in advertisements {
+                use RouteKind as RK;
+                let forward_to = match ad.kind {
+                    RK::Unicast | RK::Anycast | RK::Node => {
+                        ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
+                    }
+                    RK::Broadcast => ForwardTo::Broadcast(vec![]),
+
+                    RK::Multicast => {
+                        let mut hs = HashSet::new();
+                        hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
+                        ForwardTo::Multicast(hs)
+                    }
+                };
+                let learned_from = match ad.kind {
+                    RK::Unicast | RK::Node | RK::Anycast => peer_id,
+                    RK::Multicast | RK::Broadcast => Uuid::nil().into(),
+                };
+                let route = Route {
+                    kind: ad.kind,
+                    via: forward_to,
+                    learned_from,
+                    realm: Realm::Process,
+                    cost: ad.cost + 16,
+                };
+
+                trace!(
+                    "Added route for endpoint {} via peer {}",
+                    &ad.endpoint_id, &peer_id
+                );
+                routes_to_add.push((ad.endpoint_id.clone(), route));
+                // _ = self.add_route(ad.endpoint_id.clone(), route);
+
+                peer.received_routes.insert(ad);
+            }
+        } else {
+            trace!("Peer {} not found for AddPeerEndpoints", peer_id);
+        }
+        let num_routes = routes_to_add.len();
+        if num_routes == 0 {
+            return None;
+        }
+        for (endpoint_id, route) in routes_to_add {
+            _ = self.add_route(endpoint_id, route);
+        }
+        Some(num_routes)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct RouteEntry {
     // pub(crate) endpoint_id: EndpointId,
-    pub(crate) routes: SortedVec<Route>,
+    pub(crate) routes: Vec<Route>,
     pub(crate) kind: RouteKind,
 }
 
 impl RouteEntry {
     pub(crate) fn new(kind: RouteKind) -> Self {
-        let routes = SortedVec::new();
+        let routes = Vec::new();
         Self {
             // endpoint_id,
             routes,
@@ -51,7 +112,7 @@ impl RouteEntry {
             return Err((route, RouteTableError::UnicastRouteExists));
         }
         if self.routes.is_empty() {
-            self.routes.insert(route);
+            self.routes.push(route);
             return Ok(());
         } else {
             if self.kind == RouteKind::Multicast {
@@ -61,7 +122,8 @@ impl RouteEntry {
                 debug!("Broadcast list update: {:?}", self.routes);
                 return Ok(());
             } else {
-                self.routes.insert(route);
+                let pos = self.routes.binary_search(&route).unwrap_or_else(|e| e);
+                self.routes.insert(pos, route);
                 return Ok(());
             }
         }

@@ -2,6 +2,11 @@
 use std::collections::{HashMap, HashSet};
 
 #[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Advertisement, NodeMessage};
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::{Realm, RouteKind};
+#[cfg(any(feature = "net", feature = "ipc"))]
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     select,
@@ -11,13 +16,6 @@ use tokio::{
     },
 };
 use tracing::{info, trace};
-#[cfg(any(feature = "net", feature = "ipc"))]
-use uuid::Uuid;
-
-#[cfg(any(feature = "net", feature = "ipc"))]
-use crate::routing::{Advertisement, NodeMessage};
-#[cfg(any(feature = "net", feature = "ipc"))]
-use crate::routing::{Realm, RouteKind};
 
 use crate::{
     messages::{BrokerMsg, BusControlMsg, ClientMessage},
@@ -40,8 +38,6 @@ pub(crate) struct Router {
     // sent_routes: HashMap<Uuid, usize>,
     bus_control_rx: Receiver<BusControlMsg>,
     broker_rx: UnboundedReceiver<BrokerMsg>,
-    #[cfg(any(feature = "net", feature = "ipc"))]
-    peers: HashMap<Uuid, PeerInfo>,
 }
 
 impl Router {
@@ -64,9 +60,9 @@ impl Router {
             route_table: RoutingTable {
                 table: HashMap::new(),
                 node_id: uuid,
+                #[cfg(any(feature = "net", feature = "ipc"))]
+                peers: HashMap::new(),
             },
-            #[cfg(any(feature = "net", feature = "ipc"))]
-            peers: HashMap::new(),
         }
     }
 
@@ -85,8 +81,8 @@ impl Router {
     #[cfg(any(feature = "net", feature = "ipc"))]
 
     fn send_route_updates(&mut self) {
-        trace!("Peers: {:?}", self.peers);
-        for (peer_id, peer_info) in self.peers.iter_mut() {
+        trace!("Peers: {:?}", self.route_table.peers);
+        for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
             use std::collections::HashSet;
 
             trace!("routing table:{:?}", self.route_table.table);
@@ -218,14 +214,21 @@ impl State {
                         return Some(RegisterRoute(endpoint_id, route));
                     }
                     BrokerMsg::DeadLink(endpoint_id) => {
-                        router.route_table.table.retain(|_, route_entry| {
+                        let route_entry = router.route_table.table.get_mut(&endpoint_id);
+                        if let Some(route_entry) = route_entry {
                             let before = route_entry.routes.len();
-                            route_entry.routes.retain(|route| match &route.via {
-                                ForwardTo::Local(tx) => !tx.is_closed(),
+                            route_entry.routes.retain_mut(|route| match route.via {
+                                ForwardTo::Local(ref tx) => !tx.is_closed(),
                                 #[cfg(any(feature = "net", feature = "ipc"))]
-                                ForwardTo::Remote(tx, _) => !tx.is_closed(),
-                                ForwardTo::Multicast(_forward_tos) => true,
+                                ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
+                                ForwardTo::Multicast(ref _forward_tos) => true,
+                                ForwardTo::Broadcast(ref mut senders) => {
+                                    senders.retain(|sender| !sender.is_closed());
+                                    // once a broadcast endpoint, always a broadcast endpoint
+                                    true
+                                }
                             });
+
                             let after = route_entry.routes.len();
                             if before != after {
                                 trace!(
@@ -233,14 +236,14 @@ impl State {
                                     before - after,
                                     endpoint_id
                                 );
+                                return Some(RouteChange);
                             }
-                            !route_entry.routes.is_empty()
-                        });
-                        return Some(RouteChange);
+                        }
+                        return Some(Listen);
                     }
                     #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::RegisterPeer(uuid, unbounded_sender) => {
-                        if router.peers.contains_key(&uuid) {
+                        if router.route_table.peers.contains_key(&uuid) {
                             // Peer already registered, ignore
                             trace!("Peer {} already registered", uuid);
                             return Some(Listen);
@@ -254,7 +257,7 @@ impl State {
                         };
                         router.route_table.add_route(uuid.into(), route).unwrap();
                         let peer_info = PeerInfo::new(uuid, unbounded_sender);
-                        router.peers.insert(uuid, peer_info);
+                        router.route_table.peers.insert(uuid, peer_info);
                         trace!("Registered new peer {}", uuid);
 
                         // router.send_route_updates();
@@ -268,51 +271,64 @@ impl State {
                                 .retain(|route| route.learned_from != uuid);
                             !route_entry.routes.is_empty()
                         });
-                        router.peers.remove(&uuid);
+                        router.route_table.peers.remove(&uuid);
                         return Some(RouteChange);
                     }
                     #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::AddPeerEndpoints(peer_id, hash_set) => {
-                        if let Some(peer) = router.peers.get_mut(&peer_id) {
-                            for ad in hash_set {
-                                use RouteKind as RK;
-
-                                let forward_to = match ad.kind {
-                                    RK::Unicast | RK::Anycast | RK::Node => {
-                                        ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
-                                    }
-                                    RouteKind::Multicast => {
-                                        let mut hs = HashSet::new();
-                                        hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
-                                        ForwardTo::Multicast(hs)
-                                    }
-                                };
-                                let learned_from = match ad.kind {
-                                    RK::Unicast | RK::Node | RK::Anycast => peer_id,
-                                    RK::Multicast => Uuid::nil().into(),
-                                };
-                                let route = Route {
-                                    kind: ad.kind,
-                                    via: forward_to,
-                                    learned_from,
-                                    realm: Realm::Process,
-                                    cost: ad.cost + 16,
-                                };
-
-                                _ = router.route_table.add_route(ad.endpoint_id.clone(), route);
-
-                                trace!(
-                                    "Added route for endpoint {} via peer {}",
-                                    ad.endpoint_id, peer_id
-                                );
-                                peer.received_routes.insert(ad);
+                        match router.route_table.add_peer_endpoints(peer_id, hash_set) {
+                            Some(count) => {
+                                trace!("Added {} routes from peer {}", count, peer_id);
+                                return Some(RouteChange);
                             }
-                            return Some(RouteChange);
-                        } else {
-                            trace!("Peer {} not found for AddPeerEndpoints", peer_id);
+                            None => {
+                                trace!("Peer {} not found for AddPeerEndpoints", peer_id);
+                                return Some(Listen);
+                            }
                         }
-                        return Some(Listen);
                     }
+                    //     if let Some(peer) = router.route_table.peers.get_mut(&peer_id) {
+                    //         for ad in hash_set {
+                    //             use RouteKind as RK;
+
+                    //             let forward_to = match ad.kind {
+                    //                 RK::Unicast | RK::Anycast | RK::Node => {
+                    //                     ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
+                    //                 }
+                    //                 RK::Broadcast => ForwardTo::Broadcast(vec![]),
+
+                    //                 RK::Multicast => {
+                    //                     let mut hs = HashSet::new();
+                    //                     hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
+                    //                     ForwardTo::Multicast(hs)
+                    //                 }
+                    //             };
+                    //             let learned_from = match ad.kind {
+                    //                 RK::Unicast | RK::Node | RK::Anycast => peer_id,
+                    //                 RK::Multicast | RK::Broadcast => Uuid::nil().into(),
+                    //             };
+                    //             let route = Route {
+                    //                 kind: ad.kind,
+                    //                 via: forward_to,
+                    //                 learned_from,
+                    //                 realm: Realm::Process,
+                    //                 cost: ad.cost + 16,
+                    //             };
+
+                    //             _ = router.route_table.add_route(ad.endpoint_id.clone(), route);
+
+                    //             trace!(
+                    //                 "Added route for endpoint {} via peer {}",
+                    //                 ad.endpoint_id, peer_id
+                    //             );
+                    //             peer.received_routes.insert(ad);
+                    //         }
+                    //         return Some(RouteChange);
+                    //     } else {
+                    //         trace!("Peer {} not found for AddPeerEndpoints", peer_id);
+                    //     }
+                    //     return Some(Listen);
+                    // }
                     #[cfg(any(feature = "net", feature = "ipc"))]
                     BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => return Some(Listen),
                     BrokerMsg::Shutdown => {
@@ -333,6 +349,12 @@ impl State {
                             }
                             ForwardTo::Remote(_unbounded_sender, _node_id) => {
                                 panic!("Can't create remote endpoint locally")
+                            }
+                            ForwardTo::Broadcast(listener) => {
+                                for tx in listener {
+                                    // There should only be one in here on creation
+                                    _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id));
+                                }
                             }
                             ForwardTo::Multicast(items) => {
                                 match items
@@ -380,7 +402,7 @@ impl State {
             Shutdown => {
                 info!("Shutting down");
                 #[cfg(any(feature = "net", feature = "ipc"))]
-                for peer in router.peers.values() {
+                for peer in router.route_table.peers.values() {
                     _ = peer.peer_tx.send(NodeMessage::Close);
                 }
                 router
@@ -398,6 +420,11 @@ impl State {
                                 #[cfg(any(feature = "net", feature = "ipc"))]
                                 ForwardTo::Remote(_tx, _node_id) => {}
                                 ForwardTo::Multicast(_forward_tos) => {}
+                                ForwardTo::Broadcast(listeners) => {
+                                    for listener in listeners {
+                                        let _ = listener.send(ClientMessage::Shutdown);
+                                    }
+                                }
                             });
                     });
                 return None;
@@ -431,14 +458,14 @@ impl State {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg(any(feature = "net", feature = "ipc"))]
 #[allow(dead_code)]
-struct PeerInfo {
-    peer_id: NodeId,
-    peer_tx: UnboundedSender<NodeMessage>,
-    received_routes: HashSet<Advertisement>,
-    advertised_routes: HashSet<Advertisement>,
+pub(crate) struct PeerInfo {
+    pub(crate) peer_id: NodeId,
+    pub(crate) peer_tx: UnboundedSender<NodeMessage>,
+    pub(crate) received_routes: HashSet<Advertisement>,
+    pub(crate) advertised_routes: HashSet<Advertisement>,
 }
 #[cfg(any(feature = "net", feature = "ipc"))]
 

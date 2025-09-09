@@ -1,7 +1,12 @@
 pub(crate) mod router;
 pub(crate) mod routing_table;
 
-use std::{any::Any, collections::HashSet, fmt::Display, ops::Deref};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    ops::Deref,
+};
 
 use erased_serde::Serializer;
 use serde::{Deserialize, Serialize};
@@ -64,6 +69,7 @@ impl From<&Uuid> for EndpointId {
 pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
+    peers: HashMap<NodeId, UnboundedSender<NodeMessage>>,
 }
 
 impl ForwardingTable {
@@ -161,6 +167,16 @@ impl ForwardingTable {
                 }
                 Ok(())
             }
+            ForwardTo::Broadcast(senders) => {
+                for tx in senders {
+                    _ = tx.send(ClientMessage::Message(packet.clone()));
+                }
+                for (_nid, tx) in self.peers.iter() {
+                    _ = tx.send(NodeMessage::WirePacket(packet.clone().into()));
+                }
+
+                Ok(())
+            }
         }
     }
     // fn broadcast(
@@ -194,7 +210,13 @@ impl From<&RoutingTable> for ForwardingTable {
                 table.insert(*endpoint_id, best_route.via.clone());
             }
         }
+        let peer_senders = value
+            .peers
+            .iter()
+            .map(|(k, v)| (*k, v.peer_tx.clone()))
+            .collect();
         Self {
+            peers: peer_senders,
             table,
             node_id: value.node_id,
         }
@@ -206,59 +228,8 @@ pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(any(feature = "net", feature = "ipc"))]
     Remote(UnboundedSender<NodeMessage>, NodeId),
+    Broadcast(Vec<UnboundedSender<ClientMessage>>),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
-}
-
-impl ForwardTo {
-    // pub(crate) fn _send(&self, packet: impl Into<Packet>) -> Result<(), Payload> {
-    //     let packet: Packet = packet.into();
-    //     match self {
-    //         ForwardTo::Local(tx) => tx.send(ClientMessage::Message(packet)).map_err(|e| {
-    //             if let ClientMessage::Message(packet) = e.0 {
-    //                 packet.payload
-    //             } else {
-    //                 unreachable!("Tried to send non-message to client")
-    //             }
-    //         }),
-    //         ForwardTo::Remote(tx) => tx
-    //             .send(NodeMessage::WirePacket(packet.into()))
-    //             .map_err(|e| {
-    //                 if let NodeMessage::WirePacket(packet) = e.0 {
-    //                     packet.payload.into()
-    //                 } else {
-    //                     unreachable!("Tried to send non-message to client")
-    //                 }
-    //             }),
-    //         ForwardTo::Broadcast(forward_tos) => {
-    //             // let packet:Packet = packet;
-    //             for ft in forward_tos {
-    //                 ft.send(packet.clone())?;
-    //             }
-    //             Ok(())
-    //         }
-    //     }
-    // }
-    // fn broadcast(
-    //     &self,
-    //     packet: impl Into<WirePacket>,
-    //     destination_id: Uuid,
-    // ) -> Result<(), Box<dyn std::error::Error>> {
-    //     match self {
-    //         ForwardTo::Local(tx) => tx
-    //             .send(ClientMessage::Message(packet.into()))
-    //             .map_err(|e| e.into()),
-    //         ForwardTo::Remote(tx) => tx
-    //             .send(NodeMessage::WirePacket(packet.into()))
-    //             .map_err(|e| e.into()),
-    //         ForwardTo::Broadcast(forward_tos) => {
-    //             let packet = packet.into();
-    //             for ft in forward_tos {
-    //                 ft.broadcast(packet.clone(), destination_id)?;
-    //             }
-    //             Ok(())
-    //         }
-    //     }
-    // }
 }
 
 #[derive(Debug, Clone)]
@@ -439,6 +410,7 @@ impl Ord for Route {
 pub(crate) enum RouteKind {
     Unicast,
     Anycast,
+    Broadcast,
     Multicast,
     Node,
 }

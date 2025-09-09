@@ -179,8 +179,8 @@ async fn test_multicast_several_bus_drop() {
 
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb2.handle().clone();
-    let mut handle3 = mb3.handle().clone();
-    let mut listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
+    let _handle3 = mb3.handle().clone();
+    let listener1 = handle1.register_multicast::<NumberMessage>().await.unwrap();
     let mut listener2 = handle2.register_multicast::<NumberMessage>().await.unwrap();
     // let mut Listener3 = handle3.register_multicast::<NumberMessage>().await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
