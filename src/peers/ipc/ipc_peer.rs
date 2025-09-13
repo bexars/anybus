@@ -16,7 +16,10 @@ use uuid::Uuid;
 
 use crate::{
     messages::NodeMessage,
-    peers::ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, Peer},
+    peers::{
+        Peer,
+        ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
+    },
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -244,12 +247,12 @@ impl State for IpcMessageReceived {
                     .handle
                     .send_packet(wire_packet, state_machine.peer.peer_id);
             }
-            IpcMessage::BusRider(endpoint_id, items) => {
-                _ = state_machine
-                    .peer
-                    .handle
-                    .send_to_address(endpoint_id, items);
-            }
+            // IpcMessage::BusRider(endpoint_id, items) => {
+            //     _ = state_machine
+            //         .peer
+            //         .handle
+            //         .send_to_address(endpoint_id, items);
+            // }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
             IpcMessage::Advertise(ads) => {
                 state_machine

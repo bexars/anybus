@@ -60,7 +60,7 @@ impl RoutingTable {
                     kind: ad.kind,
                     via: forward_to,
                     learned_from,
-                    realm: Realm::Process,
+                    realm: Realm::Global,
                     cost: ad.cost + 16,
                 };
 

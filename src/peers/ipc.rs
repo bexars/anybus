@@ -6,14 +6,9 @@ use std::collections::HashSet;
 use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
 use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
-use crate::{
-    Handle,
-    messages::NodeMessage,
-    routing::{Address, Advertisement, NodeId, WirePacket},
-};
+use crate::routing::{Address, Advertisement, NodeId, WirePacket};
 
 pub(super) type IpcPeerStream = AsyncBincodeStream<
     interprocess::local_socket::tokio::Stream,
@@ -35,30 +30,6 @@ impl NameHelper for Uuid {
 }
 
 #[derive(Debug)]
-pub(crate) struct Peer {
-    pub(crate) peer_id: Uuid,
-    pub(crate) our_id: Uuid,
-    pub(crate) rx: UnboundedReceiver<NodeMessage>,
-    pub(crate) handle: Handle,
-}
-
-impl Peer {
-    pub(crate) fn new(
-        peer_id: Uuid,
-        our_id: Uuid,
-        handle: Handle,
-        rx: UnboundedReceiver<NodeMessage>,
-    ) -> Self {
-        Self {
-            peer_id,
-            our_id,
-            rx,
-            handle,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(super) enum IpcCommand {
     // AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
     PeerClosed(Uuid, bool),
@@ -76,8 +47,8 @@ pub(super) enum IpcControl {
 pub(super) enum IpcMessage {
     Hello(NodeId), //Our AnyBus ID
     KnownPeers(Vec<NodeId>),
-    NeighborRemoved(NodeId),    //Node/Peer ID
-    BusRider(Address, Vec<u8>), // Destination ID
+    NeighborRemoved(NodeId), //Node/Peer ID
+    // BusRider(Address, Vec<u8>), // Destination ID
     CloseConnection,
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
@@ -96,9 +67,9 @@ impl std::fmt::Debug for IpcMessage {
             IpcMessage::NeighborRemoved(uuid) => {
                 write!(f, "NeighborRemoved({})", uuid)
             }
-            IpcMessage::BusRider(uuid, bytes) => {
-                write!(f, "BusRider({}, {} bytes)", uuid, bytes.len())
-            }
+            // IpcMessage::BusRider(uuid, bytes) => {
+            //     write!(f, "BusRider({}, {} bytes)", uuid, bytes.len())
+            // }
             IpcMessage::CloseConnection => write!(f, "CloseConnection"),
             IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
             IpcMessage::IAmMaster => write!(f, "IAmMaster"),

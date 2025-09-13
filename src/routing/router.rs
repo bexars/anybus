@@ -258,7 +258,7 @@ impl State {
                             kind: RouteKind::Node,
                             via: ForwardTo::Remote(unbounded_sender.clone(), uuid),
                             learned_from: uuid,
-                            realm: Realm::Process,
+                            realm: Realm::Global,
                             cost: 0,
                         };
                         router.route_table.add_route(uuid.into(), route).unwrap();

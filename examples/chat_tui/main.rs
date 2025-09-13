@@ -1,12 +1,20 @@
 mod chatview;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    env,
+    net::{IpAddr, Ipv4Addr},
+};
 
-use anybus::bus_uuid;
+use anybus::{
+    AnyBus, AnyBusBuilder, bus_uuid,
+    peers::{WsListenerOptions, WsRemoteOptions},
+};
 use chatview::ChatViewWidget;
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tui_textarea::TextArea;
+use url::Url;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -19,7 +27,34 @@ async fn main() -> color_eyre::Result<()> {
         .init();
     color_eyre::install()?;
     // let mut terminal = ratatui::init();
-    let app_result = App::default().run().await;
+    let option = env::args().skip(1).next();
+
+    let app_result = match option {
+        Some(option) if option.as_str().trim() == "ws" => {
+            println!("Connecting to Server");
+            let bus = AnyBusBuilder::new()
+                .ws_remote(WsRemoteOptions {
+                    url: Url::parse("wss://localhost:10800").unwrap(),
+                })
+                .build();
+            App::new(bus).run().await
+        }
+        Some(option) if option.as_str().trim() == "server" => {
+            println!("Starting Server");
+            let bus = AnyBusBuilder::new()
+                .ws_listener(WsListenerOptions {
+                    addr: Ipv4Addr::LOCALHOST.into(),
+                    port: 10800,
+                    use_tls: true,
+                    cert_path: Some("server.crt".into()),
+                    key_path: Some("server.key".into()),
+                })
+                .build();
+            App::new(bus).run().await
+        }
+        _ => App::default().run().await,
+    };
+
     ratatui::restore();
     app_result
 }
@@ -73,31 +108,32 @@ impl Default for App {
             scroll_state: tui_scrollview::ScrollViewState::default(),
             id: Uuid::now_v7(),
             nickname: "Anonymous".to_string(),
-            bus: anybus::AnyBus::new(),
+            bus: anybus::AnyBusBuilder::new().enable_ipc(true).build(),
             chat_members: HashMap::new(),
         }
     }
 }
 
 impl App {
+    fn new(bus: AnyBus) -> Self {
+        Self {
+            bus,
+            ..Default::default()
+        }
+    }
+
     async fn run(&mut self) -> Result<()> {
+        dbg!(&self);
         let mut tui = tui::Tui::new()?
             .tick_rate(4.0) // 4 ticks per second
             .frame_rate(30.0); // 30 frames per second
 
         tui.enter()?; // Starts event handler, enters raw mode, enters alternate screen
-        let mut chat_listener = self
-            .bus
-            .handle()
-            .clone()
-            .register_broadcast()
-            .await
-            .unwrap();
+        self.bus.run();
+        let mut handle = self.bus.handle().clone();
+        let mut chat_listener = handle.register_broadcast().await.unwrap();
 
-        let mut dm_listener = self
-            .bus
-            .handle()
-            .clone()
+        let mut dm_listener = handle
             .register_anycast_uuid::<DirectMessage>(self.id)
             .await
             .unwrap();

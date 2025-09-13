@@ -30,9 +30,10 @@ uuid = { version = "1.18.0", default-features = false, features = [
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
 default = ["tokio","ipc","ws"]
 dioxus = ["dep:dioxus"]
-ipc = [ "dep:interprocess", "dep:async-bincode"]
-net = ["tokio/rt", "tokio/net",  "dep:async-bincode", "dep:interprocess"]
-ws = ["tokio/rt", "tokio/net", "dep:tokio-tungstenite"]
+ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess"]
+net = [ "tokio/net"  ]
+ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+remote =["tokio/rt"]
 
 [dependencies]
 uuid = {workspace= true}
@@ -75,7 +76,12 @@ async-trait = "0.1.89"
 bincode = { version = "2.0.1", no-default-features = true }
 #bincode2 = "2.0.1"
 dyn-clone = "1.0.20"
-tokio-tungstenite = {version = "0.27.0", optional= true}
+tokio-tungstenite = { version = "0.27.0", optional = true, features = ["native-tls"] }
+url = {version = "2.5.7", optional = true}
+bytes = {version = "1.10.1", optional = true}
+# native-tls = {version = "0.2.14", optional = true}
+tokio-native-tls = {version = "0.3.0", optional = true}
+# tungstenite = {version = "0.20.0", optional = true}
 
 [dev-dependencies]
 color-eyre = "0.6.5"

@@ -39,8 +39,9 @@ mod traits;
 #[cfg(feature = "ipc")]
 use peers::IpcManager;
 
-#[cfg(feature = "ipc")]
-mod peers;
+#[cfg(feature = "net")]
+/// Network peer discovery and messaging
+pub mod peers;
 
 use tokio::{
     // stream:: StreamExt,
@@ -73,6 +74,9 @@ pub struct AnyBus {
     bc_tx: Sender<BusControlMsg>,
     id: Uuid,
     handle: Handle,
+    options: AnyBusBuilder,
+    bc_rx: watch::Receiver<BusControlMsg>,
+    // router: Router,
 }
 
 impl AnyBus {
@@ -82,47 +86,66 @@ impl AnyBus {
     // #[allow(clippy::new_ret_no_self)]
     //
     pub fn new() -> AnyBus {
-        Self::build(&AnyBusBuilder::default())
+        Self::build(AnyBusBuilder::default())
     }
 
-    fn build(options: &AnyBusBuilder) -> AnyBus {
+    fn build(options: AnyBusBuilder) -> AnyBus {
+        trace!("Starting AnyBus");
+        // dbg!(&options);
         let id = Uuid::now_v7();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
-        let router = Router::new(id, rx, bc_rx.clone());
+        let mut router = Router::new(id, rx, bc_rx.clone());
         let route_watch_rx = router.get_watcher();
 
         let handle = Handle { tx, route_watch_rx };
-
         let _router_task = spawn(router.start());
 
         let msg_bus = AnyBus {
             bc_tx,
             id,
             handle: handle.clone(),
+            options,
+            bc_rx,
+            // router,
         };
+        msg_bus
+    }
 
+    /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
+    pub fn run(&mut self) {
         #[cfg(feature = "ws")]
-        if let Some(ws_options) = &options.ws_listener_options {
+        if self.options.ws_listener_options.is_some() || !self.options.ws_remote_options.is_empty()
+        {
+            trace!("Starting WebSocket Manager");
+
             let ws_listener = crate::peers::WebsocketManager::new(
-                id,
-                handle.clone(),
-                bc_rx.clone(),
-                (*ws_options).clone(),
+                self.id,
+                self.handle.clone(),
+                self.bc_rx.clone(),
+                self.options.ws_listener_options.clone(),
+                self.options.ws_remote_options.clone(),
             );
 
             spawn(ws_listener.start());
         }
 
         #[cfg(feature = "ipc")]
-        if options.enable_ipc {
-            let manager = IpcManager::new("anybus.ipc".into(), handle, bc_rx, id);
+        if self.options.enable_ipc {
+            let manager = IpcManager::new(
+                "anybus.ipc".into(),
+                self.handle.clone(),
+                self.bc_rx.clone(),
+                self.id,
+            );
             spawn(manager.start());
         };
 
-        msg_bus
+        if self.options.enable_ctrlc_shutdown {
+            self.shutdown_with_ctrlc();
+        }
     }
 
     /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
@@ -161,13 +184,15 @@ impl Default for AnyBus {
 // }
 
 /// AnyBusBuilder is a builder pattern for constructing an AnyBus instance with options
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AnyBusBuilder {
     enable_ctrlc_shutdown: bool,
     #[cfg(feature = "ipc")]
     enable_ipc: bool,
     #[cfg(feature = "ws")]
     ws_listener_options: Option<crate::peers::WsListenerOptions>,
+    #[cfg(feature = "ws")]
+    ws_remote_options: Vec<crate::peers::WsRemoteOptions>,
 }
 impl AnyBusBuilder {
     /// Creates a new AnyBusBuilder with default options
@@ -175,9 +200,11 @@ impl AnyBusBuilder {
         Self {
             enable_ctrlc_shutdown: false,
             #[cfg(feature = "ipc")]
-            enable_ipc: true,
+            enable_ipc: false,
             #[cfg(feature = "ws")]
             ws_listener_options: None,
+            #[cfg(feature = "ws")]
+            ws_remote_options: Vec::new(),
         }
     }
 
@@ -205,18 +232,22 @@ impl AnyBusBuilder {
     /// If not set, no WebSocket listener will be started.
     ///
     #[cfg(feature = "ws")]
-    pub fn ws_listener_options(mut self, options: crate::peers::WsListenerOptions) -> Self {
+    pub fn ws_listener(mut self, options: crate::peers::WsListenerOptions) -> Self {
         self.ws_listener_options = Some(options);
+        self
+    }
+
+    /// Adds a remote WebSocket peer to connect to.  Can be called multiple times to add multiple remote peers.
+    pub fn ws_remote(mut self, options: crate::peers::WsRemoteOptions) -> Self {
+        self.ws_remote_options.push(options);
         self
     }
 
     /// Builds and starts the AnyBus instance with the specified options.  Returns the AnyBus instance.
     ///
-    pub fn run(self) -> AnyBus {
-        let anybus = AnyBus::build(&self);
-        if self.enable_ctrlc_shutdown {
-            anybus.shutdown_with_ctrlc();
-        }
+    pub fn build(self) -> AnyBus {
+        let anybus = AnyBus::build(self.clone());
+
         anybus
     }
 }

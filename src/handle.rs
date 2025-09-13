@@ -58,7 +58,7 @@ impl Handle {
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
             #[cfg(any(feature = "net", feature = "ipc"))]
-            realm: crate::routing::Realm::Userspace,
+            realm: crate::routing::Realm::Global,
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
             #[cfg(any(feature = "net", feature = "ipc"))]
@@ -422,6 +422,10 @@ impl Handle {
     #[cfg(feature = "tokio")]
     pub(crate) fn shutdown(&self) {
         let _ = self.tx.send(BrokerMsg::Shutdown);
+    }
+
+    pub(crate) fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
+        self.tx.send(msg).ok()
     }
 }
 
