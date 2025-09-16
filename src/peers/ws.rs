@@ -5,10 +5,7 @@ use std::{
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
-};
+use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
 use tokio_native_tls::{TlsStream, native_tls::Identity};
 use tokio_tungstenite::WebSocketStream;
 use tracing::error;
@@ -31,7 +28,7 @@ enum WsControl {
 
 #[derive(Debug)]
 enum WsCommand {
-    NewTcpStream(tokio::net::TcpStream, SocketAddr),
+    // NewTcpStream(tokio::net::TcpStream, SocketAddr),
     NewWsStream(WebSocketStream<TlsStream<TcpStream>>, SocketAddr),
 }
 
@@ -153,7 +150,7 @@ async fn run_ws_listener(
                     }
                 }
             }
-            Ok(msg) = bus_control.changed() => {
+            Ok(_msg) = bus_control.changed() => {
                 let msg = *bus_control.borrow();
                 match msg {
                     BusControlMsg::Shutdown => {

@@ -1,9 +1,5 @@
 mod chatview;
-use std::{
-    collections::HashMap,
-    env,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::{collections::HashMap, env, net::Ipv4Addr};
 
 use anybus::{
     AnyBus, AnyBusBuilder, bus_uuid,

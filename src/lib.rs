@@ -97,7 +97,7 @@ impl AnyBus {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
-        let mut router = Router::new(id, rx, bc_rx.clone());
+        let router = Router::new(id, rx, bc_rx.clone());
         let route_watch_rx = router.get_watcher();
 
         let handle = Handle { tx, route_watch_rx };

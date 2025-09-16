@@ -1,18 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::unix::SocketAddr,
     sync::{
-        RwLock,
         mpsc::{UnboundedReceiver, UnboundedSender},
         watch,
     },
     time::timeout,
 };
-use tokio_tungstenite::MaybeTlsStream;
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
@@ -21,7 +18,7 @@ use crate::{
     messages::BusControlMsg,
     peers::{
         Peer, WsRemoteOptions,
-        ws::{self, WsCommand, WsControl, WsError, WsListenerOptions, WsMessage, create_listener},
+        ws::{self, WsCommand, WsControl, WsListenerOptions, WsMessage, create_listener},
     },
     routing::NodeId,
     spawn,
@@ -137,7 +134,7 @@ impl State for Listen {
                 b(HandleCommand(cmd))
                 // Handle incoming commands
             }
-            Ok(msg) = state.bus_control.changed() => {
+            Ok(_msg) = state.bus_control.changed() => {
                 match *state.bus_control.borrow() {
                     BusControlMsg::Shutdown => {
                         debug!("WebSocket Manager shutting down");
@@ -160,8 +157,8 @@ impl State for Listen {
 impl State for HandleCommand {
     async fn next(self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         match self.0 {
-            WsCommand::NewTcpStream(stream, addr) => b(NewTcpStream { stream, addr }),
-            WsCommand::NewWsStream(stream, addr) => b(NewWsStream { stream }),
+            // WsCommand::NewTcpStream(stream, addr) => b(NewTcpStream { stream, addr }),
+            WsCommand::NewWsStream(stream, _addr) => b(NewWsStream { stream }),
         }
     }
 }

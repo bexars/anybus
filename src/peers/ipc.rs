@@ -8,7 +8,7 @@ use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::routing::{Address, Advertisement, NodeId, WirePacket};
+use crate::routing::{Advertisement, NodeId, WirePacket};
 
 pub(super) type IpcPeerStream = AsyncBincodeStream<
     interprocess::local_socket::tokio::Stream,

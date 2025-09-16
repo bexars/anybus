@@ -25,10 +25,10 @@ async fn main() {
         .enable_ipc(true);
     let mut bus = bus.build();
     bus.run();
-    let handle: Handle = bus.handle().clone();
+    let _handle: Handle = bus.handle().clone();
 
     sleep(Duration::from_millis(100)).await; // Give the bus time to start
 
-    let url = Url::parse("ws://localhost:10800").unwrap();
+    let _url = Url::parse("ws://localhost:10800").unwrap();
     stdin().read_line(&mut String::new()).unwrap();
 }

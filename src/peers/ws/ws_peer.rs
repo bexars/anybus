@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
     select,
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
@@ -248,7 +247,7 @@ pub(crate) async fn run_ws_peer<S: AsyncRead + AsyncWrite + Unpin>(
                     Some(InMessage::NodeMessage(msg))
                 }
 
-                Ok(msg) = bus_control.changed() => {
+                Ok(_msg) = bus_control.changed() => {
                     let msg = *bus_control.borrow();
                     match msg {
                         BusControlMsg::Shutdown => {
