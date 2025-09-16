@@ -1,8 +1,9 @@
+use futures::Stream;
 use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    ReceiveError, messages::ClientMessage, receivers::packet_receiver::PacketReceiver,
+    BusRider, ReceiveError, messages::ClientMessage, receivers::packet_receiver::PacketReceiver,
     routing::EndpointId,
 };
 
@@ -36,5 +37,28 @@ where
             .payload
             .reveal()
             .map_err(|p| ReceiveError::DeserializationError(p))
+    }
+}
+
+impl<T: BusRider + Unpin> Stream for Receiver<T>
+where
+    for<'de> T: Deserialize<'de>,
+{
+    type Item = T;
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match futures::ready!(std::pin::Pin::new(&mut this.packet_receiver.rx).poll_recv(cx)) {
+            Some(ClientMessage::Message(packet)) => match packet.payload.reveal() {
+                Ok(msg) => std::task::Poll::Ready(Some(msg)),
+                Err(_) => std::task::Poll::Pending,
+            },
+            Some(ClientMessage::Shutdown) => std::task::Poll::Ready(None),
+            Some(ClientMessage::FailedRegistration(_, _)) => std::task::Poll::Pending,
+            Some(ClientMessage::SuccessfulRegistration(_)) => std::task::Poll::Pending,
+            None => std::task::Poll::Ready(None),
+        }
     }
 }

@@ -1,3 +1,4 @@
+use futures::Stream;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
@@ -56,5 +57,26 @@ impl PacketReceiver {
 impl Drop for PacketReceiver {
     fn drop(&mut self) {
         self.handle.unregister_endpoint(self.endpoint_id);
+    }
+}
+
+impl Stream for PacketReceiver {
+    type Item = Packet;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(msg)) => match msg {
+                ClientMessage::Message(packet) => std::task::Poll::Ready(Some(packet)),
+                ClientMessage::Shutdown => std::task::Poll::Ready(None),
+                ClientMessage::FailedRegistration(_, _) => std::task::Poll::Pending,
+                ClientMessage::SuccessfulRegistration(_) => std::task::Poll::Pending,
+            },
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     }
 }

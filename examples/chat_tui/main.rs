@@ -7,6 +7,7 @@ use anybus::{
 };
 use chatview::ChatViewWidget;
 use color_eyre::Result;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tui_textarea::TextArea;
@@ -141,14 +142,14 @@ impl App {
             })?;
 
             select! {
-                Ok(msg) = chat_listener.recv() => {
+                Some(msg) = chat_listener.next() => {
                     let mut maybe_action = self.process_anybusmsg(msg);
                     while let Some(action) = maybe_action {
                         maybe_action = self.update(action);
                     }
                 }
 
-                Ok(msg) = dm_listener.recv() => {
+                Some(msg) = dm_listener.next() => {
                     let dm = format!("(DM) {}: {}", msg.from.nickname, msg.message);
                     let mut maybe_action = Some(Action::AddMessage(dm));
                     while let Some(action) = maybe_action {
