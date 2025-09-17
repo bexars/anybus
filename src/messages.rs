@@ -1,10 +1,8 @@
 #[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::HashSet;
 
-use tokio::sync::mpsc::UnboundedSender;
-
 #[cfg(any(feature = "net", feature = "ipc"))]
-use crate::routing::{Advertisement, NodeId, WirePacket};
+use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
 use crate::routing::{EndpointId, Packet, Route};
 
 #[derive(Debug)]
@@ -12,7 +10,7 @@ pub(crate) enum BrokerMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
     #[cfg(any(feature = "net", feature = "ipc"))]
-    RegisterPeer(NodeId, UnboundedSender<NodeMessage>),
+    RegisterPeer(NodeId, PeerEntry),
     #[cfg(any(feature = "net", feature = "ipc"))]
     UnRegisterPeer(NodeId),
     #[cfg(any(feature = "net", feature = "ipc"))]

@@ -26,6 +26,7 @@ use crate::{
         Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
+    routing::PeerEntry,
     spawn,
 };
 
@@ -389,7 +390,13 @@ impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         let (tx, rx) = unbounded_channel();
         let (node_tx, node_rx) = unbounded_channel();
-        let peer = Peer::new(self.peer_id, state.uuid, state.handle.clone(), node_rx);
+        let peer = Peer::new(
+            self.peer_id,
+            state.uuid,
+            state.handle.clone(),
+            node_rx,
+            crate::routing::Realm::Userspace, // Always userspace for IPC peers
+        );
         let ipc_peer = IpcPeer::new(
             self.stream,
             state.tx.clone(),
@@ -398,8 +405,12 @@ impl State for CreateIpcPeer {
             peer,
             self.peer_is_master,
         );
+        let peer_entry = PeerEntry {
+            peer_tx: node_tx,
+            realm: crate::routing::Realm::Userspace,
+        };
         state.peers.write().await.push((self.peer_id, tx));
-        state.handle.register_peer(self.peer_id, node_tx);
+        state.handle.register_peer(self.peer_id, peer_entry);
         _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once

@@ -37,14 +37,13 @@ impl RoutingTable {
     ) -> Option<usize> {
         let mut routes_to_add = Vec::new();
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // let peer_tx = peer.peer_tx.clone();
             for ad in advertisements {
                 use RouteKind as RK;
                 let forward_to = match ad.kind {
                     RK::Unicast | RK::Anycast | RK::Node => {
-                        ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
+                        ForwardTo::Remote(peer.peer_entry.peer_tx.clone(), peer_id)
                     }
-                    RK::Broadcast => ForwardTo::Broadcast(vec![]),
+                    RK::Broadcast => ForwardTo::Broadcast(vec![], Realm::Global), //TODO fix realm
 
                     RK::Multicast => {
                         let mut hs = HashSet::new();

@@ -12,7 +12,7 @@ pub use ws::{WsListenerOptions, WsRemoteOptions};
 #[cfg(feature = "ipc")]
 pub(crate) use ipc::ipc_manager::IpcManager;
 
-use crate::{Handle, messages::NodeMessage};
+use crate::{Handle, messages::NodeMessage, routing::Realm};
 
 #[derive(Debug)]
 pub(crate) struct Peer {
@@ -20,6 +20,7 @@ pub(crate) struct Peer {
     pub(crate) our_id: Uuid,
     pub(crate) rx: UnboundedReceiver<NodeMessage>,
     pub(crate) handle: Handle,
+    pub(crate) realm: Realm,
 }
 
 impl Peer {
@@ -28,12 +29,14 @@ impl Peer {
         our_id: Uuid,
         handle: Handle,
         rx: UnboundedReceiver<NodeMessage>,
+        realm: Realm,
     ) -> Self {
         Self {
             peer_id,
             our_id,
             rx,
             handle,
+            realm,
         }
     }
 }

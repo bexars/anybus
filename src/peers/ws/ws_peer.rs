@@ -94,6 +94,8 @@ impl WsPeer {
                             BrokerMsg::UnRegisterPeer(self.peer_id),
                         ));
                         self.output.push_back(OutMessage::ClosePeer);
+                        self.output
+                            .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
                         self.state = State::Shutdown;
                     }
                     WsMessage::CloseConnection => {
@@ -101,6 +103,8 @@ impl WsPeer {
                             BrokerMsg::UnRegisterPeer(self.peer_id),
                         ));
                         self.output.push_back(OutMessage::ClosePeer);
+                        self.output
+                            .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
                         self.state = State::Shutdown;
                     }
                     WsMessage::Packet(wire_packet) => {
@@ -128,10 +132,14 @@ impl WsPeer {
                             .push_back(OutMessage::WsMessage(WsMessage::Packet(wire_packet)));
                     }
                     NodeMessage::Close => {
+                        self.output.push_back(OutMessage::ClosePeer);
+
                         self.output.push_back(OutMessage::BrokerMessage(
                             BrokerMsg::UnRegisterPeer(self.peer_id),
                         ));
-                        self.output.push_back(OutMessage::ClosePeer);
+                        self.output
+                            .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
+
                         self.state = State::Shutdown;
                     }
                     NodeMessage::Advertise(hash_set) => {
@@ -144,7 +152,15 @@ impl WsPeer {
                     }
                 }
             }
-            InMessage::WsPeerClosed => todo!(),
+            InMessage::WsPeerClosed => {
+                self.output
+                    .push_back(OutMessage::BrokerMessage(BrokerMsg::UnRegisterPeer(
+                        self.peer_id,
+                    )));
+                self.output
+                    .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
+                self.state = State::Shutdown;
+            }
             InMessage::Shutdown => {
                 self.output
                     .push_back(OutMessage::WsMessage(WsMessage::CloseConnection));

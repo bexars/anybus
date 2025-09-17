@@ -16,6 +16,9 @@ use crate::receivers::Receiver;
 
 use crate::receivers::RpcReceiver;
 use crate::routing::Address;
+#[cfg(any(feature = "net", feature = "ipc"))]
+use crate::routing::PeerEntry;
+use crate::routing::Realm;
 use crate::routing::router::RoutesWatchRx;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::routing::{Advertisement, NodeId, WirePacket};
@@ -37,7 +40,8 @@ impl Handle {
     pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_anycast_inner(T::ANYBUS_UUID.into()).await
+        self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global)
+            .await
     }
 
     /// Same as register_anycast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
@@ -45,12 +49,14 @@ impl Handle {
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_anycast_inner(endpoint_id.into()).await
+        self.register_anycast_inner(endpoint_id.into(), Realm::Global)
+            .await
     }
 
     async fn register_anycast_inner<T: BusRider + DeserializeOwned>(
         &mut self,
         endpoint_id: EndpointId,
+        realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
         // let endpoint_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -58,7 +64,7 @@ impl Handle {
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
             #[cfg(any(feature = "net", feature = "ipc"))]
-            realm: crate::routing::Realm::Global,
+            realm,
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
             #[cfg(any(feature = "net", feature = "ipc"))]
@@ -80,19 +86,22 @@ impl Handle {
     pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_unicast_inner(T::ANYBUS_UUID.into()).await
+        self.register_unicast_inner(T::ANYBUS_UUID.into(), Realm::Global)
+            .await
     }
     /// Same as register_unicast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_unicast_uuid<T: BusRider + DeserializeOwned>(
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_unicast_inner(endpoint_id.into()).await
+        self.register_unicast_inner(endpoint_id.into(), Realm::Global)
+            .await
     }
 
     async fn register_unicast_inner<T: BusRider + DeserializeOwned>(
         &mut self,
         endpoint_id: EndpointId,
+        realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -101,7 +110,7 @@ impl Handle {
             Route {
                 kind: crate::routing::RouteKind::Unicast,
                 #[cfg(any(feature = "net", feature = "ipc"))]
-                realm: crate::routing::Realm::Userspace,
+                realm,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(any(feature = "net", feature = "ipc"))]
@@ -124,7 +133,7 @@ impl Handle {
     }
 
     /// Register a RPC service with the given Uuid as the endpoint
-    pub async fn register_rpc_uuid<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+    pub async fn register_rpc_uuid<T: BusRiderRpc + DeserializeOwned>(
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
@@ -132,7 +141,7 @@ impl Handle {
         self.register_rpc_inner(endpoint_id).await
     }
 
-    async fn register_rpc_inner<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+    async fn register_rpc_inner<T: BusRiderRpc + DeserializeOwned>(
         &mut self,
         endpoint_id: EndpointId,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
@@ -164,7 +173,8 @@ impl Handle {
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
-        self.register_broadcast_inner(broadcast_id).await
+        self.register_broadcast_inner(broadcast_id, Realm::Global)
+            .await
     }
 
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
@@ -173,11 +183,13 @@ impl Handle {
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
-        self.register_broadcast_inner(broadcast_id).await
+        self.register_broadcast_inner(broadcast_id, Realm::Global)
+            .await
     }
     async fn register_broadcast_inner<T: BusRider + DeserializeOwned>(
         &mut self,
         broadcast_id: EndpointId,
+        realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -186,8 +198,8 @@ impl Handle {
             Route {
                 kind: crate::routing::RouteKind::Broadcast,
                 #[cfg(any(feature = "net", feature = "ipc"))]
-                realm: crate::routing::Realm::Global,
-                via: crate::routing::ForwardTo::Broadcast(vec![tx]),
+                realm,
+                via: crate::routing::ForwardTo::Broadcast(vec![tx], Realm::Global),
 
                 cost: 0,
                 #[cfg(any(feature = "net", feature = "ipc"))]
@@ -401,10 +413,16 @@ impl Handle {
     }
 
     #[cfg(any(feature = "net", feature = "ipc"))]
-    pub(crate) fn register_peer(&self, uuid: NodeId, tx: UnboundedSender<NodeMessage>) {
+    pub(crate) fn register_peer(
+        &self,
+        uuid: NodeId,
+        peer_entry: PeerEntry,
+        // tx: UnboundedSender<NodeMessage>,
+        // realm: Realm,
+    ) {
         use tracing::debug;
 
-        match self.tx.send(BrokerMsg::RegisterPeer(uuid, tx)) {
+        match self.tx.send(BrokerMsg::RegisterPeer(uuid, peer_entry)) {
             Ok(_) => {}
             Err(e) => debug!("Error sending RegisterPeer packet: {:?}", e),
         }
@@ -426,6 +444,17 @@ impl Handle {
 
     pub(crate) fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
         self.tx.send(msg).ok()
+    }
+
+    /// Start building a registration with the builder pattern
+    pub fn listener(&self) -> RegistrationBuilder<NoEndpointId, NoCast, NoRpc> {
+        RegistrationBuilder {
+            endpoint_id: NoEndpointId,
+            realm: Realm::default(),
+            cast: NoCast,
+            rpc: NoRpc,
+            handle: self.clone(),
+        }
     }
 }
 
@@ -515,6 +544,166 @@ impl RequestHelper {
             }),
             None => Err(AnyBusHandleError::Shutdown),
             _ => todo!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RegistrationBuilder<EP, CAST, RPC> {
+    endpoint_id: EP,
+    realm: Realm,
+    cast: CAST,
+    rpc: RPC,
+    handle: Handle,
+}
+
+pub struct NoEndpointId;
+pub struct NoCast;
+pub struct EndpointSet(EndpointId);
+pub struct CastSet(crate::routing::RouteKind);
+pub struct NoRpc;
+pub struct RpcSet;
+
+// impl Default for RegistrationBuilder<NoEndpointId, NoCast, NoRpc> {
+//     fn default() -> Self {
+//         Self {
+//             endpoint_id: NoEndpointId,
+//             realm: Realm::default(),
+//             cast: NoCast,
+//             rpc: NoRpc,
+//         }
+//     }
+// }
+
+impl<EP, CAST, RPC> RegistrationBuilder<EP, CAST, RPC> {
+    /// Set the realm for this registration, defaults to Realm::Global
+    pub fn realm(mut self, realm: Realm) -> Self {
+        self.realm = realm;
+        self
+    }
+
+    pub fn endpoint(self, ep: EndpointId) -> RegistrationBuilder<EndpointSet, CAST, RPC> {
+        RegistrationBuilder {
+            endpoint_id: EndpointSet(ep),
+            realm: self.realm,
+            cast: self.cast,
+            rpc: self.rpc,
+            handle: self.handle,
+        }
+    }
+
+    pub fn anycast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
+        RegistrationBuilder {
+            endpoint_id: self.endpoint_id,
+            realm: self.realm,
+            cast: CastSet(crate::routing::RouteKind::Anycast),
+            rpc: self.rpc,
+            handle: self.handle,
+        }
+    }
+
+    pub fn unicast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
+        RegistrationBuilder {
+            endpoint_id: self.endpoint_id,
+            realm: self.realm,
+            cast: CastSet(crate::routing::RouteKind::Unicast),
+            rpc: self.rpc,
+            handle: self.handle,
+        }
+    }
+    pub fn broadcast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
+        RegistrationBuilder {
+            endpoint_id: self.endpoint_id,
+            realm: self.realm,
+            cast: CastSet(crate::routing::RouteKind::Broadcast),
+            rpc: self.rpc,
+            handle: self.handle,
+        }
+    }
+
+    pub fn rpc(self) -> RegistrationBuilder<EP, CastSet, RpcSet> {
+        RegistrationBuilder {
+            endpoint_id: self.endpoint_id,
+            realm: self.realm,
+            cast: CastSet(crate::routing::RouteKind::Unicast),
+            rpc: RpcSet,
+            handle: self.handle,
+        }
+    }
+}
+
+impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
+    /// Finalize the registration and get a [Receiver] for the messages
+    pub async fn register<T: BusRider + DeserializeOwned>(
+        mut self,
+    ) -> Result<Receiver<T>, ReceiveError> {
+        match self.cast.0 {
+            crate::routing::RouteKind::Anycast => {
+                self.handle
+                    .register_anycast_inner::<T>(self.endpoint_id.0.into(), self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Unicast => {
+                self.handle
+                    .register_unicast_inner::<T>(self.endpoint_id.0.into(), self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Broadcast => {
+                self.handle
+                    .register_broadcast_inner::<T>(self.endpoint_id.0.into(), self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Multicast => unimplemented!(),
+            crate::routing::RouteKind::Node => unimplemented!(),
+        }
+    }
+}
+
+impl<CAST> RegistrationBuilder<NoEndpointId, CAST, RpcSet> {
+    /// Finalize the registration and get a [RpcReceiver] for the messages
+    pub async fn register<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+        mut self,
+    ) -> Result<RpcReceiver<T>, ReceiveError> {
+        let ep = T::ANYBUS_UUID.into();
+        self.handle.register_rpc_inner::<T>(ep).await
+    }
+}
+
+impl<CAST> RegistrationBuilder<EndpointSet, CAST, RpcSet> {
+    /// Finalize the registration and get a [RpcReceiver] for the messages
+    pub async fn register<T: BusRiderRpc + DeserializeOwned>(
+        mut self,
+    ) -> Result<RpcReceiver<T>, ReceiveError> {
+        self.handle
+            .register_rpc_inner::<T>(self.endpoint_id.0.into())
+            .await
+    }
+}
+
+impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
+    /// Finalize the registration and get a [Receiver] for the messages
+    pub async fn register<T: BusRider + DeserializeOwned + BusRiderWithUuid>(
+        mut self,
+    ) -> Result<Receiver<T>, ReceiveError> {
+        let ep = T::ANYBUS_UUID.into();
+        match self.cast.0 {
+            crate::routing::RouteKind::Anycast => {
+                self.handle
+                    .register_anycast_inner::<T>(ep, self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Unicast => {
+                self.handle
+                    .register_unicast_inner::<T>(ep, self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Broadcast => {
+                self.handle
+                    .register_broadcast_inner::<T>(ep, self.realm)
+                    .await
+            }
+            crate::routing::RouteKind::Multicast => unimplemented!(),
+            crate::routing::RouteKind::Node => unimplemented!(),
         }
     }
 }

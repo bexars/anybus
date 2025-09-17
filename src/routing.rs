@@ -4,6 +4,7 @@ pub(crate) mod routing_table;
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
+    default,
     fmt::Display,
     ops::Deref,
 };
@@ -19,7 +20,10 @@ use uuid::Uuid;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::NodeMessage;
 use crate::{
-    BusRider, errors::SendError, messages::ClientMessage, routing::routing_table::RoutingTable,
+    BusRider,
+    errors::SendError,
+    messages::ClientMessage,
+    routing::{router::PeerInfo, routing_table::RoutingTable},
 };
 
 // pub(crate) type EndpointId = Uuid;
@@ -65,11 +69,26 @@ impl From<&Uuid> for EndpointId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PeerEntry {
+    pub(crate) peer_tx: UnboundedSender<NodeMessage>,
+    pub(crate) realm: Realm,
+}
+
+// impl From<PeerInfo> for PeerEntry {
+//     fn from(value: PeerInfo) -> Self {
+//         Self {
+//             peer_tx: value.peer_tx,
+//             realm: value.realm,
+//         }
+//     }
+// }
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
-    peers: HashMap<NodeId, UnboundedSender<NodeMessage>>,
+    peers: HashMap<NodeId, PeerEntry>,
 }
 
 impl ForwardingTable {
@@ -167,7 +186,7 @@ impl ForwardingTable {
                 }
                 Ok(())
             }
-            ForwardTo::Broadcast(senders) => {
+            ForwardTo::Broadcast(senders, realm) => {
                 trace!(
                     "Broadcasting packet to {} clients and {} peers",
                     senders.len(),
@@ -176,36 +195,24 @@ impl ForwardingTable {
                 for tx in senders {
                     _ = tx.send(ClientMessage::Message(packet.clone()));
                 }
-                for (nid, tx) in self.peers.iter() {
+                for (nid, peer_entry) in self.peers.iter() {
+                    if !realm.allows_realm(&peer_entry.realm) {
+                        trace!(
+                            "Not broadcasting to peer {} due to realm mismatch {:?} vs {:?}",
+                            nid, realm, peer_entry.realm
+                        );
+                        continue;
+                    }
                     trace!("Broadcasting to peer {}", nid);
-                    _ = tx.send(NodeMessage::WirePacket(packet.clone().into()));
+                    _ = peer_entry
+                        .peer_tx
+                        .send(NodeMessage::WirePacket(packet.clone().into()));
                 }
 
                 Ok(())
             }
         }
     }
-    // fn broadcast(
-    //     &self,
-    //     packet: impl Into<WirePacket>,
-    //     destination_id: Uuid,
-    // ) -> Result<(), Box<dyn std::error::Error>> {
-    //     match self {
-    //         ForwardTo::Local(tx) => tx
-    //             .send(ClientMessage::Message(packet.into()))
-    //             .map_err(|e| e.into()),
-    //         ForwardTo::Remote(tx) => tx
-    //             .send(NodeMessage::WirePacket(packet.into()))
-    //             .map_err(|e| e.into()),
-    //         ForwardTo::Broadcast(forward_tos) => {
-    //             let packet = packet.into();
-    //             for ft in forward_tos {
-    //                 ft.broadcast(packet.clone(), destination_id)?;
-    //             }
-    //             Ok(())
-    //         }
-    //     }
-    // }
 }
 
 impl From<&RoutingTable> for ForwardingTable {
@@ -219,7 +226,7 @@ impl From<&RoutingTable> for ForwardingTable {
         let peer_senders = value
             .peers
             .iter()
-            .map(|(k, v)| (*k, v.peer_tx.clone()))
+            .map(|(k, v)| (*k, v.peer_entry.clone()))
             .collect();
         Self {
             peers: peer_senders,
@@ -234,7 +241,7 @@ pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(any(feature = "net", feature = "ipc"))]
     Remote(UnboundedSender<NodeMessage>, NodeId),
-    Broadcast(Vec<UnboundedSender<ClientMessage>>),
+    Broadcast(Vec<UnboundedSender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
 
@@ -422,14 +429,30 @@ pub(crate) enum RouteKind {
 }
 
 /// Used to control how the route is advertised
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default, Eq, Serialize, Deserialize, Hash)]
 #[allow(dead_code)]
-pub(crate) enum Realm {
+pub enum Realm {
+    /// Only within the current process
     Process,
+    /// Within the current userspace instance (multiple processes on same machine)
     Userspace,
+    /// Within the local network (LAN)
     LocalNet,
+    /// Globally routable (Websocket)
+    #[default]
     Global,
     // BroadcastProxy(EndpointId),
+}
+
+impl Realm {
+    pub(crate) fn allows_realm(&self, other: &Realm) -> bool {
+        match self {
+            Realm::Global => true,
+            Realm::LocalNet => matches!(other, Realm::LocalNet | Realm::Process | Realm::Userspace),
+            Realm::Userspace => matches!(other, Realm::Userspace | Realm::Process),
+            Realm::Process => matches!(other, Realm::Process),
+        }
+    }
 }
 
 #[derive(Debug, Error)]

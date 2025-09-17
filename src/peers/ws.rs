@@ -30,6 +30,7 @@ enum WsControl {
 enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
     NewWsStream(WebSocketStream<TlsStream<TcpStream>>, SocketAddr),
+    PeerClosed(Uuid),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,10 +62,58 @@ enum WsError {
 #[derive(Debug, Clone)]
 /// Options for connecting to a remote WebSocket peer
 pub struct WsRemoteOptions {
+    /// The URL of the remote WebSocket peer.  Should start with ws:// or wss://
     pub url: Url,
-    // pub use_tls: bool,
-    // pub cert_path: Option<String>,
-    // pub key_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct WsPendingPeer {
+    url: Url,
+    last_attempt: tokio::time::Instant,
+    backoff: std::time::Duration,
+    num_attempts: u32,
+}
+
+impl WsPendingPeer {
+    // fn is_ready(&self) -> bool {
+    //     tokio::time::Instant::now().duration_since(self.last_attempt) >= self.backoff
+    // }
+    fn from_url(url: Url) -> Self {
+        Self {
+            url,
+            last_attempt: tokio::time::Instant::now(),
+            backoff: std::time::Duration::from_secs(1),
+            num_attempts: 0,
+        }
+    }
+
+    fn when_ready(&self) -> tokio::time::Instant {
+        self.last_attempt + self.backoff
+    }
+
+    fn record_attempt(&mut self) {
+        self.last_attempt = tokio::time::Instant::now();
+        self.num_attempts += 1;
+        self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
+    }
+}
+
+#[derive(Debug)]
+struct WsActivePeer {
+    url: Option<Url>,
+    peer_id: Uuid,
+    ws_control: UnboundedSender<WsControl>,
+}
+
+impl From<&WsRemoteOptions> for WsPendingPeer {
+    fn from(opts: &WsRemoteOptions) -> Self {
+        Self {
+            url: opts.url.clone(),
+            last_attempt: tokio::time::Instant::now(),
+            backoff: std::time::Duration::from_secs(1),
+            num_attempts: 0,
+        }
+    }
 }
 
 /// Options for the WebSocket listener
