@@ -2,7 +2,7 @@ mod chatview;
 use std::{collections::HashMap, env, net::Ipv4Addr};
 
 use anybus::{
-    AnyBus, AnyBusBuilder, bus_uuid,
+    AnyBus, AnyBusBuilder, Realm, bus_uuid,
     peers::{WsListenerOptions, WsRemoteOptions},
 };
 use chatview::ChatViewWidget;
@@ -128,10 +128,22 @@ impl App {
         tui.enter()?; // Starts event handler, enters raw mode, enters alternate screen
         self.bus.run();
         let mut handle = self.bus.handle().clone();
-        let mut chat_listener = handle.register_broadcast().await.unwrap();
+        let mut chat_listener = handle
+            .listener()
+            .realm(Realm::Global)
+            .broadcast()
+            .register()
+            .await
+            .unwrap();
+        // let mut chat_listener = handle.register_broadcast().await.unwrap();
 
         let mut dm_listener = handle
-            .register_anycast_uuid::<DirectMessage>(self.id)
+            .listener()
+            .endpoint(self.id.into())
+            .realm(Realm::Global)
+            .anycast()
+            .register::<DirectMessage>()
+            // .register_anycast_uuid::<DirectMessage>(self.id)
             .await
             .unwrap();
 

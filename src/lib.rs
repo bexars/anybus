@@ -35,6 +35,7 @@ pub use receivers::rpc_receiver::RpcRequest;
 // pub use routing::EndpointId;
 // mod route_table;
 mod routing;
+pub use routing::Realm;
 mod traits;
 #[cfg(feature = "ipc")]
 use peers::IpcManager;
@@ -245,7 +246,7 @@ impl AnyBusBuilder {
 
     /// Builds and starts the AnyBus instance with the specified options.  Returns the AnyBus instance.
     ///
-    pub fn build(self) -> AnyBus {
+    pub fn build(&self) -> AnyBus {
         let anybus = AnyBus::build(self.clone());
 
         anybus

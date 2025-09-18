@@ -1,0 +1,41 @@
+error[E0599]: no method named `rpc` found for struct `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::CastSet, anybus::handle::NoRpc>` in the current scope
+  --> tests/builder/test1.rs:23:10
+   |
+20 | /     handle
+21 | |         .listener()
+22 | |         .broadcast()
+23 | |         .rpc()
+   | |         -^^^ method not found in `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::CastSet, anybus::handle::NoRpc>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
+
+error[E0599]: no method named `broadcast` found for struct `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::NoCast, anybus::handle::RpcSet>` in the current scope
+  --> tests/builder/test1.rs:28:10
+   |
+25 | /     handle
+26 | |         .listener()
+27 | |         .rpc()
+28 | |         .broadcast()
+   | |         -^^^^^^^^^ method not found in `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::NoCast, anybus::handle::RpcSet>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
+
+error[E0599]: no method named `rpc` found for struct `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::CastSet, anybus::handle::NoRpc>` in the current scope
+  --> tests/builder/test1.rs:33:10
+   |
+30 | /     handle
+31 | |         .listener()
+32 | |         .anycast()
+33 | |         .rpc()
+   | |         -^^^ method not found in `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::CastSet, anybus::handle::NoRpc>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`

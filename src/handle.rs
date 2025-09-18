@@ -452,8 +452,9 @@ impl Handle {
             endpoint_id: NoEndpointId,
             realm: Realm::default(),
             cast: NoCast,
-            rpc: NoRpc,
+            rpc_flag: NoRpc,
             handle: self.clone(),
+            cost: 0,
         }
     }
 }
@@ -553,7 +554,8 @@ pub struct RegistrationBuilder<EP, CAST, RPC> {
     endpoint_id: EP,
     realm: Realm,
     cast: CAST,
-    rpc: RPC,
+    rpc_flag: RPC,
+    cost: u16,
     handle: Handle,
 }
 
@@ -587,18 +589,21 @@ impl<EP, CAST, RPC> RegistrationBuilder<EP, CAST, RPC> {
             endpoint_id: EndpointSet(ep),
             realm: self.realm,
             cast: self.cast,
-            rpc: self.rpc,
+            rpc_flag: self.rpc_flag,
             handle: self.handle,
+            cost: self.cost,
         }
     }
-
+}
+impl<EP, RPC> RegistrationBuilder<EP, NoCast, RPC> {
     pub fn anycast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
         RegistrationBuilder {
             endpoint_id: self.endpoint_id,
             realm: self.realm,
             cast: CastSet(crate::routing::RouteKind::Anycast),
-            rpc: self.rpc,
+            rpc_flag: self.rpc_flag,
             handle: self.handle,
+            cost: self.cost,
         }
     }
 
@@ -607,27 +612,34 @@ impl<EP, CAST, RPC> RegistrationBuilder<EP, CAST, RPC> {
             endpoint_id: self.endpoint_id,
             realm: self.realm,
             cast: CastSet(crate::routing::RouteKind::Unicast),
-            rpc: self.rpc,
+            rpc_flag: self.rpc_flag,
             handle: self.handle,
+            cost: self.cost,
         }
     }
-    pub fn broadcast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
+}
+impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
+    pub fn broadcast(self) -> RegistrationBuilder<EP, CastSet, NoRpc> {
         RegistrationBuilder {
             endpoint_id: self.endpoint_id,
             realm: self.realm,
             cast: CastSet(crate::routing::RouteKind::Broadcast),
-            rpc: self.rpc,
+            rpc_flag: self.rpc_flag,
             handle: self.handle,
+            cost: self.cost,
         }
     }
+}
 
-    pub fn rpc(self) -> RegistrationBuilder<EP, CastSet, RpcSet> {
+impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
+    pub fn rpc(self) -> RegistrationBuilder<EP, NoCast, RpcSet> {
         RegistrationBuilder {
             endpoint_id: self.endpoint_id,
             realm: self.realm,
-            cast: CastSet(crate::routing::RouteKind::Unicast),
-            rpc: RpcSet,
+            cast: NoCast,
+            rpc_flag: RpcSet,
             handle: self.handle,
+            cost: self.cost,
         }
     }
 }
@@ -660,11 +672,12 @@ impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
 }
 
 impl<CAST> RegistrationBuilder<NoEndpointId, CAST, RpcSet> {
-    /// Finalize the registration and get a [RpcReceiver] for the messages
+    /// Finalize the registration and get a [RpcReceiver] for the messages.
     pub async fn register<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
         mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let ep = T::ANYBUS_UUID.into();
+        // let config = self.create_config(&self, ep);
         self.handle.register_rpc_inner::<T>(ep).await
     }
 }
@@ -686,6 +699,7 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
         mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let ep = T::ANYBUS_UUID.into();
+        let config = self.create_config(&self, ep);
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
                 self.handle
@@ -704,6 +718,69 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
             }
             crate::routing::RouteKind::Multicast => unimplemented!(),
             crate::routing::RouteKind::Node => unimplemented!(),
+        }
+    }
+}
+
+impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
+    fn create_config(
+        &self,
+        builder: &RegistrationBuilder<NoEndpointId, CastSet, NoRpc>,
+        ep: EndpointId,
+    ) -> RegistrationConfig {
+        RegistrationConfig {
+            endpoint_id: ep,
+            realm: builder.realm,
+            cast: builder.cast.0,
+            rpc: false,
+            cost: builder.cost,
+        }
+    }
+}
+impl RegistrationBuilder<NoEndpointId, CastSet, RpcSet> {
+    fn create_config(
+        &self,
+        builder: &RegistrationBuilder<NoEndpointId, CastSet, RpcSet>,
+        ep: EndpointId,
+    ) -> RegistrationConfig {
+        RegistrationConfig {
+            endpoint_id: ep,
+            realm: builder.realm,
+            cast: builder.cast.0,
+            rpc: false,
+            cost: builder.cost,
+        }
+    }
+}
+
+struct RegistrationConfig {
+    endpoint_id: EndpointId,
+    realm: Realm,
+    cast: crate::routing::RouteKind,
+    rpc: bool,
+    cost: u16,
+}
+
+impl From<RegistrationBuilder<EndpointSet, CastSet, RpcSet>> for RegistrationConfig {
+    fn from(builder: RegistrationBuilder<EndpointSet, CastSet, RpcSet>) -> Self {
+        Self {
+            endpoint_id: builder.endpoint_id.0,
+            realm: builder.realm,
+            cast: builder.cast.0,
+            rpc: true,
+            cost: builder.cost,
+        }
+    }
+}
+
+impl From<RegistrationBuilder<EndpointSet, CastSet, NoRpc>> for RegistrationConfig {
+    fn from(builder: RegistrationBuilder<EndpointSet, CastSet, NoRpc>) -> Self {
+        Self {
+            endpoint_id: builder.endpoint_id.0,
+            realm: builder.realm,
+            cast: builder.cast.0,
+            rpc: false,
+            cost: builder.cost,
         }
     }
 }

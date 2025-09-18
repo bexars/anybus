@@ -429,7 +429,7 @@ pub(crate) enum RouteKind {
 }
 
 /// Used to control how the route is advertised
-#[derive(Debug, Clone, PartialEq, Default, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Default, Eq, Serialize, Deserialize, Hash)]
 #[allow(dead_code)]
 pub enum Realm {
     /// Only within the current process
