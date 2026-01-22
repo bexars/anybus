@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 #[cfg(any(feature = "net", feature = "ipc"))]
-use crate::messages::NodeMessage;
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::Receiver;
 
@@ -491,19 +490,22 @@ impl RequestHelper {
     where
         for<'de> <T as BusRiderRpc>::Response: Deserialize<'de>,
     {
-        let map = self.handle.route_watch_rx.borrow();
-        let node_id = map.get_node_id();
+        // let map = self.handle.route_watch_rx.borrow();
+        let node_id = self.handle.route_watch_rx.borrow().get_node_id();
         let payload = Box::new(payload);
         let to_address: Address = T::ANYBUS_UUID.into();
 
-        map.send(Packet {
-            to: to_address,
-            reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
-            from: None,
-            payload: Payload::BusRider(payload),
-        })
-        .map_err(AnyBusHandleError::SendError)?;
-        drop(map);
+        self.handle
+            .route_watch_rx
+            .borrow()
+            .send(Packet {
+                to: to_address,
+                reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
+                from: None,
+                payload: Payload::BusRider(payload),
+            })
+            .map_err(AnyBusHandleError::SendError)?;
+        // drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
@@ -699,7 +701,7 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
         mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let ep = T::ANYBUS_UUID.into();
-        let config = self.create_config(&self, ep);
+        let _config = self.create_config(&self, ep);
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
                 self.handle
@@ -738,7 +740,7 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
     }
 }
 impl RegistrationBuilder<NoEndpointId, CastSet, RpcSet> {
-    fn create_config(
+    pub fn create_config(
         &self,
         builder: &RegistrationBuilder<NoEndpointId, CastSet, RpcSet>,
         ep: EndpointId,
@@ -753,12 +755,12 @@ impl RegistrationBuilder<NoEndpointId, CastSet, RpcSet> {
     }
 }
 
-struct RegistrationConfig {
-    endpoint_id: EndpointId,
-    realm: Realm,
-    cast: crate::routing::RouteKind,
-    rpc: bool,
-    cost: u16,
+pub struct RegistrationConfig {
+    pub endpoint_id: EndpointId,
+    pub realm: Realm,
+    pub cast: crate::routing::RouteKind,
+    pub rpc: bool,
+    pub cost: u16,
 }
 
 impl From<RegistrationBuilder<EndpointSet, CastSet, RpcSet>> for RegistrationConfig {
