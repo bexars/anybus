@@ -4,7 +4,6 @@ pub(crate) mod routing_table;
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
-    default,
     fmt::Display,
     ops::Deref,
 };
@@ -20,10 +19,7 @@ use uuid::Uuid;
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::NodeMessage;
 use crate::{
-    BusRider,
-    errors::SendError,
-    messages::ClientMessage,
-    routing::{router::PeerInfo, routing_table::RoutingTable},
+    BusRider, errors::SendError, messages::ClientMessage, routing::routing_table::RoutingTable,
 };
 
 // pub(crate) type EndpointId = Uuid;
@@ -420,7 +416,7 @@ impl Ord for Route {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub(crate) enum RouteKind {
+pub enum RouteKind {
     Unicast,
     Anycast,
     Broadcast,

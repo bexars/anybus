@@ -77,20 +77,26 @@ pub struct AnyBus {
     handle: Handle,
     options: AnyBusBuilder,
     bc_rx: watch::Receiver<BusControlMsg>,
-    // router: Router,
+    router: Option<Router>,
 }
 
 impl AnyBus {
-    /// This starts and runs the AnyBus.  The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
+    /// This starts and runs the AnyBus.
+    ///
+    /// The returned [BusControlHandle] is used to shutdown the system.  The [Handle] is
     /// used for normal interaction with the system
     ///
-    // #[allow(clippy::new_ret_no_self)]
     //
     pub fn new() -> AnyBus {
-        Self::build(AnyBusBuilder::default())
+        Self::init(AnyBusBuilder::default())
     }
 
-    fn build(options: AnyBusBuilder) -> AnyBus {
+    /// Returns a new AnyBusBuilder to configure and build an AnyBus instance
+    pub fn build() -> AnyBusBuilder {
+        AnyBusBuilder::new()
+    }
+
+    fn init(options: AnyBusBuilder) -> AnyBus {
         trace!("Starting AnyBus");
         // dbg!(&options);
         let id = Uuid::now_v7();
@@ -102,7 +108,6 @@ impl AnyBus {
         let route_watch_rx = router.get_watcher();
 
         let handle = Handle { tx, route_watch_rx };
-        let _router_task = spawn(router.start());
 
         let msg_bus = AnyBus {
             bc_tx,
@@ -110,13 +115,46 @@ impl AnyBus {
             handle: handle.clone(),
             options,
             bc_rx,
-            // router,
+            router: Some(router),
         };
         msg_bus
     }
 
+    /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
+    ///
+    /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this AnyBus
+    ///
+    pub fn shutdown(&mut self) {
+        self.bc_tx
+            .send(BusControlMsg::Shutdown)
+            .map_err(|e| trace!("Send shutdown error {:?}", e))
+            .ok();
+    }
+
+    /// Returns a Handle for clients to interact with the AnyBus system.
+    /// Expected to be cloned and sent to other parts of your program
+    ///
+    pub fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
+    #[cfg(feature = "tokio")]
+    /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the AnyBus system
+    pub fn shutdown_with_ctrlc(&self) {
+        _ = spawn(helper::watch_ctrlc(self.handle.clone()));
+    }
+
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
+        if self.options.enable_ctrlc_shutdown {
+            self.shutdown_with_ctrlc();
+        }
+        let router = self
+            .router
+            .take()
+            .expect("Router should be present at startup");
+        let _router_task = spawn(router.start());
+
         #[cfg(feature = "ws")]
         if self.options.ws_listener_options.is_some() || !self.options.ws_remote_options.is_empty()
         {
@@ -143,34 +181,6 @@ impl AnyBus {
             );
             spawn(manager.start());
         };
-
-        if self.options.enable_ctrlc_shutdown {
-            self.shutdown_with_ctrlc();
-        }
-    }
-
-    /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
-    ///
-    /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this AnyBus
-    ///
-    pub fn shutdown(&mut self) {
-        self.bc_tx
-            .send(BusControlMsg::Shutdown)
-            .map_err(|e| trace!("Send shutdown error {:?}", e))
-            .ok();
-    }
-
-    /// Returns a Handle for clients to interact with the AnyBus system.
-    /// Expected to be cloned and sent to other parts of your program
-    ///
-    pub fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
-    #[cfg(feature = "tokio")]
-    /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the AnyBus system
-    pub fn shutdown_with_ctrlc(&self) {
-        _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 }
 
@@ -244,11 +254,19 @@ impl AnyBusBuilder {
         self
     }
 
-    /// Builds and starts the AnyBus instance with the specified options.  Returns the AnyBus instance.
+    /// Builds an AnyBus instance with the specified options.  Returns the AnyBus instance.
     ///
-    pub fn build(&self) -> AnyBus {
-        let anybus = AnyBus::build(self.clone());
+    pub fn init(&self) -> AnyBus {
+        let anybus = AnyBus::init(self.clone());
 
+        anybus
+    }
+
+    /// Initializes and starts an AnyBus instance with the specified options.  Returns the AnyBus instance.
+    ///
+    pub fn run(&self) -> AnyBus {
+        let mut anybus = self.init();
+        anybus.run();
         anybus
     }
 }

@@ -23,7 +23,7 @@ async fn main() {
             key_path: Some("./server.key".into()),
         })
         .enable_ipc(true);
-    let mut bus = bus.build();
+    let mut bus = bus.init();
     bus.run();
     let _handle: Handle = bus.handle().clone();
 

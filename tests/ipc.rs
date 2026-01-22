@@ -92,10 +92,8 @@ async fn test_anycast_two_busses_local_then_remote() {
 
     // tracing_subscriber::fmt::init();
     let builder = anybus::AnyBusBuilder::new().enable_ipc(true);
-    let mut mb1 = builder.build();
-    let mut mb2 = builder.build();
-    mb1.run();
-    mb2.run();
+    let mb1 = builder.run();
+    let mb2 = builder.run();
     let mut handle1 = mb1.handle().clone();
     let mut handle2 = mb2.handle().clone();
     let mut listener1 = handle1

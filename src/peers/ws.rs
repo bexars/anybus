@@ -119,10 +119,15 @@ impl From<&WsRemoteOptions> for WsPendingPeer {
 /// Options for the WebSocket listener
 #[derive(Debug, Clone)]
 pub struct WsListenerOptions {
+    /// The IP address to bind to.
     pub addr: IpAddr,
+    /// The port to bind to.
     pub port: u16,
+    /// Whether to use TLS (wss://) or not (ws://)
     pub use_tls: bool,
+    /// The path to the TLS certificate file (PEM format)
     pub cert_path: Option<String>,
+    /// The path to the TLS private key file (PEM format)
     pub key_path: Option<String>,
 }
 

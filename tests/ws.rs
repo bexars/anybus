@@ -1,4 +1,4 @@
-use anybus::{AnyBus, Handle};
+use anybus::Handle;
 use std::time::Duration;
 use tokio::time::sleep;
 use url::Url;
@@ -17,7 +17,7 @@ async fn test_ws_connection() {
         cert_path: Some("./server.crt".into()),
         key_path: Some("./server.key".into()),
     });
-    let mut bus = bus.build();
+    let mut bus = bus.init();
     bus.run();
     let _handle: Handle = bus.handle().clone();
 
@@ -27,5 +27,5 @@ async fn test_ws_connection() {
 
     sleep(Duration::from_millis(100)).await; // Give the bus time to start
 
-    let url = Url::parse("ws://localhost:10800").unwrap();
+    let _url = Url::parse("ws://localhost:10800").unwrap();
 }

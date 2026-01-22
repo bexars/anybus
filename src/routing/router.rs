@@ -7,7 +7,6 @@ use crate::routing::{Advertisement, NodeMessage};
 #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::routing::{PeerEntry, Realm, RouteKind};
 #[cfg(any(feature = "net", feature = "ipc"))]
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     select,
     sync::{

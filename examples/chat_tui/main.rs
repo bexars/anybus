@@ -33,7 +33,7 @@ async fn main() -> color_eyre::Result<()> {
                 .ws_remote(WsRemoteOptions {
                     url: Url::parse("wss://localhost:10800").unwrap(),
                 })
-                .build();
+                .init();
             App::new(bus).run().await
         }
         Some(option) if option.as_str().trim() == "server" => {
@@ -46,7 +46,7 @@ async fn main() -> color_eyre::Result<()> {
                     cert_path: Some("server.crt".into()),
                     key_path: Some("server.key".into()),
                 })
-                .build();
+                .init();
             App::new(bus).run().await
         }
         _ => App::default().run().await,
@@ -105,7 +105,7 @@ impl Default for App {
             scroll_state: tui_scrollview::ScrollViewState::default(),
             id: Uuid::now_v7(),
             nickname: "Anonymous".to_string(),
-            bus: anybus::AnyBusBuilder::new().enable_ipc(true).build(),
+            bus: anybus::AnyBusBuilder::new().enable_ipc(true).init(),
             chat_members: HashMap::new(),
         }
     }
@@ -127,7 +127,7 @@ impl App {
 
         tui.enter()?; // Starts event handler, enters raw mode, enters alternate screen
         self.bus.run();
-        let mut handle = self.bus.handle().clone();
+        let handle = self.bus.handle().clone();
         let mut chat_listener = handle
             .listener()
             .realm(Realm::Global)
