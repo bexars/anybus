@@ -527,20 +527,23 @@ impl RequestHelper {
     where
         for<'de> <U as BusRiderRpc>::Response: Deserialize<'de>,
     {
-        let map = self.handle.route_watch_rx.borrow();
+        // let map = self.handle.route_watch_rx.borrow();
         let to_address: Address = endpoint_id.into();
-        let node_id = map.get_node_id();
+        let node_id = self.handle.route_watch_rx.borrow().get_node_id();
         let payload = Box::new(payload);
         // let address: Address = T::ANYBUS_UUID.into();
 
-        map.send(Packet {
-            to: to_address,
-            reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
-            from: None,
-            payload: Payload::BusRider(payload),
-        })
-        .map_err(AnyBusHandleError::SendError)?;
-        drop(map);
+        self.handle
+            .route_watch_rx
+            .borrow()
+            .send(Packet {
+                to: to_address,
+                reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
+                from: None,
+                payload: Payload::BusRider(payload),
+            })
+            .map_err(AnyBusHandleError::SendError)?;
+        // drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
