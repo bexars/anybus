@@ -38,6 +38,19 @@ where
             .reveal()
             .map_err(|p| ReceiveError::DeserializationError(p))
     }
+
+    /// Polls for available packet and returns it or an error.  None is no message waiting
+    pub fn try_recv(&mut self) -> Option<Result<T, crate::errors::ReceiveError>> {
+        let packet = self.packet_receiver.try_recv();
+        match packet {
+            Some(Ok(packet)) => match packet.payload.reveal() {
+                Ok(msg) => Some(Ok(msg)),
+                Err(_payload) => None, // just don't deliver undeserializable messages
+            },
+            Some(Err(err)) => Some(Err(err)),
+            None => None,
+        }
+    }
 }
 
 impl<T: BusRider + Unpin> Stream for Receiver<T>

@@ -53,6 +53,29 @@ impl PacketReceiver {
             }
         }
     }
+
+    pub(super) fn try_recv(&mut self) -> Option<Result<Packet, ReceiveError>> {
+        let msg = match self.rx.try_recv() {
+            Ok(msg) => match msg {
+                ClientMessage::Message(packet) => Ok(packet),
+                ClientMessage::Shutdown => Err(ReceiveError::Shutdown),
+                ClientMessage::FailedRegistration(_, _) => Err(ReceiveError::RegistrationFailed(
+                    "Registration failed".into(),
+                )),
+                ClientMessage::SuccessfulRegistration(_) => Err(ReceiveError::RegistrationFailed(
+                    "Unexpected successful registration".into(),
+                )),
+            },
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                return None;
+                // Err(ReceiveError::NoMessageAvailable)
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                Err(ReceiveError::Shutdown)
+            }
+        };
+        Some(msg)
+    }
 }
 impl Drop for PacketReceiver {
     fn drop(&mut self) {
