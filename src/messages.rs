@@ -1,7 +1,7 @@
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use std::collections::HashSet;
 
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
 use crate::routing::{EndpointId, Packet, Route};
 
@@ -9,13 +9,13 @@ use crate::routing::{EndpointId, Packet, Route};
 pub(crate) enum BrokerMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     RegisterPeer(NodeId, PeerEntry),
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     UnRegisterPeer(NodeId),
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     AddPeerEndpoints(NodeId, HashSet<Advertisement>),
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     RemovePeerEndpoints(NodeId, HashSet<Advertisement>),
     Shutdown,
 }
@@ -42,7 +42,7 @@ pub(crate) enum BusControlMsg {
     Shutdown,
 }
 
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
 #[derive(Debug)]
 pub(crate) enum NodeMessage {

@@ -82,4 +82,9 @@ where
             .send_to_address(self.response_endpoint_id, response)
         // .map_err(|payload| AnyBusHandleError::SendError(payload))
     }
+
+    /// A reference to the [[Anybus]] handle to be cloned or used as needed
+    pub fn handle(&self) -> &Handle {
+        &self.handle
+    }
 }

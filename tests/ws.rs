@@ -1,7 +1,10 @@
 use anybus::Handle;
 use std::time::Duration;
 use tokio::time::sleep;
+
+#[cfg(feature = "ws")]
 use url::Url;
+// use url::Url;
 
 #[cfg(all(feature = "ws", feature = "tokio"))]
 #[tokio::test]

@@ -1,12 +1,12 @@
 #[cfg(feature = "ipc")]
 mod ipc;
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws", feature = "wasm_ws"))]
 mod ws;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws", feature = "wasm_ws"))]
 pub(crate) use ws::ws_manager::WebsocketManager;
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws", feature = "wasm_ws"))]
 pub use ws::{WsListenerOptions, WsRemoteOptions};
 
 #[cfg(feature = "ipc")]

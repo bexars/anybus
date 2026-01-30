@@ -15,6 +15,15 @@ rust-version = "1.86"
 name = "counter"
 required-features = [ "tokio", "ipc"]
 
+[[example]]
+name = "bridge"
+required-features = [ "tokio", "ipc","ws"]
+
+[[example]]
+name = "chat_tui"
+required-features = [ "tokio", "ipc","ws"]
+
+
 
 [workspace]
 members = ["anybus-macro"]
@@ -28,15 +37,20 @@ uuid = { version = "1.18.0", default-features = false, features = [
 
 [features]
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["tokio","ipc","ws"]
+default = ["tokio","ipc","ws","uuid"]
+# default = ["tokio","serde","uuid","wasm_ws"]
+
 dioxus = ["dep:dioxus"]
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess"]
 net = [ "tokio/net"  ]
 ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
-remote =["tokio/rt"]
+ws_server = ["ws"]
+remote =["tokio/rt", "serde"]
+wasm = ["uuid/js","serde"]
+wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
 [dependencies]
-uuid = {workspace= true}
+uuid = {workspace= true, optional = true}
 tokio = { version = "1", features = [
     # "rt",
     # "rt-multi-thread",
@@ -45,7 +59,7 @@ tokio = { version = "1", features = [
 ] }
 interprocess = { version = "2.2.3", features = ["tokio"], optional = true }
 
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
 # tokio = { version = "1", features = [
 #     "rt",
 #     # "rt-multi-thread",
@@ -76,12 +90,25 @@ async-trait = "0.1.89"
 bincode = { version = "2.0.1", no-default-features = true }
 #bincode2 = "2.0.1"
 dyn-clone = "1.0.20"
-tokio-tungstenite = { version = "0.27.0", optional = true, features = ["native-tls"] }
 url = {version = "2.5.7", optional = true}
 bytes = {version = "1.10.1", optional = true}
+tokio-rustls = {version = "0.26.4", optional = true}
 # native-tls = {version = "0.2.14", optional = true}
 tokio-native-tls = {version = "0.3.0", optional = true}
 # tungstenite = {version = "0.20.0", optional = true}
+tokio-tungstenite-wasm = { version = "0.8.1",optional=true, features = ["native-tls"] }
+tokio-tungstenite = { version = "0.27.0", optional = true, features = ["native-tls"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+
+[target.'cfg(target_arch = "wasm32")'.features]
+ws = ["remote","net", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.features]
+ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+
 
 [dev-dependencies]
 color-eyre = "0.6.5"
@@ -98,5 +125,6 @@ tui-textarea = "0.7.0"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2.3"
 trybuild = "1.0.111"
+anybus = { path = "./" , features = ["tokio","ipc"] }
 # tokio = { version = "1.15", features = ["full", "tracing"] }
 # console-subscriber = "0.4.1"

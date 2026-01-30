@@ -10,6 +10,12 @@ use tokio::{
     },
     time::timeout,
 };
+
+#[cfg(not(feature = "wasm_ws"))]
+use tokio_tungstenite::{WebSocketStream, connect_async};
+#[cfg(feature = "wasm_ws")]
+use tokio_tungstenite_wasm::WebSocketStream;
+
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -39,6 +45,7 @@ pub(crate) struct WebsocketManager {
     tx: UnboundedSender<WsCommand>,
     rx: UnboundedReceiver<WsCommand>,
     node_id: NodeId,
+    #[cfg(feature = "ws_server")]
     ws_listener_options: Option<WsListenerOptions>,
     pending_peers: Vec<WsPendingPeer>,
     disconnected_peers: Vec<WsPendingPeer>,
@@ -60,6 +67,7 @@ impl WebsocketManager {
             tx,
             rx,
             node_id,
+            #[cfg(feature = "ws_server")]
             ws_listener_options,
             pending_peers: ws_peers.iter().map(WsPendingPeer::from).collect(),
             disconnected_peers: Vec::new(),
@@ -115,10 +123,20 @@ struct HandleCommand(WsCommand);
 //     stream: tokio::net::TcpStream,
 //     addr: core::net::SocketAddr,
 // }
+//
+#[cfg(feature = "wasm_ws")]
+// #[derive(Debug)]
+struct NewWsStream {
+    stream: WebSocketStream,
 
+    pending: Option<WsPendingPeer>,
+}
+
+#[cfg(not(feature = "wasm_ws"))]
 #[derive(Debug)]
 struct NewWsStream<S: AsyncRead + AsyncWrite + Unpin> {
-    stream: tokio_tungstenite::WebSocketStream<S>,
+    stream: WebSocketStream<S>,
+
     pending: Option<WsPendingPeer>,
 }
 
@@ -135,6 +153,7 @@ struct QueueReconnect {
 #[async_trait]
 impl State for Start {
     async fn next(self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
+        #[cfg(feature = "ws_server")]
         if let Some(ws_options) = state.ws_listener_options.take() {
             match create_listener(ws_options, state.tx.clone(), state.bus_control.clone()).await {
                 Ok(()) => b(Listen {}),
@@ -147,6 +166,9 @@ impl State for Start {
             debug!("WebSocket listener options not provided");
             b(Listen)
         }
+
+        #[cfg(not(feature = "ws_server"))]
+        b(Listen)
     }
 }
 
@@ -318,7 +340,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + std::fmt::Debug + 'static
 impl State for ConnectRemote {
     async fn next(mut self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // tokio_native_tls::native_tls::
-        let attempt = tokio_tungstenite::connect_async(self.pending.url.as_str()).await;
+        let attempt = connect_async(self.pending.url.as_str()).await;
         match attempt {
             Ok((ws_stream, response)) => {
                 // let addr = ws_stream

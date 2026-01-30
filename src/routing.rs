@@ -1,22 +1,23 @@
 pub(crate) mod router;
 pub(crate) mod routing_table;
 
+#[cfg(feature = "serde")]
+use erased_serde::Serializer;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
     fmt::Display,
     ops::Deref,
 };
-
-use erased_serde::Serializer;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::trace;
 // use tracing::debug;
 use uuid::Uuid;
 
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::messages::NodeMessage;
 use crate::{
     BusRider, errors::SendError, messages::ClientMessage, routing::routing_table::RoutingTable,
@@ -25,7 +26,12 @@ use crate::{
 // pub(crate) type EndpointId = Uuid;
 pub(crate) type NodeId = Uuid;
 
+#[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EndpointId(Uuid);
+
+#[cfg(not(feature = "serde"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EndpointId(Uuid);
 
 impl Display for EndpointId {
@@ -65,6 +71,7 @@ impl From<&Uuid> for EndpointId {
     }
 }
 
+#[cfg(feature = "remote")]
 #[derive(Debug, Clone)]
 pub(crate) struct PeerEntry {
     pub(crate) peer_tx: UnboundedSender<NodeMessage>,
@@ -84,6 +91,7 @@ pub(crate) struct PeerEntry {
 pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
+    #[cfg(feature = "remote")]
     peers: HashMap<NodeId, PeerEntry>,
 }
 
@@ -115,6 +123,7 @@ impl ForwardingTable {
         self.node_id
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn forward(&self, packet: WirePacket, from_peer: NodeId) {
         let reverse_route = packet.from.map(|f| self.lookup(&f)).flatten();
         if reverse_route.is_none() {
@@ -122,6 +131,7 @@ impl ForwardingTable {
             return;
         }
         trace!("Reverse Route {:?} for {:?}", reverse_route, packet);
+
         if let Some(ForwardTo::Remote(_, peer_id)) = reverse_route {
             if *peer_id != from_peer {
                 trace!("Dropping due to RPF check");
@@ -161,7 +171,7 @@ impl ForwardingTable {
                     unreachable!("Tried to send non-message to client")
                 }
             }),
-            #[cfg(any(feature = "net", feature = "ipc"))]
+            #[cfg(feature = "remote")]
             ForwardTo::Remote(tx, _node_id) => tx
                 .send(NodeMessage::WirePacket(packet.into()))
                 .map_err(|e| {
@@ -183,14 +193,18 @@ impl ForwardingTable {
                 Ok(())
             }
             ForwardTo::Broadcast(senders, realm) => {
+                #[cfg(feature = "remote")]
                 trace!(
                     "Broadcasting packet to {} clients and {} peers",
                     senders.len(),
                     self.peers.len()
                 );
+                #[cfg(not(feature = "remote"))]
+                trace!("Broadcasting packet to {} clients", senders.len(),);
                 for tx in senders {
                     _ = tx.send(ClientMessage::Message(packet.clone()));
                 }
+                #[cfg(feature = "remote")]
                 for (nid, peer_entry) in self.peers.iter() {
                     if !realm.allows_realm(&peer_entry.realm) {
                         trace!(
@@ -219,23 +233,34 @@ impl From<&RoutingTable> for ForwardingTable {
                 table.insert(*endpoint_id, best_route.via.clone());
             }
         }
+        #[cfg(feature = "remote")]
         let peer_senders = value
             .peers
             .iter()
             .map(|(k, v)| (*k, v.peer_entry.clone()))
             .collect();
-        Self {
+
+        #[cfg(feature = "remote")]
+        let new = Self {
             peers: peer_senders,
             table,
             node_id: value.node_id,
-        }
+        };
+
+        #[cfg(not(feature = "remote"))]
+        let new = Self {
+            table,
+            node_id: value.node_id,
+        };
+
+        new
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     Remote(UnboundedSender<NodeMessage>, NodeId),
     Broadcast(Vec<UnboundedSender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
@@ -248,7 +273,7 @@ pub(crate) struct Packet {
     pub(crate) from: Option<Address>,
     pub(crate) payload: Payload,
 }
-
+#[cfg(feature = "remote")]
 impl From<WirePacket> for Packet {
     fn from(value: WirePacket) -> Self {
         let payload = Payload::Bytes(value.payload);
@@ -269,6 +294,7 @@ pub(crate) struct WirePacket {
     pub(crate) payload: Vec<u8>,
 }
 
+#[cfg(feature = "remote")]
 impl From<Packet> for WirePacket {
     fn from(value: Packet) -> Self {
         let payload: Vec<u8> = value.payload.into();
@@ -308,6 +334,27 @@ impl Display for Address {
     }
 }
 
+#[cfg(not(feature = "remote"))]
+#[derive(Debug, Clone)]
+pub enum Payload {
+    BusRider(Box<dyn crate::traits::BusRider>),
+    // Bytes(Vec<u8>),
+    // Packet(Box<Packet>), // For internal use only
+}
+#[cfg(not(feature = "remote"))]
+impl Payload {
+    pub(crate) fn reveal<T: BusRider>(self) -> Result<T, Self> {
+        match self {
+            Payload::BusRider(br) => {
+                let res = (br as Box<dyn Any>).downcast::<T>().map(|b| *b);
+                res.map_err(|e| e.into())
+            }
+        }
+        // result.ok_or(self)
+    }
+}
+
+#[cfg(feature = "remote")]
 #[derive(Debug, Clone)]
 pub enum Payload {
     BusRider(Box<dyn crate::traits::BusRider>),
@@ -315,6 +362,7 @@ pub enum Payload {
     // Packet(Box<Packet>), // For internal use only
 }
 
+#[cfg(feature = "remote")]
 impl Payload {
     pub(crate) fn reveal<T: BusRider + for<'de> Deserialize<'de>>(self) -> Result<T, Self> {
         match self {
@@ -331,6 +379,7 @@ impl Payload {
     }
 }
 
+#[cfg(feature = "remote")]
 impl From<Payload> for Vec<u8> {
     fn from(value: Payload) -> Self {
         match value {
@@ -348,6 +397,7 @@ impl From<Payload> for Vec<u8> {
     }
 }
 
+#[cfg(feature = "remote")]
 impl From<Vec<u8>> for Payload {
     fn from(value: Vec<u8>) -> Self {
         Payload::Bytes(value)
@@ -363,7 +413,7 @@ impl From<Box<dyn Any>> for Payload {
     }
 }
 
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Advertisement {
     pub(crate) kind: RouteKind,
@@ -375,9 +425,9 @@ pub(crate) struct Advertisement {
 pub(crate) struct Route {
     pub(crate) via: ForwardTo,
     pub(crate) cost: u16,
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) realm: Realm,
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) learned_from: NodeId, // (0 for local)
     pub(crate) kind: RouteKind,
 }

@@ -1,25 +1,29 @@
-#[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::HashSet;
 
+#[cfg(feature = "serde")]
 use serde::Deserialize;
+#[cfg(feature = "serde")]
 use serde::de::DeserializeOwned;
+use std::net::Shutdown;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 use uuid::Uuid;
 
+use crate::BusDeserialize;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
-#[cfg(any(feature = "net", feature = "ipc"))]
+// use crate::messages::BrokerMsg;
+// #[cfg(any(feature = "net", feature = "ipc"))]
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::Receiver;
 
 use crate::receivers::RpcReceiver;
 use crate::routing::Address;
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::routing::PeerEntry;
 use crate::routing::Realm;
 use crate::routing::router::RoutesWatchRx;
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeId, WirePacket};
 use crate::routing::{EndpointId, Packet, Payload, Route};
 
@@ -36,7 +40,7 @@ impl Handle {
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [Receiver] for receiving
     /// messages sent to the [Uuid].  Anycast allows multiple listeners to be registered and the lowest cost route will
     /// be used to deliver the message.
-    pub async fn register_anycast<T: BusRiderWithUuid + DeserializeOwned>(
+    pub async fn register_anycast<T: BusRiderWithUuid + BusDeserialize>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global)
@@ -44,7 +48,7 @@ impl Handle {
     }
 
     /// Same as register_anycast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
-    pub async fn register_anycast_uuid<T: BusRider + DeserializeOwned>(
+    pub async fn register_anycast_uuid<T: BusRider + BusDeserialize>(
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -52,7 +56,7 @@ impl Handle {
             .await
     }
 
-    async fn register_anycast_inner<T: BusRider + DeserializeOwned>(
+    async fn register_anycast_inner<T: BusRider + BusDeserialize + for<'de> Deserialize<'de>>(
         &mut self,
         endpoint_id: EndpointId,
         realm: Realm,
@@ -62,11 +66,11 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
-            #[cfg(any(feature = "net", feature = "ipc"))]
+            #[cfg(feature = "remote")]
             realm,
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
-            #[cfg(any(feature = "net", feature = "ipc"))]
+            #[cfg(feature = "remote")]
             learned_from: Uuid::nil(),
         };
 
@@ -82,14 +86,14 @@ impl Handle {
     }
 
     /// Similar to anycast but only one receiver can be registered at a time
-    pub async fn register_unicast<T: BusRiderWithUuid + DeserializeOwned>(
+    pub async fn register_unicast<T: BusRiderWithUuid + BusDeserialize>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_unicast_inner(T::ANYBUS_UUID.into(), Realm::Global)
             .await
     }
     /// Same as register_unicast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
-    pub async fn register_unicast_uuid<T: BusRider + DeserializeOwned>(
+    pub async fn register_unicast_uuid<T: BusRider + BusDeserialize>(
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -97,7 +101,7 @@ impl Handle {
             .await
     }
 
-    async fn register_unicast_inner<T: BusRider + DeserializeOwned>(
+    async fn register_unicast_inner<T: BusRider + BusDeserialize>(
         &mut self,
         endpoint_id: EndpointId,
         realm: Realm,
@@ -108,11 +112,11 @@ impl Handle {
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -124,7 +128,7 @@ impl Handle {
     }
 
     /// Register a RPC service with the broker.
-    pub async fn register_rpc<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+    pub async fn register_rpc<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
         &mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = T::ANYBUS_UUID.into();
@@ -132,7 +136,7 @@ impl Handle {
     }
 
     /// Register a RPC service with the given Uuid as the endpoint
-    pub async fn register_rpc_uuid<T: BusRiderRpc + DeserializeOwned>(
+    pub async fn register_rpc_uuid<T: BusRiderRpc + BusDeserialize>(
         &mut self,
         endpoint_id: Uuid,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
@@ -140,7 +144,7 @@ impl Handle {
         self.register_rpc_inner(endpoint_id).await
     }
 
-    async fn register_rpc_inner<T: BusRiderRpc + DeserializeOwned>(
+    async fn register_rpc_inner<T: BusRiderRpc + BusDeserialize>(
         &mut self,
         endpoint_id: EndpointId,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
@@ -152,11 +156,11 @@ impl Handle {
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Userspace,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -168,7 +172,7 @@ impl Handle {
     }
 
     /// Broadcast registration, all receivers will get a copy of the message
-    pub async fn register_broadcast<T: BusRiderWithUuid + DeserializeOwned>(
+    pub async fn register_broadcast<T: BusRiderWithUuid + BusDeserialize>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
@@ -177,7 +181,7 @@ impl Handle {
     }
 
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
-    pub async fn register_broadcast_uuid<T: BusRider + DeserializeOwned>(
+    pub async fn register_broadcast_uuid<T: BusRider + BusDeserialize>(
         &mut self,
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -185,7 +189,7 @@ impl Handle {
         self.register_broadcast_inner(broadcast_id, Realm::Global)
             .await
     }
-    async fn register_broadcast_inner<T: BusRider + DeserializeOwned>(
+    async fn register_broadcast_inner<T: BusRider + BusDeserialize>(
         &mut self,
         broadcast_id: EndpointId,
         realm: Realm,
@@ -196,12 +200,12 @@ impl Handle {
             broadcast_id,
             Route {
                 kind: crate::routing::RouteKind::Broadcast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm,
                 via: crate::routing::ForwardTo::Broadcast(vec![tx], Realm::Global),
 
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -214,7 +218,7 @@ impl Handle {
     // Multicast is broken right now, removing it until fixed.
     /// Multicast registration, all receivers will get a copy of the message
     #[allow(dead_code)]
-    pub(crate) async fn register_multicast<T: BusRiderWithUuid + DeserializeOwned>(
+    pub(crate) async fn register_multicast<T: BusRiderWithUuid + BusDeserialize>(
         &mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
@@ -224,14 +228,14 @@ impl Handle {
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
     #[allow(dead_code)]
 
-    pub(crate) async fn register_multicast_uuid<T: BusRider + DeserializeOwned>(
+    pub(crate) async fn register_multicast_uuid<T: BusRider + BusDeserialize>(
         &mut self,
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
         self.register_multicast_inner(broadcast_id).await
     }
-    async fn register_multicast_inner<T: BusRider + DeserializeOwned>(
+    async fn register_multicast_inner<T: BusRider + BusDeserialize>(
         &mut self,
         broadcast_id: EndpointId,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -242,11 +246,11 @@ impl Handle {
             local_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Process,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -259,13 +263,13 @@ impl Handle {
             broadcast_id,
             Route {
                 kind: crate::routing::RouteKind::Multicast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Global,
                 via: crate::routing::ForwardTo::Multicast(HashSet::from([Address::Endpoint(
                     local_id,
                 )])),
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -301,7 +305,7 @@ impl Handle {
         }
     }
 
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) fn send_packet(&self, packet: WirePacket, from_peer: NodeId) {
         let map = self.route_watch_rx.borrow();
 
@@ -360,11 +364,11 @@ impl Handle {
             response_uuid,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Process,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 learned_from: Uuid::nil(),
             },
         );
@@ -394,24 +398,25 @@ impl Handle {
         payload: T,
     ) -> Result<T::Response, AnyBusHandleError>
     where
-        for<'de> T::Response: serde::de::Deserialize<'de>,
+        for<'de> T::Response: BusDeserialize,
+        // for<'de> T::Response: serde::de::Deserialize<'de>,
     {
         let mut helper = self.rpc_helper().await?;
         helper.request(payload).await
     }
 
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
         _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
     }
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
         _ = self
             .tx
             .send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes));
     }
 
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) fn register_peer(
         &self,
         uuid: NodeId,
@@ -427,7 +432,7 @@ impl Handle {
         }
     }
 
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
         _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
     }
@@ -488,7 +493,8 @@ impl RequestHelper {
         payload: T,
     ) -> Result<T::Response, AnyBusHandleError>
     where
-        for<'de> <T as BusRiderRpc>::Response: Deserialize<'de>,
+        for<'de> <T as BusRiderRpc>::Response: BusDeserialize,
+        // for<'de> <T as BusRiderRpc>::Response: Deserialize<'de>,
     {
         // let map = self.handle.route_watch_rx.borrow();
         let node_id = self.handle.route_watch_rx.borrow().get_node_id();
@@ -525,14 +531,16 @@ impl RequestHelper {
         endpoint_id: Uuid,
     ) -> Result<U::Response, AnyBusHandleError>
     where
-        for<'de> <U as BusRiderRpc>::Response: Deserialize<'de>,
+        for<'de> <U as BusRiderRpc>::Response: BusDeserialize,
+        // for<'de> <U as BusRiderRpc>::Response: Deserialize<'de>,
     {
         // let map = self.handle.route_watch_rx.borrow();
         let to_address: Address = endpoint_id.into();
         let node_id = self.handle.route_watch_rx.borrow().get_node_id();
         let payload = Box::new(payload);
         // let address: Address = T::ANYBUS_UUID.into();
-
+        // println!("Payload: {:?}", payload);
+        // println!("To: {}", to_address);
         self.handle
             .route_watch_rx
             .borrow()
@@ -543,12 +551,14 @@ impl RequestHelper {
                 payload: Payload::BusRider(payload),
             })
             .map_err(AnyBusHandleError::SendError)?;
+        // println!("Packet sent from inside rpc_helper");
         // drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
             }),
             None => Err(AnyBusHandleError::Shutdown),
+            Some(ClientMessage::Shutdown) => Err(AnyBusHandleError::Shutdown),
             _ => todo!(),
         }
     }
@@ -651,7 +661,7 @@ impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
 
 impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
     /// Finalize the registration and get a [Receiver] for the messages
-    pub async fn register<T: BusRider + DeserializeOwned>(
+    pub async fn register<T: BusRider + BusDeserialize>(
         mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         match self.cast.0 {
@@ -678,7 +688,7 @@ impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
 
 impl<CAST> RegistrationBuilder<NoEndpointId, CAST, RpcSet> {
     /// Finalize the registration and get a [RpcReceiver] for the messages.
-    pub async fn register<T: BusRiderRpc + DeserializeOwned + BusRiderWithUuid>(
+    pub async fn register<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
         mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let ep = T::ANYBUS_UUID.into();
@@ -689,7 +699,7 @@ impl<CAST> RegistrationBuilder<NoEndpointId, CAST, RpcSet> {
 
 impl<CAST> RegistrationBuilder<EndpointSet, CAST, RpcSet> {
     /// Finalize the registration and get a [RpcReceiver] for the messages
-    pub async fn register<T: BusRiderRpc + DeserializeOwned>(
+    pub async fn register<T: BusRiderRpc + BusDeserialize>(
         mut self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         self.handle
@@ -700,7 +710,7 @@ impl<CAST> RegistrationBuilder<EndpointSet, CAST, RpcSet> {
 
 impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
     /// Finalize the registration and get a [Receiver] for the messages
-    pub async fn register<T: BusRider + DeserializeOwned + BusRiderWithUuid>(
+    pub async fn register<T: BusRider + BusDeserialize + BusRiderWithUuid>(
         mut self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let ep = T::ANYBUS_UUID.into();

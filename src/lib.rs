@@ -40,7 +40,7 @@ mod traits;
 #[cfg(feature = "ipc")]
 use peers::IpcManager;
 
-#[cfg(feature = "net")]
+#[cfg(feature = "remote")]
 /// Network peer discovery and messaging
 pub mod peers;
 
@@ -138,14 +138,16 @@ impl AnyBus {
         &self.handle
     }
 
-    #[cfg(feature = "tokio")]
+    // #[cfg(feature = "tokio")]
     /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the AnyBus system
+    #[cfg(not(any(feature = "dioxus", feature = "wasm")))]
     pub fn shutdown_with_ctrlc(&self) {
         _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
+        #[cfg(not(any(feature = "dioxus", feature = "wasm")))]
         if self.options.enable_ctrlc_shutdown {
             self.shutdown_with_ctrlc();
         }
@@ -249,6 +251,7 @@ impl AnyBusBuilder {
     }
 
     /// Adds a remote WebSocket peer to connect to.  Can be called multiple times to add multiple remote peers.
+    #[cfg(feature = "ws")]
     pub fn ws_remote(mut self, options: crate::peers::WsRemoteOptions) -> Self {
         self.ws_remote_options.push(options);
         self

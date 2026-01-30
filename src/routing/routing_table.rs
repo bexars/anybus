@@ -4,15 +4,16 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::routing::{
-    Address, Advertisement, EndpointId, ForwardTo, NodeId, Realm, Route, RouteKind,
-    RouteTableError, router::PeerInfo,
+    Address, EndpointId, ForwardTo, NodeId, Realm, Route, RouteKind, RouteTableError,
 };
+#[cfg(feature = "remote")]
+use crate::routing::{Advertisement, router::PeerInfo};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
     pub(crate) peers: HashMap<Uuid, PeerInfo>,
 }
 
@@ -30,6 +31,7 @@ impl RoutingTable {
         Ok(())
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn add_peer_endpoints(
         &mut self,
         peer_id: Uuid,

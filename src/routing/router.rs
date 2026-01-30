@@ -1,12 +1,12 @@
-#[cfg(any(feature = "net", feature = "ipc"))]
+// #[cfg(any(feature = "net", feature = "ipc"))]
 use std::collections::{HashMap, HashSet};
 
-#[cfg(any(feature = "net", feature = "ipc"))]
-#[cfg(any(feature = "net", feature = "ipc"))]
+// #[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeMessage};
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 use crate::routing::{PeerEntry, Realm, RouteKind};
-#[cfg(any(feature = "net", feature = "ipc"))]
+// #[cfg(any(feature = "net", feature = "ipc"))]
 use tokio::{
     select,
     sync::{
@@ -59,7 +59,7 @@ impl Router {
             route_table: RoutingTable {
                 table: HashMap::new(),
                 node_id: uuid,
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 peers: HashMap::new(),
             },
         }
@@ -224,7 +224,7 @@ impl State {
                             let before = route_entry.routes.len();
                             route_entry.routes.retain_mut(|route| match route.via {
                                 ForwardTo::Local(ref tx) => !tx.is_closed(),
-                                #[cfg(any(feature = "net", feature = "ipc"))]
+                                #[cfg(feature = "remote")]
                                 ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
                                 ForwardTo::Multicast(ref _forward_tos) => true,
                                 ForwardTo::Broadcast(ref mut senders, _) => {
@@ -246,7 +246,7 @@ impl State {
                         }
                         return Some(Listen);
                     }
-                    #[cfg(any(feature = "net", feature = "ipc"))]
+                    #[cfg(feature = "remote")]
                     BrokerMsg::RegisterPeer(uuid, peer_entry) => {
                         if router.route_table.peers.contains_key(&uuid) {
                             // Peer already registered, ignore
@@ -268,7 +268,7 @@ impl State {
                         // router.send_route_updates();
                         return Some(RouteChange);
                     }
-                    #[cfg(any(feature = "net", feature = "ipc"))]
+                    #[cfg(feature = "remote")]
                     BrokerMsg::UnRegisterPeer(uuid) => {
                         router.route_table.table.retain(|_, route_entry| {
                             route_entry
@@ -279,7 +279,7 @@ impl State {
                         router.route_table.peers.remove(&uuid);
                         return Some(RouteChange);
                     }
-                    #[cfg(any(feature = "net", feature = "ipc"))]
+                    #[cfg(feature = "remote")]
                     BrokerMsg::AddPeerEndpoints(peer_id, hash_set) => {
                         match router.route_table.add_peer_endpoints(peer_id, hash_set) {
                             Some(count) => {
@@ -334,7 +334,7 @@ impl State {
                     //     }
                     //     return Some(Listen);
                     // }
-                    #[cfg(any(feature = "net", feature = "ipc"))]
+                    #[cfg(feature = "remote")]
                     BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => return Some(Listen),
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
@@ -352,6 +352,7 @@ impl State {
                             ForwardTo::Local(tx) => {
                                 _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
                             }
+                            #[cfg(feature = "remote")]
                             ForwardTo::Remote(_unbounded_sender, _node_id) => {
                                 panic!("Can't create remote endpoint locally")
                             }
@@ -422,7 +423,7 @@ impl State {
                                 ForwardTo::Local(tx) => {
                                     let _ = tx.send(ClientMessage::Shutdown);
                                 }
-                                #[cfg(any(feature = "net", feature = "ipc"))]
+                                #[cfg(feature = "remote")]
                                 ForwardTo::Remote(_tx, _node_id) => {}
                                 ForwardTo::Multicast(_forward_tos) => {}
                                 ForwardTo::Broadcast(listeners, _) => {
@@ -455,7 +456,7 @@ impl State {
               // HandleError(_e) => {
               //     todo!()
               // }
-        };
+        }
         // #[allow(unreachable_code)]
         // unreachable!();
         // error!("Fell through the brokermsg");
@@ -464,7 +465,7 @@ impl State {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 #[allow(dead_code)]
 pub(crate) struct PeerInfo {
     pub(crate) peer_id: NodeId,
@@ -474,7 +475,7 @@ pub(crate) struct PeerInfo {
     // pub(crate) realm: Realm,
     pub(crate) peer_entry: PeerEntry,
 }
-#[cfg(any(feature = "net", feature = "ipc"))]
+#[cfg(feature = "remote")]
 
 impl PeerInfo {
     fn new(peer_id: NodeId, peer_entry: PeerEntry) -> Self {

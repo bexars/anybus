@@ -2,6 +2,7 @@ use std::{io::stdin, time::Duration};
 
 use anybus::Handle;
 use tokio::time::sleep;
+#[cfg(feature = "ws")]
 use url::Url;
 
 #[tokio::main]
