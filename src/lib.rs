@@ -166,6 +166,7 @@ impl AnyBus {
                 self.id,
                 self.handle.clone(),
                 self.bc_rx.clone(),
+                #[cfg(feature = "ws_server")]
                 self.options.ws_listener_options.clone(),
                 self.options.ws_remote_options.clone(),
             );

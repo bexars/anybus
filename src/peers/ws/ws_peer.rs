@@ -10,9 +10,9 @@ use tokio::{
     },
 };
 
-#[cfg(not(feature = "wasm_ws"))]
-use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
-#[cfg(feature = "wasm_ws")]
+// #[cfg(not(feature = "wasm_ws"))]
+// use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
+// #[cfg(feature = "wasm_ws")]
 use tokio_tungstenite_wasm::{Message, WebSocketStream};
 
 use tracing::{error, trace};
@@ -176,122 +176,7 @@ impl WsPeer {
     }
 }
 
-#[cfg(not(feature = "wasm_ws"))]
-pub(crate) async fn run_ws_peer<S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: WebSocketStream<S>,
-    // addr: SocketAddr,
-    mut bus_control: watch::Receiver<BusControlMsg>,
-    tx_command: UnboundedSender<WsCommand>,
-    mut rx_control: UnboundedReceiver<WsControl>,
-    mut peer: Peer,
-) {
-    trace!("Entered run_ws_peer");
-    let mut ws_peer = WsPeer::new(peer.our_id, peer.peer_id);
-
-    'outer: loop {
-        // Send all queued outgoing messages first
-        let mut in_message: Option<InMessage> = None;
-        while let Some(out_message) = ws_peer.poll_outgoing() {
-            trace!("WsPeer sending out_message: {:?}", &out_message);
-            match out_message {
-                OutMessage::WsCommand(cmd) => {
-                    if let Err(e) = tx_command.send(cmd) {
-                        eprintln!("Failed to send WsCommand: {}", e);
-                        break 'outer; // everything is broken, exit loop
-                    }
-                }
-                OutMessage::WsMessage(msg) => {
-                    let msg = Message::Binary(msg.into());
-                    if let Err(e) = stream.send(msg).await {
-                        error!("Failed to send WsMessage: {} to {}", e, peer.peer_id);
-                        in_message = Some(InMessage::WsPeerClosed);
-                        break;
-                    }
-                }
-                OutMessage::BrokerMessage(msg) => {
-                    if peer.handle.send_broker_msg(msg).is_none() {
-                        error!("Failed to send BrokerMsg to handle");
-                        break 'outer; // everything is broken, exit loop
-                    }
-
-                    // Handle Broker message sending here
-                }
-                OutMessage::ClosePeer => {
-                    stream.close(None).await.ok();
-                }
-                OutMessage::ForwardPacket(wire_packet) => {
-                    peer.handle.send_packet(wire_packet, peer.peer_id);
-                }
-            };
-        }
-        if let State::Shutdown = ws_peer.state {
-            break;
-        }
-
-        in_message = if in_message.is_none() {
-            select! {
-
-                msg = stream.next() => {
-                    match msg {
-                        Some(Ok(message)) => {
-                            match message {
-                                Message::Binary(data) => {
-                                    let msg = serde_cbor::from_slice::<WsMessage>(&data)
-                                        .map(|msg| InMessage::WsMessage(msg))
-                                        .unwrap_or_else(|e| {
-                                            error!("Failed to deserialize WsMessage: {}", e);
-                                            InMessage::WsPeerClosed
-                                        });
-                                    Some(msg)
-
-                                    // Some(InMessage::WsMessage(data))
-                                }
-                                Message::Close(_) => {
-                                    Some(InMessage::WsPeerClosed)
-                                }
-                                _ => None, // Ignore other message types for now
-                            }
-                        }
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {}", e);
-                            Some(InMessage::WsPeerClosed)
-                        }
-                        None => {
-                            // Connection closed
-                            Some(InMessage::WsPeerClosed)
-                        }
-                    }
-                }
-                Some(msg) = rx_control.recv() => {
-                    Some(InMessage::WsControl(msg))
-                }
-                Some(msg) = peer.rx.recv() => {
-                    Some(InMessage::NodeMessage(msg))
-                }
-
-                Ok(_msg) = bus_control.changed() => {
-                    let msg = *bus_control.borrow();
-                    match msg {
-                        BusControlMsg::Shutdown => {
-                            // ws_peer.state = State::Shutdown;
-                            Some(InMessage::Shutdown)
-                        }
-                        _ => None,
-                    }
-                }
-            }
-        } else {
-            in_message
-        };
-
-        if let Some(in_msg) = in_message {
-            ws_peer.handle_input(in_msg);
-        }
-    }
-}
-
-#[cfg(feature = "wasm_ws")]
-pub(crate) async fn run_ws_peer<S: AsyncRead + AsyncWrite + Unpin>(
+pub(crate) async fn run_ws_peer(
     mut stream: WebSocketStream,
     // addr: SocketAddr,
     mut bus_control: watch::Receiver<BusControlMsg>,

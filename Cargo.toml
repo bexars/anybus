@@ -9,7 +9,7 @@ authors = ["Matt Bradbury <matt@bexars.com"]
 categories = ["network-programming", "asynchronous"]
 keywords    = ["messaging", "ipc", "networking", "async", "dioxus"]
 description = "A serverless message bus for communicating between Rust applications easily (only IPC currently)"
-rust-version = "1.86"
+# rust-version = "1.86"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[example]]
 name = "counter"
@@ -37,17 +37,17 @@ uuid = { version = "1.18.0", default-features = false, features = [
 
 [features]
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["tokio","ipc","ws","uuid"]
+default = ["tokio","ipc","ws","uuid","ws_server"]
 # default = ["tokio","serde","uuid","wasm_ws"]
 
 dioxus = ["dep:dioxus"]
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess"]
 net = [ "tokio/net"  ]
-ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
-ws_server = ["ws"]
+ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+ws_server = ["ws", "dep:tokio-tungstenite"]
 remote =["tokio/rt", "serde"]
 wasm = ["uuid/js","serde"]
-wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
+# wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
 [dependencies]
 uuid = {workspace= true, optional = true}
@@ -96,8 +96,8 @@ tokio-rustls = {version = "0.26.4", optional = true}
 # native-tls = {version = "0.2.14", optional = true}
 tokio-native-tls = {version = "0.3.0", optional = true}
 # tungstenite = {version = "0.20.0", optional = true}
-tokio-tungstenite-wasm = { version = "0.8.1",optional=true, features = ["native-tls"] }
-tokio-tungstenite = { version = "0.27.0", optional = true, features = ["native-tls"] }
+tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, features = ["native-tls"] }
+tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","native-tls"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 

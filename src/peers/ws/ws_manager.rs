@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
@@ -11,10 +11,11 @@ use tokio::{
     time::timeout,
 };
 
-#[cfg(not(feature = "wasm_ws"))]
-use tokio_tungstenite::{WebSocketStream, connect_async};
-#[cfg(feature = "wasm_ws")]
-use tokio_tungstenite_wasm::WebSocketStream;
+// #[cfg(not(feature = "wasm_ws"))]
+use tokio_tungstenite_wasm::connect;
+use tokio_tungstenite_wasm::{Message, WebSocketStream};
+// #[cfg(feature = "wasm_ws")]
+// use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::{debug, error, trace};
 
@@ -23,14 +24,14 @@ use crate::{
     messages::BusControlMsg,
     peers::{
         Peer, WsRemoteOptions,
-        ws::{
-            self, WsActivePeer, WsCommand, WsListenerOptions, WsMessage, WsPendingPeer,
-            create_listener,
-        },
+        ws::{self, WsActivePeer, WsCommand, WsListenerOptions, WsMessage, WsPendingPeer},
     },
     routing::{NodeId, PeerEntry, Realm},
     spawn,
 };
+
+#[cfg(feature = "ws_server")]
+use crate::peers::ws::create_listener;
 
 /// Helper function to box a State and return it as an Option
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -56,7 +57,7 @@ impl WebsocketManager {
         node_id: NodeId,
         handle: Handle,
         bus_control: watch::Receiver<BusControlMsg>,
-        ws_listener_options: Option<WsListenerOptions>,
+        #[cfg(feature = "ws_server")] ws_listener_options: Option<WsListenerOptions>,
         ws_peers: Vec<WsRemoteOptions>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -124,20 +125,28 @@ struct HandleCommand(WsCommand);
 //     addr: core::net::SocketAddr,
 // }
 //
-#[cfg(feature = "wasm_ws")]
-// #[derive(Debug)]
+// #[cfg(feature = "wasm_ws")]
+// // #[derive(Debug)]
+// struct NewWsStream {
+//     stream: WebSocketStream,
+
+//     pending: Option<WsPendingPeer>,
+// }
+
+// #[cfg(not(feature = "wasm_ws"))]
+
 struct NewWsStream {
     stream: WebSocketStream,
 
     pending: Option<WsPendingPeer>,
 }
 
-#[cfg(not(feature = "wasm_ws"))]
-#[derive(Debug)]
-struct NewWsStream<S: AsyncRead + AsyncWrite + Unpin> {
-    stream: WebSocketStream<S>,
-
-    pending: Option<WsPendingPeer>,
+impl Debug for NewWsStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewWsStream")
+            .field("pending", &self.pending)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -261,13 +270,11 @@ impl State for HandleCommand {
 }
 
 #[async_trait]
-impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + std::fmt::Debug + 'static> State
-    for NewWsStream<S>
-{
+impl State for NewWsStream {
     async fn next(mut self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // Handshake the Anybus protocol here
         let msg = WsMessage::Hello(state.node_id);
-        let msg = tokio_tungstenite::tungstenite::Message::Binary(msg.into());
+        let msg = Message::Binary(msg.into());
         trace!("Sending Hello message: {:?}", msg);
         if let Err(e) = self.stream.send(msg).await {
             error!("Failed to send Hello message: {}", e);
@@ -279,7 +286,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + std::fmt::Debug + 'static
             Ok(Some(Ok(msg))) => {
                 trace!("Received message: {:?}", msg);
                 match msg {
-                    tokio_tungstenite::tungstenite::Message::Binary(bin) => {
+                    Message::Binary(bin) => {
                         match serde_cbor::from_slice::<WsMessage>(&bin) {
                             Ok(WsMessage::Hello(peer_id)) => {
                                 debug!("Received Hello from peer: {} ", peer_id);
@@ -340,14 +347,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + std::fmt::Debug + 'static
 impl State for ConnectRemote {
     async fn next(mut self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // tokio_native_tls::native_tls::
-        let attempt = connect_async(self.pending.url.as_str()).await;
+        let attempt = connect(self.pending.url.as_str()).await;
         match attempt {
-            Ok((ws_stream, response)) => {
+            Ok(ws_stream) => {
                 // let addr = ws_stream
-                debug!(
-                    "Connected to remote WebSocket peer  with response {:?}",
-                    response
-                );
+                // debug!(
+                //     "Connected to remote WebSocket peer  with response {:?}",
+                //     response
+                // );
                 b(NewWsStream {
                     stream: ws_stream,
                     pending: Some(self.pending),
