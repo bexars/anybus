@@ -244,7 +244,7 @@ impl State for HandleCommand {
     async fn next(self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         match self.0 {
             WsCommand::NewWsStream(stream, _addr) => b(NewWsStream {
-                stream,
+                stream: stream,
                 pending: None,
             }),
             WsCommand::PeerClosed(uuid) => {

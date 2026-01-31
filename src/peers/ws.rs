@@ -7,9 +7,9 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
-use tokio_native_tls::{TlsStream, native_tls::Identity};
+// use tokio_native_tls::{TlsStream, native_tls::Identity};
 #[cfg(feature = "ws_server")]
-use tokio_tungstenite::WebSocketStream as WsTg;
+// use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::error;
@@ -67,7 +67,7 @@ enum WsError {
     #[error("Error binding to address {}", .0)]
     BindFailure(SocketAddr),
     #[error("TLS Error: {0}")]
-    TlsError(#[from] tokio_native_tls::native_tls::Error),
+    TlsError(#[from] rustls::Error),
     #[error("File error: {0}")]
     StandardIo(#[from] std::io::Error),
 }
@@ -170,14 +170,37 @@ async fn create_listener(
         ws_listener_options.cert_path.unwrap_or_default(),
         ws_listener_options.key_path.unwrap_or_default(),
     );
+    // let acceptor = {
+    //     let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
+    //     let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
+    //     let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
+    //     let acceptor = tokio_native_tls::TlsAcceptor::from(
+    //         tokio_native_tls::native_tls::TlsAcceptor::builder(identity).build()?,
+    //         // .expect("Failed to build TlsAcceptor"),
+    //     );
+    //     acceptor
+    // };
     let acceptor = {
+        use std::sync::Arc;
+
+        use tokio_rustls::rustls::pki_types::{
+            CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject,
+        };
+
         let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
         let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
-        let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
-        let acceptor = tokio_native_tls::TlsAcceptor::from(
-            tokio_native_tls::native_tls::TlsAcceptor::builder(identity).build()?,
-            // .expect("Failed to build TlsAcceptor"),
-        );
+        let cert = vec![CertificateDer::from(cert)];
+        let key = PrivatePkcs8KeyDer::from(key);
+        let key = PrivateKeyDer::Pkcs8(key);
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert, key)?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        // let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
+        // let acceptor = tokio_native_tls::TlsAcceptor::from(
+        //     tokio_native_tls::native_tls::TlsAcceptor::builder(identity).build()?,
+        //     // .expect("Failed to build TlsAcceptor"),
+        // );
         acceptor
     };
     let sock_addr = std::net::SocketAddr::new(ws_listener_options.addr, ws_listener_options.port);
@@ -196,7 +219,7 @@ async fn run_ws_listener(
     listener: tokio::net::TcpListener,
     ws_command: UnboundedSender<WsCommand>,
     mut bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
-    acceptor: tokio_native_tls::TlsAcceptor,
+    acceptor: tokio_rustls::TlsAcceptor,
 ) {
     loop {
         use tokio_tungstenite::MaybeTlsStream;
@@ -206,9 +229,12 @@ async fn run_ws_listener(
                 match accept_result {
                     Ok((stream, addr)) => {
                         // Handle the new connection
-                        let stream = match acceptor.accept(stream).await {
+                        let stream = acceptor.accept(stream).await;
+                        // let s = stream..into_inner();
+                        let stream = match stream {
                             Ok(s) => {
-                                let s = MaybeTlsStream::NativeTls(s);
+                                // let s = rustls::client::TlsStream::fr
+                                let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
                                 tokio_tungstenite::accept_async(s).await.unwrap()}
                             ,
                             Err(e) => {

@@ -43,7 +43,8 @@ default = ["tokio","ipc","ws","uuid","ws_server"]
 dioxus = ["dep:dioxus"]
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess"]
 net = [ "tokio/net"  ]
-ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+#ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite"]
 remote =["tokio/rt", "serde"]
 wasm = ["uuid/js","serde"]
@@ -94,10 +95,12 @@ url = {version = "2.5.7", optional = true}
 bytes = {version = "1.10.1", optional = true}
 tokio-rustls = {version = "0.26.4", optional = true}
 # native-tls = {version = "0.2.14", optional = true}
-tokio-native-tls = {version = "0.3.0", optional = true}
+# tokio-native-tls = {version = "0.3.0", optional = true}
 # tungstenite = {version = "0.20.0", optional = true}
-tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, features = ["native-tls"] }
-tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","native-tls"] }
+tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, features = ["rustls-tls-native-roots"] }
+# tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls"] }
+tokio-tungstenite = { path = "../tokio-tungstenite", optional = true, features = ["stream","rustls-tls-native-roots"] }
+rustls = {version = "0.23.36", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 
