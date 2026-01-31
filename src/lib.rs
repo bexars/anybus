@@ -203,7 +203,7 @@ pub struct AnyBusBuilder {
     enable_ctrlc_shutdown: bool,
     #[cfg(feature = "ipc")]
     enable_ipc: bool,
-    #[cfg(feature = "ws")]
+    #[cfg(feature = "ws_server")]
     ws_listener_options: Option<crate::peers::WsListenerOptions>,
     #[cfg(feature = "ws")]
     ws_remote_options: Vec<crate::peers::WsRemoteOptions>,
@@ -226,6 +226,7 @@ impl AnyBusBuilder {
     ///
     /// If enabled, when the user presses Ctrl-C in the terminal, the AnyBus system will be shutdown cleanly
     ///
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn enable_ctrlc_shutdown(mut self, enable: bool) -> Self {
         self.enable_ctrlc_shutdown = enable;
         self
@@ -245,7 +246,7 @@ impl AnyBusBuilder {
     ///
     /// If not set, no WebSocket listener will be started.
     ///
-    #[cfg(feature = "ws")]
+    #[cfg(feature = "ws_server")]
     pub fn ws_listener(mut self, options: crate::peers::WsListenerOptions) -> Self {
         self.ws_listener_options = Some(options);
         self
