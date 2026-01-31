@@ -29,7 +29,7 @@ required-features = [ "tokio", "ipc","ws"]
 members = ["anybus-macro"]
 
 [workspace.dependencies]
-uuid = { version = "1.18.0", default-features = false, features = [
+uuid = { version = "1.18.0", default-features = false, option=true,features = [
     "v7",
     "serde",
     "std",
@@ -37,21 +37,22 @@ uuid = { version = "1.18.0", default-features = false, features = [
 
 [features]
 tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["tokio","ipc","ws","uuid","ws_server"]
+default = ["tokio","ws_rustls","ws_server", "ipc"]
 # default = ["tokio","serde","uuid","wasm_ws"]
 
 dioxus = ["dep:dioxus"]
-ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess"]
+ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess", "tokio/signal", "tokio/net"]
 net = [ "tokio/net"  ]
 #ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
-ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-rustls", "dep:rustls"]
+ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
+ws_rustls = ["ws", "dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite"]
 remote =["tokio/rt", "serde"]
-wasm = ["uuid/js","serde"]
+# wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
 [dependencies]
-uuid = {workspace= true, optional = true}
+# uuid = {workspace= true, optional = true}
 tokio = { version = "1", features = [
     # "rt",
     # "rt-multi-thread",
@@ -101,16 +102,17 @@ tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, fea
 # tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls"] }
 tokio-tungstenite = { path = "../tokio-tungstenite", optional = true, features = ["stream","rustls-tls-native-roots"] }
 rustls = {version = "0.23.36", optional = true }
+uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 
 [target.'cfg(target_arch = "wasm32")'.features]
-ws = ["remote","net", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
+ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.features]
-ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
+ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes"]
 
 
 [dev-dependencies]

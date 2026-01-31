@@ -1,13 +1,15 @@
 #[cfg(feature = "ipc")]
 mod ipc;
-#[cfg(any(feature = "ws", feature = "wasm_ws"))]
+#[cfg(feature = "ws")]
 mod ws;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
-#[cfg(any(feature = "ws", feature = "wasm_ws"))]
+#[cfg(feature = "ws_server")]
+pub use ws::WsListenerOptions;
+#[cfg(feature = "ws")]
+pub use ws::WsRemoteOptions;
+#[cfg(feature = "ws")]
 pub(crate) use ws::ws_manager::WebsocketManager;
-#[cfg(any(feature = "ws", feature = "wasm_ws"))]
-pub use ws::{WsListenerOptions, WsRemoteOptions};
 
 #[cfg(feature = "ipc")]
 pub(crate) use ipc::ipc_manager::IpcManager;
@@ -15,6 +17,7 @@ pub(crate) use ipc::ipc_manager::IpcManager;
 use crate::{Handle, messages::NodeMessage, routing::Realm};
 
 #[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct Peer {
     pub(crate) peer_id: Uuid,
     pub(crate) our_id: Uuid,

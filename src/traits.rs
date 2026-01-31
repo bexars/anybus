@@ -41,6 +41,7 @@ pub trait BusRiderRpc: BusRider {
 #[cfg(not(feature = "serde"))]
 pub trait BusDeserialize {}
 #[cfg(feature = "serde")]
+/// WIP for removing Serde from Anybus
 pub trait BusDeserialize: DeserializeOwned {}
 
 #[cfg(feature = "serde")]

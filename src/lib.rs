@@ -140,14 +140,14 @@ impl AnyBus {
 
     // #[cfg(feature = "tokio")]
     /// Convenience function to spawn a task that will listen for Ctrl-C from the terminal and trigger a shutdown of the AnyBus system
-    #[cfg(not(any(feature = "dioxus", feature = "wasm")))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn shutdown_with_ctrlc(&self) {
         _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
-        #[cfg(not(any(feature = "dioxus", feature = "wasm")))]
+        #[cfg(not(target_arch = "wasm32"))]
         if self.options.enable_ctrlc_shutdown {
             self.shutdown_with_ctrlc();
         }

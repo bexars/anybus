@@ -6,10 +6,8 @@ use std::{
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
-// use tokio_native_tls::{TlsStream, native_tls::Identity};
-#[cfg(feature = "ws_server")]
-// use tokio_tungstenite::WebSocketStream;
+use tokio::sync::mpsc::UnboundedSender;
+#[cfg(feature = "ws")]
 use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::error;
@@ -40,7 +38,7 @@ enum WsCommand {
 impl Debug for WsCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NewWsStream(arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
+            Self::NewWsStream(_arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),
         }
     }
@@ -183,9 +181,7 @@ async fn create_listener(
     let acceptor = {
         use std::sync::Arc;
 
-        use tokio_rustls::rustls::pki_types::{
-            CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject,
-        };
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
         let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
         let key = std::fs::read(key_path)?; //.expect("Failed to read private key");

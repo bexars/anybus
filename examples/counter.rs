@@ -1,12 +1,11 @@
 use std::{
     env::{self},
     fmt::Display,
-    marker::PhantomData,
     time::Duration,
 };
 
 // use anybus::helper::ShutdownWithCtrlC;
-use anybus::{AnyBus, BusRider, BusRiderRpc, Handle, RpcRequest, bus_uuid};
+use anybus::{AnyBus, Handle, bus_uuid};
 use tokio;
 
 // use tracing_subscriber;
@@ -69,32 +68,32 @@ impl Display for ChatMessage {
 //     }
 // }
 //
-struct Responder<T> {
-    p: PhantomData<T>,
-}
+// struct Responder<T> {
+//     p: PhantomData<T>,
+// }
 
-impl<T> Responder<T> {
-    fn send(result: T) {}
-}
+// impl<T> Responder<T> {
+//     fn send(result: T) {}
+// }
 
-trait BusService: BusRiderRpc + Sized {
-    // type Output: BusRider;
-    fn recv(self, r: RpcRequest<Self>);
-}
+// trait BusService: BusRiderRpc + Sized {
+//     // type Output: BusRider;
+//     fn recv(self, r: RpcRequest<Self>);
+// }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone, Default)]
-struct Echo {}
+// #[derive(Debug, serde::Serialize, serde::Deserialize, Clone, Default)]
+// struct Echo {}
 
-impl BusService for Echo {
-    // type Output = Echo;
-    fn recv(self, r: RpcRequest<Self>) {
-        Echo::default();
-    }
-}
+// impl BusService for Echo {
+//     // type Output = Echo;
+//     fn recv(self, r: RpcRequest<Self>) {
+//         Echo::default();
+//     }
+// }
 
-impl BusRiderRpc for Echo {
-    type Response = String;
-}
+// impl BusRiderRpc for Echo {
+//     type Response = String;
+// }
 
 struct ChatListener {}
 

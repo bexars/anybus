@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    // io::{AsyncRead, AsyncWrite},
     select,
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
@@ -49,6 +49,7 @@ enum State {
     Shutdown,
 }
 
+#[allow(unused)]
 struct WsPeer {
     output: VecDeque<OutMessage>,
     state: State,

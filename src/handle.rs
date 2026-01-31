@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 #[cfg(feature = "serde")]
 use serde::Deserialize;
-#[cfg(feature = "serde")]
-use serde::de::DeserializeOwned;
-use std::net::Shutdown;
+// #[cfg(feature = "serde")]
+// use serde::de::DeserializeOwned;
+// use std::net::Shutdown;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 use uuid::Uuid;
@@ -440,8 +440,7 @@ impl Handle {
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
         _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
     }
-
-    #[cfg(feature = "tokio")]
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn shutdown(&self) {
         let _ = self.tx.send(BrokerMsg::Shutdown);
     }
