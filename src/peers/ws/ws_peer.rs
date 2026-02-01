@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use futures::{SinkExt, StreamExt};
 use tokio::{
     // io::{AsyncRead, AsyncWrite},
     select,
@@ -36,7 +35,7 @@ enum OutMessage {
 }
 
 #[derive(Debug)]
-pub enum InMessage {
+pub(crate) enum InMessage {
     WsControl(WsControl),
     WsMessage(WsMessage),
     NodeMessage(NodeMessage),

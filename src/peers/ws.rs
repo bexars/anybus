@@ -3,7 +3,6 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -16,7 +15,6 @@ use uuid::Uuid;
 
 use crate::{
     messages::BusControlMsg,
-    peers::ws::ws_peer::InMessage,
     routing::{Advertisement, WirePacket},
     spawn,
 };
@@ -33,7 +31,7 @@ pub use tg_websock::WebSockStream;
 mod websys_websock;
 
 #[derive(Debug)]
-enum WsControl {
+pub(crate) enum WsControl {
     Shutdown,
 }
 
@@ -202,7 +200,7 @@ async fn create_listener(
         use std::sync::Arc;
 
         use rustls::pki_types::pem::PemObject;
-        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
         // let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
         // let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
