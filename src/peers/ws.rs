@@ -3,19 +3,20 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "ws")]
-use tokio_tungstenite_wasm::WebSocketStream;
-
+// use tokio_tungstenite_wasm::WebSocketStream;
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
     messages::BusControlMsg,
+    peers::ws::ws_peer::InMessage,
     routing::{Advertisement, WirePacket},
     spawn,
 };
@@ -23,15 +24,32 @@ use crate::{
 pub(super) mod ws_manager;
 mod ws_peer;
 
+#[cfg(not(target_family = "wasm"))]
+mod tg_websock;
+#[cfg(not(target_family = "wasm"))]
+pub use tg_websock::WebSockStream;
+
+#[cfg(target_family = "wasm")]
+mod websys_websock;
+
 #[derive(Debug)]
 enum WsControl {
     Shutdown,
 }
 
+// #[async_trait]
+// trait WebSockStream {
+//     async fn send_msg(&mut self, message: WsMessage) -> Result<(), Box<dyn std::error::Error>>;
+
+//     async fn next_msg(&mut self) -> InMessage;
+
+//     async fn close_conn(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+// }
+
 // #[derive(Debug)]
 enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
-    NewWsStream(WebSocketStream, SocketAddr),
+    NewWsStream(WebSockStream, SocketAddr),
     PeerClosed(Uuid),
 }
 
@@ -45,7 +63,7 @@ impl Debug for WsCommand {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum WsMessage {
+pub(crate) enum WsMessage {
     Hello(Uuid),
     Packet(WirePacket),
     CloseConnection,
@@ -66,6 +84,8 @@ enum WsError {
     BindFailure(SocketAddr),
     #[error("TLS Error: {0}")]
     TlsError(#[from] rustls::Error),
+    #[error("File error: {0}")]
+    TlsPkiError(#[from] rustls::pki_types::pem::Error),
     #[error("File error: {0}")]
     StandardIo(#[from] std::io::Error),
 }
@@ -181,16 +201,20 @@ async fn create_listener(
     let acceptor = {
         use std::sync::Arc;
 
+        use rustls::pki_types::pem::PemObject;
         use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
-        let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
-        let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
-        let cert = vec![CertificateDer::from(cert)];
-        let key = PrivatePkcs8KeyDer::from(key);
-        let key = PrivateKeyDer::Pkcs8(key);
+        // let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
+        // let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
+        let cert = CertificateDer::from_pem_file(&cert_path)?;
+
+        let key = PrivateKeyDer::from_pem_file(&key_path)?;
+        let certs = vec![cert];
+        // let key = key.
+        // let key = PrivateKeyDer::Pkcs8(key);
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(cert, key)?;
+            .with_single_cert(certs, key)?;
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         // let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
         // let acceptor = tokio_native_tls::TlsAcceptor::from(
@@ -218,7 +242,7 @@ async fn run_ws_listener(
     acceptor: tokio_rustls::TlsAcceptor,
 ) {
     loop {
-        use tokio_tungstenite::MaybeTlsStream;
+        // use tokio_tungstenite::MaybeTlsStream;
 
         tokio::select! {
             accept_result = listener.accept() => {
@@ -230,7 +254,7 @@ async fn run_ws_listener(
                         let stream = match stream {
                             Ok(s) => {
                                 // let s = rustls::client::TlsStream::fr
-                                let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
+                                // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
                                 tokio_tungstenite::accept_async(s).await.unwrap()}
                             ,
                             Err(e) => {
