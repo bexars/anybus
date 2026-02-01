@@ -31,7 +31,7 @@ async fn main() -> color_eyre::Result<()> {
             println!("Connecting to Server");
             let bus = AnyBusBuilder::new()
                 .ws_remote(WsRemoteOptions {
-                    url: Url::parse("wss://localhost:10800").unwrap(),
+                    url: Url::parse("wss://anybus.bexars.com:10900").unwrap(),
                 })
                 .init();
             App::new(bus).run().await
@@ -40,12 +40,13 @@ async fn main() -> color_eyre::Result<()> {
             println!("Starting Server");
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
-                    addr: Ipv4Addr::LOCALHOST.into(),
-                    port: 10800,
+                    addr: Ipv4Addr::from_octets([192, 168, 0, 6]).into(),
+                    port: 10900,
                     use_tls: true,
-                    cert_path: Some("server.crt".into()),
-                    key_path: Some("server.key".into()),
+                    cert_path: Some("/Users/bradbury/.secure/client.crt".into()),
+                    key_path: Some("/Users/bradbury/.secure/client.key".into()),
                 })
+                .enable_ipc(true)
                 .init();
             App::new(bus).run().await
         }
