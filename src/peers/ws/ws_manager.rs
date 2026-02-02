@@ -1,13 +1,14 @@
 use std::{fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::timeout;
 use tokio::{
     // io::{AsyncRead, AsyncWrite},
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         watch,
     },
-    time::timeout,
 };
 
 #[cfg(not(target_family = "wasm"))]
@@ -91,7 +92,7 @@ impl WebsocketManager {
 
     fn get_next_timeout(&self) -> Option<Duration> {
         self.disconnected_peers.first().map(|p| {
-            let now = tokio::time::Instant::now();
+            let now = std::time::Instant::now();
             if p.when_ready() <= now {
                 Duration::from_secs(0)
             } else {
@@ -102,7 +103,7 @@ impl WebsocketManager {
 
     fn get_next_ready_peer(&mut self) -> Option<WsPendingPeer> {
         if let Some(first) = self.disconnected_peers.first() {
-            let now = tokio::time::Instant::now();
+            let now = std::time::Instant::now();
             if first.when_ready() <= now {
                 return self.disconnected_peers.remove(0).into();
             }
@@ -203,7 +204,8 @@ impl State for Listen {
 
         let timeout = state.get_next_timeout();
 
-        tokio::select! {
+        #[cfg(not(target_arch = "wasm32"))]
+        let select_result = tokio::select! {
             _ = async {
                 if let Some(dur) = timeout {
                     tokio::time::sleep(dur).await;
@@ -241,7 +243,36 @@ impl State for Listen {
                 error!("WebSocket Manager closed.  Shutting down Websockets.");
                 None
             }
-        }
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let select_result = tokio::select! {
+            Some(cmd) = state.rx.recv() => {
+                b(HandleCommand(cmd))
+                // Handle incoming commands
+            }
+            Ok(_msg) = state.bus_control.changed() => {
+                match *state.bus_control.borrow() {
+                    BusControlMsg::Shutdown => {
+                        for peer in state.current_peers.drain(..) {
+                            debug!("Shutting down connection to peer {}", peer.peer_id);
+                            let _ = peer.ws_control.send(ws::WsControl::Shutdown);
+                        }
+                        debug!("WebSocket Manager shutting down");
+                         None
+                    }
+                    _ => {
+                        b(Listen)
+                    }
+                }
+            }
+            else => {
+                error!("WebSocket Manager closed.  Shutting down Websockets.");
+                None
+            }
+        };
+
+        select_result
     }
 }
 
@@ -285,16 +316,8 @@ impl State for NewWsStream {
         if let Err(e) = self.stream.send_msg(msg.into()).await {
             error!("Failed to send Hello message: {}", e);
         }
+        #[cfg(not(target_arch = "wasm32"))]
         match timeout(Duration::from_secs(5), self.stream.next_msg()).await {
-            // // Ok(Some(Err(e))) => {
-            // //     error!("Error receiving Hello response : {}", e);
-            // // }
-            // // Ok(Some(Ok(msg))) => {
-            // //     trace!("Received message: {:?}", msg);
-            // //     match msg {
-            // //         Message::Binary(bin) => {
-            // //             match serde_cbor::from_slice::<WsMessage>(&bin)
-            //             {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
                 let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -328,21 +351,45 @@ impl State for NewWsStream {
             Ok(other) => {
                 error!("Unexpected message: {:?}", other);
             }
-            Err(e) => {
-                error!("Failed to deserialize message: {}", e);
-            } //             }
-              //         }
-              //         other => {
-              //             error!("Unexpected WebSocket message: {:?}", other);
-              //         }
-              //     }
-              // }
-              // Ok(None) => {
-              //     error!("Connection closed by peer");
-              // }
-              // Err(_) => {
-              //     error!("Timeout waiting for Hello response");
-              // }
+            Err(_) => {
+                error!("Timeout waiting for Hello response");
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        match self.stream.next_msg().await {
+            InMessage::WsMessage(WsMessage::Hello(peer_id)) => {
+                debug!("Received Hello from peer: {} ", peer_id);
+                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
+                let peer = Peer::new(
+                    peer_id,
+                    state.node_id,
+                    state.handle.clone(),
+                    rx,
+                    Realm::Global, // WebSocket peers are always in the global realm
+                );
+                let peer_entry = PeerEntry {
+                    peer_tx: tx_nodemessage,
+                    realm: Realm::Global,
+                };
+                state.handle.register_peer(peer_id, peer_entry);
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                spawn(ws::ws_peer::run_ws_peer(
+                    self.stream,
+                    state.bus_control.clone(),
+                    state.tx.clone(),
+                    rx,
+                    peer,
+                ));
+                let peer = WsActivePeer {
+                    peer_id,
+                    url: self.pending.and_then(|p| Some(p.url)),
+                    ws_control: tx,
+                };
+                state.current_peers.push(peer);
+            }
+            other => {
+                error!("Unexpected message: {:?}", other);
+            }
         }
 
         b(Listen)

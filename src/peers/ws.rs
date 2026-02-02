@@ -107,7 +107,7 @@ pub struct WsRemoteOptions {
 #[derive(Debug)]
 struct WsPendingPeer {
     url: Url,
-    last_attempt: tokio::time::Instant,
+    last_attempt: std::time::Instant,
     backoff: std::time::Duration,
     num_attempts: u32,
 }
@@ -119,18 +119,18 @@ impl WsPendingPeer {
     fn from_url(url: Url) -> Self {
         Self {
             url,
-            last_attempt: tokio::time::Instant::now(),
+            last_attempt: std::time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
     }
 
-    fn when_ready(&self) -> tokio::time::Instant {
+    fn when_ready(&self) -> std::time::Instant {
         self.last_attempt + self.backoff
     }
 
     fn record_attempt(&mut self) {
-        self.last_attempt = tokio::time::Instant::now();
+        self.last_attempt = std::time::Instant::now();
         self.num_attempts += 1;
         self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
     }
@@ -147,7 +147,7 @@ impl From<&WsRemoteOptions> for WsPendingPeer {
     fn from(opts: &WsRemoteOptions) -> Self {
         Self {
             url: opts.url.clone(),
-            last_attempt: tokio::time::Instant::now(),
+            last_attempt: std::time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
