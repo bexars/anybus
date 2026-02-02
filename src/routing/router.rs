@@ -77,7 +77,7 @@ impl Router {
     pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
         self.routes_watch_rx.clone()
     }
-    #[cfg(any(feature = "net", feature = "ipc"))]
+    #[cfg(feature = "remote")]
 
     fn send_route_updates(&mut self) {
         trace!("Peers: {:?}", self.route_table.peers);
@@ -407,7 +407,7 @@ impl State {
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 for peer in router.route_table.peers.values() {
                     _ = peer.peer_entry.peer_tx.send(NodeMessage::Close);
                 }
@@ -448,7 +448,7 @@ impl State {
                 let _ = router.routes_watch_tx.send(forward_table).unwrap();
                 // trace!("Updated forwarding table: Router: {:#?}", router);
                 // Notify peers of route changes
-                #[cfg(any(feature = "net", feature = "ipc"))]
+                #[cfg(feature = "remote")]
                 router.send_route_updates();
 
                 return Some(Listen);

@@ -17,8 +17,6 @@ use tokio_tungstenite::connect_async;
 // use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::{debug, error, trace};
-#[cfg(target_family = "wasm")]
-use wasm_socket_handle::WsHandle;
 
 #[cfg(feature = "ws_server")]
 use crate::peers::ws::WsListenerOptions;
@@ -354,7 +352,7 @@ impl State for ConnectRemote {
     async fn next(mut self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // tokio_native_tls::native_tls::
         #[cfg(target_family = "wasm")]
-        let attempt = WsHandle::new(self.pending.url.as_str());
+        let attempt = ws_stream_wasm::WsMeta::connect(self.pending.url.as_str(), None).await;
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(self.pending.url.as_str()).await;
         match attempt {
@@ -369,7 +367,9 @@ impl State for ConnectRemote {
                 }
                 #[cfg(target_family = "wasm")]
                 {
-                    let stream = ws_stream;
+                    use std::sync::{Arc, Mutex};
+
+                    let (meta, stream) = ws_stream;
 
                     let stream = stream;
                     // debug!(
@@ -377,7 +377,10 @@ impl State for ConnectRemote {
                     //     response
                     // );
                     b(NewWsStream {
-                        stream: stream.into(),
+                        stream: WebSockStream::Websys(
+                            Arc::new(Mutex::new(stream)),
+                            Arc::new(Mutex::new(meta)),
+                        ),
                         pending: Some(self.pending),
                     })
                 }

@@ -158,8 +158,11 @@ impl AnyBus {
         let _router_task = spawn(router.start());
 
         #[cfg(feature = "ws")]
-        if self.options.ws_listener_options.is_some() || !self.options.ws_remote_options.is_empty()
-        {
+        let ws_enabled = !self.options.ws_remote_options.is_empty();
+        #[cfg(feature = "ws_server")]
+        let ws_enabled = self.options.ws_listener_options.is_some() || ws_enabled;
+        #[cfg(feature = "ws")]
+        if ws_enabled {
             trace!("Starting WebSocket Manager");
 
             let ws_listener = crate::peers::WebsocketManager::new(
@@ -215,7 +218,7 @@ impl AnyBusBuilder {
             enable_ctrlc_shutdown: false,
             #[cfg(feature = "ipc")]
             enable_ipc: false,
-            #[cfg(feature = "ws")]
+            #[cfg(feature = "ws_server")]
             ws_listener_options: None,
             #[cfg(feature = "ws")]
             ws_remote_options: Vec::new(),

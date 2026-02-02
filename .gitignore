@@ -2,3 +2,6 @@
 /Cargo.lock
 /.cargo
 /logs
+.zed/settings.json
+src/peers/.DS_Store
+src/peers/ws/.DS_Store

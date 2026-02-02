@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use url::Url;
 // use url::Url;
 
-#[cfg(all(feature = "ws", feature = "tokio"))]
+#[cfg(all(feature = "ws_server", feature = "tokio"))]
 #[tokio::test]
 async fn test_ws_connection() {
     use std::net::Ipv4Addr;

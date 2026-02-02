@@ -7,8 +7,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
-#[cfg(feature = "ws")]
-// use tokio_tungstenite_wasm::WebSocketStream;
+
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
@@ -29,6 +28,8 @@ pub use tg_websock::WebSockStream;
 
 #[cfg(target_family = "wasm")]
 mod websys_websock;
+#[cfg(target_family = "wasm")]
+pub use websys_websock::WebSockStream;
 
 #[derive(Debug)]
 pub(crate) enum WsControl {
@@ -69,6 +70,12 @@ pub(crate) enum WsMessage {
     Withdraw(HashSet<Advertisement>),
 }
 
+impl From<WsMessage> for Vec<u8> {
+    fn from(msg: WsMessage) -> Self {
+        serde_cbor::to_vec(&msg).expect("")
+    }
+}
+
 impl From<WsMessage> for Bytes {
     fn from(msg: WsMessage) -> Self {
         let vec = serde_cbor::to_vec(&msg).expect("");
@@ -81,8 +88,10 @@ enum WsError {
     #[error("Error binding to address {}", .0)]
     BindFailure(SocketAddr),
     #[error("TLS Error: {0}")]
+    #[cfg(not(target_family = "wasm"))]
     TlsError(#[from] rustls::Error),
     #[error("File error: {0}")]
+    #[cfg(not(target_family = "wasm"))]
     TlsPkiError(#[from] rustls::pki_types::pem::Error),
     #[error("File error: {0}")]
     StandardIo(#[from] std::io::Error),
@@ -145,6 +154,7 @@ impl From<&WsRemoteOptions> for WsPendingPeer {
     }
 }
 
+#[cfg(feature = "ws_server")]
 /// Options for the WebSocket listener
 #[derive(Debug, Clone)]
 pub struct WsListenerOptions {
@@ -160,6 +170,7 @@ pub struct WsListenerOptions {
     pub key_path: Option<String>,
 }
 
+#[cfg(feature = "ws_server")]
 impl Default for WsListenerOptions {
     fn default() -> Self {
         Self {
@@ -173,7 +184,6 @@ impl Default for WsListenerOptions {
 }
 
 #[cfg(feature = "ws_server")]
-
 async fn create_listener(
     ws_listener_options: WsListenerOptions,
     ws_command: tokio::sync::mpsc::UnboundedSender<WsCommand>,
