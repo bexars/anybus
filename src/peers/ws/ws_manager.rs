@@ -1,3 +1,5 @@
+use tokio_with_wasm::alias as tokio;
+
 use std::{fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
@@ -10,6 +12,7 @@ use tokio::{
         watch,
     },
 };
+use web_time::Instant;
 
 #[cfg(not(target_family = "wasm"))]
 use tokio_tungstenite::connect_async;
@@ -92,7 +95,7 @@ impl WebsocketManager {
 
     fn get_next_timeout(&self) -> Option<Duration> {
         self.disconnected_peers.first().map(|p| {
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             if p.when_ready() <= now {
                 Duration::from_secs(0)
             } else {
@@ -103,7 +106,7 @@ impl WebsocketManager {
 
     fn get_next_ready_peer(&mut self) -> Option<WsPendingPeer> {
         if let Some(first) = self.disconnected_peers.first() {
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             if first.when_ready() <= now {
                 return self.disconnected_peers.remove(0).into();
             }
@@ -401,7 +404,7 @@ impl State for ConnectRemote {
     async fn next(mut self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // tokio_native_tls::native_tls::
         #[cfg(target_family = "wasm")]
-        let attempt = WsHandle::new(self.pending.url.as_str());
+        let attempt = WsHandle::new(self.pending.url.as_str()).await;
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(self.pending.url.as_str()).await;
         match attempt {

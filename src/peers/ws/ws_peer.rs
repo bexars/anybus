@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use tokio_with_wasm::alias as tokio;
 
 use tokio::{
     // io::{AsyncRead, AsyncWrite},

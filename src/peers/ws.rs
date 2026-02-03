@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     net::{IpAddr, SocketAddr},
 };
+use tokio_with_wasm::alias as tokio;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::{
     messages::BusControlMsg,
@@ -107,7 +109,7 @@ pub struct WsRemoteOptions {
 #[derive(Debug)]
 struct WsPendingPeer {
     url: Url,
-    last_attempt: std::time::Instant,
+    last_attempt: web_time::Instant,
     backoff: std::time::Duration,
     num_attempts: u32,
 }
@@ -119,18 +121,18 @@ impl WsPendingPeer {
     fn from_url(url: Url) -> Self {
         Self {
             url,
-            last_attempt: std::time::Instant::now(),
+            last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
     }
 
-    fn when_ready(&self) -> std::time::Instant {
+    fn when_ready(&self) -> web_time::Instant {
         self.last_attempt + self.backoff
     }
 
     fn record_attempt(&mut self) {
-        self.last_attempt = std::time::Instant::now();
+        self.last_attempt = web_time::Instant::now();
         self.num_attempts += 1;
         self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
     }
@@ -147,7 +149,7 @@ impl From<&WsRemoteOptions> for WsPendingPeer {
     fn from(opts: &WsRemoteOptions) -> Self {
         Self {
             url: opts.url.clone(),
-            last_attempt: std::time::Instant::now(),
+            last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }

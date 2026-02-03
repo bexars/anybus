@@ -8,6 +8,7 @@
 //! * Unicast - [Handle::register_unicast()]
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
+use tokio_with_wasm::alias as tokio;
 
 // pub use bus_listener::BusListener;
 pub use errors::ReceiveError;

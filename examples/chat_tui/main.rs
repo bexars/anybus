@@ -40,7 +40,7 @@ async fn main() -> color_eyre::Result<()> {
             println!("Starting Server");
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
-                    addr: Ipv4Addr::from_octets([192, 168, 0, 6]).into(),
+                    addr: Ipv4Addr::from_octets([0, 0, 0, 0]).into(),
                     port: 10900,
                     use_tls: true,
                     cert_path: Some("/Users/bradbury/.secure/client.crt".into()),

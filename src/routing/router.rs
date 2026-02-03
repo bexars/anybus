@@ -1,12 +1,11 @@
-// #[cfg(any(feature = "net", feature = "ipc"))]
+use tokio_with_wasm::alias as tokio;
+
 use std::collections::{HashMap, HashSet};
 
-// #[cfg(any(feature = "net", feature = "ipc"))]
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeMessage};
 #[cfg(feature = "remote")]
 use crate::routing::{PeerEntry, Realm, RouteKind};
-// #[cfg(any(feature = "net", feature = "ipc"))]
 use tokio::{
     select,
     sync::{

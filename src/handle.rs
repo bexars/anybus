@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use tokio_with_wasm::alias as tokio;
 
 #[cfg(feature = "serde")]
 use serde::Deserialize;

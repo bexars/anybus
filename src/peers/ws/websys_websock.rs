@@ -13,7 +13,7 @@ use crate::peers::ws::{WsMessage, ws_peer::InMessage};
 // From<tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>>
 
 pub enum WebSockStream {
-    Wasm(Arc<Mutex<WsHandle>>),
+    Wasm(WsHandle),
 }
 
 impl WebSockStream {
@@ -23,8 +23,8 @@ impl WebSockStream {
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             WebSockStream::Wasm(s) => Ok(s
-                .lock()
-                .await
+                // .lock()
+                // .await
                 .send(WsHandleMessage::Binary(message.into()))
                 .await?),
         }
@@ -32,16 +32,23 @@ impl WebSockStream {
 
     pub(crate) async fn next_msg(&mut self) -> InMessage {
         let res = match self {
-            WebSockStream::Wasm(s) => s.lock().await.next().await,
+            WebSockStream::Wasm(s) => {
+                s
+                    // .lock().await
+                    .next()
+                    .await
+            }
         };
         res.into()
     }
 
     pub(crate) async fn close_conn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let res = match self {
-            WebSockStream::Wasm(s) => s.lock().await.close(),
+            WebSockStream::Wasm(s) => s
+                // .lock().await
+                .close(),
         };
-        Ok(res?)
+        Ok(())
     }
 }
 
@@ -53,7 +60,8 @@ impl WebSockStream {
 
 impl From<WsHandle> for WebSockStream {
     fn from(value: WsHandle) -> Self {
-        Self::Wasm(Arc::new(Mutex::new(value)))
+        // Self::Wasm(Arc::new(Mutex::new(value)))
+        Self::Wasm(value)
     }
 }
 
