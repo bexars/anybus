@@ -12,7 +12,7 @@ use tokio::{
         watch,
     },
 };
-use web_time::Instant;
+// use web_time::Instant;
 
 #[cfg(not(target_family = "wasm"))]
 use tokio_tungstenite::connect_async;
@@ -171,9 +171,9 @@ struct QueueReconnect {
 
 #[async_trait]
 impl State for Start {
-    async fn next(self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
+    async fn next(self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         #[cfg(feature = "ws_server")]
-        if let Some(ws_options) = state.ws_listener_options.take() {
+        if let Some(ws_options) = _state.ws_listener_options.take() {
             match create_listener(ws_options, state.tx.clone(), state.bus_control.clone()).await {
                 Ok(()) => b(Listen {}),
                 Err(e) => {
@@ -249,7 +249,10 @@ impl State for Listen {
         };
 
         #[cfg(target_arch = "wasm32")]
+        use web_time::Instant;
         let select_result = tokio::select! {
+            // Some(dur) = web_time::
+
             Some(cmd) = state.rx.recv() => {
                 b(HandleCommand(cmd))
                 // Handle incoming commands
@@ -420,12 +423,6 @@ impl State for ConnectRemote {
                 #[cfg(target_family = "wasm")]
                 {
                     let stream = ws_stream;
-
-                    let stream = stream;
-                    // debug!(
-                    //     "Connected to remote WebSocket peer  with response {:?}",
-                    //     response
-                    // );
                     b(NewWsStream {
                         stream: stream.into(),
                         pending: Some(self.pending),

@@ -1,8 +1,5 @@
-use std::sync::Arc;
+use futures::{SinkExt, StreamExt};
 
-use futures::{Sink, SinkExt, Stream, StreamExt};
-
-use tokio::sync::Mutex;
 // use tokio_tungstenite::MaybeTlsStream;
 use tracing::error;
 use wasm_socket_handle::{WsError, WsHandle, WsMessage as WsHandleMessage};
@@ -43,7 +40,7 @@ impl WebSockStream {
     }
 
     pub(crate) async fn close_conn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let res = match self {
+        let _res = match self {
             WebSockStream::Wasm(s) => s
                 // .lock().await
                 .close(),

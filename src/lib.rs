@@ -204,6 +204,7 @@ impl Default for AnyBus {
 /// AnyBusBuilder is a builder pattern for constructing an AnyBus instance with options
 #[derive(Debug, Default, Clone)]
 pub struct AnyBusBuilder {
+    #[cfg(not(target_arch = "wasm32"))]
     enable_ctrlc_shutdown: bool,
     #[cfg(feature = "ipc")]
     enable_ipc: bool,
@@ -216,6 +217,7 @@ impl AnyBusBuilder {
     /// Creates a new AnyBusBuilder with default options
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             enable_ctrlc_shutdown: false,
             #[cfg(feature = "ipc")]
             enable_ipc: false,
