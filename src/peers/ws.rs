@@ -2,17 +2,17 @@ use std::{
     collections::HashSet,
     net::{IpAddr, SocketAddr},
 };
+use tokio_with_wasm::alias as tokio;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
-#[cfg(feature = "ws")]
-use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::{
     messages::BusControlMsg,
@@ -23,15 +23,34 @@ use crate::{
 pub(super) mod ws_manager;
 mod ws_peer;
 
+#[cfg(not(target_family = "wasm"))]
+mod tg_websock;
+#[cfg(not(target_family = "wasm"))]
+pub use tg_websock::WebSockStream;
+
+#[cfg(target_family = "wasm")]
+mod websys_websock;
+#[cfg(target_family = "wasm")]
+pub use websys_websock::WebSockStream;
+
 #[derive(Debug)]
-enum WsControl {
+pub(crate) enum WsControl {
     Shutdown,
 }
+
+// #[async_trait]
+// trait WebSockStream {
+//     async fn send_msg(&mut self, message: WsMessage) -> Result<(), Box<dyn std::error::Error>>;
+
+//     async fn next_msg(&mut self) -> InMessage;
+
+//     async fn close_conn(&mut self) -> Result<(), Box<dyn std::error::Error>>;
+// }
 
 // #[derive(Debug)]
 enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
-    NewWsStream(WebSocketStream, SocketAddr),
+    NewWsStream(WebSockStream, SocketAddr),
     PeerClosed(Uuid),
 }
 
@@ -45,12 +64,18 @@ impl Debug for WsCommand {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum WsMessage {
+pub(crate) enum WsMessage {
     Hello(Uuid),
     Packet(WirePacket),
     CloseConnection,
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
+}
+
+impl From<WsMessage> for Vec<u8> {
+    fn from(msg: WsMessage) -> Self {
+        serde_cbor::to_vec(&msg).expect("")
+    }
 }
 
 impl From<WsMessage> for Bytes {
@@ -65,7 +90,11 @@ enum WsError {
     #[error("Error binding to address {}", .0)]
     BindFailure(SocketAddr),
     #[error("TLS Error: {0}")]
+    #[cfg(not(target_family = "wasm"))]
     TlsError(#[from] rustls::Error),
+    #[error("File error: {0}")]
+    #[cfg(not(target_family = "wasm"))]
+    TlsPkiError(#[from] rustls::pki_types::pem::Error),
     #[error("File error: {0}")]
     StandardIo(#[from] std::io::Error),
 }
@@ -80,7 +109,7 @@ pub struct WsRemoteOptions {
 #[derive(Debug)]
 struct WsPendingPeer {
     url: Url,
-    last_attempt: tokio::time::Instant,
+    last_attempt: web_time::Instant,
     backoff: std::time::Duration,
     num_attempts: u32,
 }
@@ -92,18 +121,18 @@ impl WsPendingPeer {
     fn from_url(url: Url) -> Self {
         Self {
             url,
-            last_attempt: tokio::time::Instant::now(),
+            last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
     }
 
-    fn when_ready(&self) -> tokio::time::Instant {
+    fn when_ready(&self) -> web_time::Instant {
         self.last_attempt + self.backoff
     }
 
     fn record_attempt(&mut self) {
-        self.last_attempt = tokio::time::Instant::now();
+        self.last_attempt = web_time::Instant::now();
         self.num_attempts += 1;
         self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
     }
@@ -120,13 +149,14 @@ impl From<&WsRemoteOptions> for WsPendingPeer {
     fn from(opts: &WsRemoteOptions) -> Self {
         Self {
             url: opts.url.clone(),
-            last_attempt: tokio::time::Instant::now(),
+            last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
     }
 }
 
+#[cfg(feature = "ws_server")]
 /// Options for the WebSocket listener
 #[derive(Debug, Clone)]
 pub struct WsListenerOptions {
@@ -142,6 +172,7 @@ pub struct WsListenerOptions {
     pub key_path: Option<String>,
 }
 
+#[cfg(feature = "ws_server")]
 impl Default for WsListenerOptions {
     fn default() -> Self {
         Self {
@@ -155,7 +186,6 @@ impl Default for WsListenerOptions {
 }
 
 #[cfg(feature = "ws_server")]
-
 async fn create_listener(
     ws_listener_options: WsListenerOptions,
     ws_command: tokio::sync::mpsc::UnboundedSender<WsCommand>,
@@ -181,16 +211,20 @@ async fn create_listener(
     let acceptor = {
         use std::sync::Arc;
 
-        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+        use rustls::pki_types::pem::PemObject;
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-        let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
-        let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
-        let cert = vec![CertificateDer::from(cert)];
-        let key = PrivatePkcs8KeyDer::from(key);
-        let key = PrivateKeyDer::Pkcs8(key);
+        // let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
+        // let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
+        let cert = CertificateDer::from_pem_file(&cert_path)?;
+
+        let key = PrivateKeyDer::from_pem_file(&key_path)?;
+        let certs = vec![cert];
+        // let key = key.
+        // let key = PrivateKeyDer::Pkcs8(key);
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(cert, key)?;
+            .with_single_cert(certs, key)?;
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         // let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
         // let acceptor = tokio_native_tls::TlsAcceptor::from(
@@ -218,7 +252,7 @@ async fn run_ws_listener(
     acceptor: tokio_rustls::TlsAcceptor,
 ) {
     loop {
-        use tokio_tungstenite::MaybeTlsStream;
+        // use tokio_tungstenite::MaybeTlsStream;
 
         tokio::select! {
             accept_result = listener.accept() => {
@@ -230,7 +264,7 @@ async fn run_ws_listener(
                         let stream = match stream {
                             Ok(s) => {
                                 // let s = rustls::client::TlsStream::fr
-                                let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
+                                // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
                                 tokio_tungstenite::accept_async(s).await.unwrap()}
                             ,
                             Err(e) => {

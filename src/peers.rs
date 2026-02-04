@@ -1,3 +1,5 @@
+use tokio_with_wasm::alias as tokio;
+
 #[cfg(feature = "ipc")]
 mod ipc;
 #[cfg(feature = "ws")]

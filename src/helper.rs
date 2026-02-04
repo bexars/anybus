@@ -1,3 +1,5 @@
+use tokio_with_wasm::alias as tokio;
+
 #[cfg(feature = "dioxus")]
 use std::future::Future;
 
@@ -6,8 +8,8 @@ use dioxus::core::Task;
 #[cfg(not(feature = "dioxus"))]
 use tokio::task::JoinHandle;
 
-#[cfg(not(feature = "dioxus"))]
-use crate::Handle;
+// #[cfg(not(feature = "dioxus"))]
+// use crate::Handle;
 
 #[cfg(feature = "dioxus")]
 /// Convenience function for spawning a task in whichever runtime is being used

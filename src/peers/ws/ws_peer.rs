@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
+use tokio_with_wasm::alias as tokio;
 
-use futures::{SinkExt, StreamExt};
 use tokio::{
     // io::{AsyncRead, AsyncWrite},
     select,
@@ -13,15 +13,15 @@ use tokio::{
 // #[cfg(not(feature = "wasm_ws"))]
 // use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 // #[cfg(feature = "wasm_ws")]
-use tokio_tungstenite_wasm::{Message, WebSocketStream};
+// use tokio_tungstenite_wasm::{Message, WebSocketStream};
 
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::{
     messages::{BrokerMsg, BusControlMsg, NodeMessage},
     peers::{
         Peer,
-        ws::{WsCommand, WsControl, WsMessage},
+        ws::{WebSockStream, WsCommand, WsControl, WsMessage},
     },
     routing::{NodeId, WirePacket},
 };
@@ -36,12 +36,13 @@ enum OutMessage {
 }
 
 #[derive(Debug)]
-enum InMessage {
+pub(crate) enum InMessage {
     WsControl(WsControl),
     WsMessage(WsMessage),
     NodeMessage(NodeMessage),
     WsPeerClosed,
     Shutdown,
+    Unknown,
 }
 
 enum State {
@@ -173,12 +174,15 @@ impl WsPeer {
                 self.output.push_back(OutMessage::ClosePeer);
                 self.state = State::Shutdown;
             }
+            InMessage::Unknown => {
+                debug!("Got an unknown packet from the remote Websocket")
+            } //TODO Needs to  be smarter
         }
     }
 }
 
 pub(crate) async fn run_ws_peer(
-    mut stream: WebSocketStream,
+    mut stream: WebSockStream,
     // addr: SocketAddr,
     mut bus_control: watch::Receiver<BusControlMsg>,
     tx_command: UnboundedSender<WsCommand>,
@@ -201,8 +205,8 @@ pub(crate) async fn run_ws_peer(
                     }
                 }
                 OutMessage::WsMessage(msg) => {
-                    let msg = Message::Binary(msg.into());
-                    if let Err(e) = stream.send(msg).await {
+                    // let msg = Message::Binary(msg.into());
+                    if let Err(e) = stream.send_msg(msg).await {
                         error!("Failed to send WsMessage: {} to {}", e, peer.peer_id);
                         in_message = Some(InMessage::WsPeerClosed);
                         break;
@@ -217,7 +221,7 @@ pub(crate) async fn run_ws_peer(
                     // Handle Broker message sending here
                 }
                 OutMessage::ClosePeer => {
-                    stream.close().await.ok();
+                    stream.close_conn().await.ok();
                 }
                 OutMessage::ForwardPacket(wire_packet) => {
                     peer.handle.send_packet(wire_packet, peer.peer_id);
@@ -231,37 +235,37 @@ pub(crate) async fn run_ws_peer(
         in_message = if in_message.is_none() {
             select! {
 
-                msg = stream.next() => {
-                    match msg {
-                        Some(Ok(message)) => {
-                            match message {
-                                Message::Binary(data) => {
-                                    let msg = serde_cbor::from_slice::<WsMessage>(&data)
-                                        .map(|msg| InMessage::WsMessage(msg))
-                                        .unwrap_or_else(|e| {
-                                            error!("Failed to deserialize WsMessage: {}", e);
-                                            InMessage::WsPeerClosed
-                                        });
-                                    Some(msg)
+                msg = stream.next_msg() => { Some(msg) },
+                //     match msg {
+                //         Some(Ok(message)) => {
+                //             match message {
+                //                 Message::Binary(data) => {
+                //                     let msg = serde_cbor::from_slice::<WsMessage>(&data)
+                //                         .map(|msg| InMessage::WsMessage(msg))
+                //                         .unwrap_or_else(|e| {
+                //                             error!("Failed to deserialize WsMessage: {}", e);
+                //                             InMessage::WsPeerClosed
+                //                         });
+                //                     Some(msg)
 
-                                    // Some(InMessage::WsMessage(data))
-                                }
-                                Message::Close(_) => {
-                                    Some(InMessage::WsPeerClosed)
-                                }
-                                _ => None, // Ignore other message types for now
-                            }
-                        }
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {}", e);
-                            Some(InMessage::WsPeerClosed)
-                        }
-                        None => {
-                            // Connection closed
-                            Some(InMessage::WsPeerClosed)
-                        }
-                    }
-                }
+                //                     // Some(InMessage::WsMessage(data))
+                //                 }
+                //                 Message::Close(_) => {
+                //                     Some(InMessage::WsPeerClosed)
+                //                 }
+                //                 _ => None, // Ignore other message types for now
+                //             }
+                //         }
+                //         Some(Err(e)) => {
+                //             error!("WebSocket error: {}", e);
+                //             Some(InMessage::WsPeerClosed)
+                //         }
+                //         None => {
+                //             // Connection closed
+                //             Some(InMessage::WsPeerClosed)
+                //         }
+                //     }
+                // }
                 Some(msg) = rx_control.recv() => {
                     Some(InMessage::WsControl(msg))
                 }

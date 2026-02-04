@@ -11,54 +11,49 @@ keywords    = ["messaging", "ipc", "networking", "async", "dioxus"]
 description = "A serverless message bus for communicating between Rust applications easily (only IPC currently)"
 # rust-version = "1.86"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
 [[example]]
 name = "counter"
 required-features = [ "tokio", "ipc"]
 
 [[example]]
 name = "bridge"
-required-features = [ "tokio", "ipc","ws"]
+required-features = [ "tokio", "ipc","ws","ws_server"]
 
 [[example]]
 name = "chat_tui"
-required-features = [ "tokio", "ipc","ws"]
+required-features = [ "tokio", "ipc","ws","ws_server"]
 
 
 
 [workspace]
 members = ["anybus-macro"]
 
+
 [workspace.dependencies]
-uuid = { version = "1.18.0", default-features = false, option=true,features = [
-    "v7",
-    "serde",
-    "std",
-] }
+
 
 [features]
-tokio = ["tokio/rt-multi-thread", "tokio/time", "tokio/signal"]
-default = ["tokio","ws_rustls","ws_server", "ipc"]
+tokio = ["tokio/rt-multi-thread", "tokio/time"]
+default = ["serde"]
 # default = ["tokio","serde","uuid","wasm_ws"]
 
 dioxus = ["dep:dioxus"]
-ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess", "tokio/signal", "tokio/net"]
-net = [ "tokio/net"  ]
+ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess",  "tokio/net"]
+#net = [ "tokio/net"]
 #ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
-ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
+ws = ["remote", "dep:tokio-tungstenite", "dep:url", "dep:bytes","ws_rustls"
+    ,"dep:wasm_socket_handle"
+    ]
 ws_rustls = ["ws", "dep:tokio-rustls", "dep:rustls"]
-ws_server = ["ws", "dep:tokio-tungstenite"]
+ws_server = ["ws", "dep:tokio-tungstenite","ws_rustls"]
 remote =["tokio/rt", "serde"]
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
 [dependencies]
-# uuid = {workspace= true, optional = true}
-tokio = { version = "1", features = [
-    # "rt",
-    # "rt-multi-thread",
-    "sync",
-    "macros",
-] }
+
 interprocess = { version = "2.2.3", features = ["tokio"], optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
@@ -85,34 +80,66 @@ anybus-macro = { path = "./anybus-macro", version = "0.1.0" }
 dioxus = { version = "0.7.0-rc.0", optional = true }
 # futures-channel = "0.3.31"
 async-watch = "0.3.1"
-tracing = "0.1.41"
+tracing = "0.1"
+web-time = "1.1"
 
-async-bincode = { version = "0.8.0", optional = true }
+async-bincode = { version = "0.8.0", optional = true ,no-default-features = true}
 async-trait = "0.1.89"
 bincode = { version = "2.0.1", no-default-features = true }
 #bincode2 = "2.0.1"
 dyn-clone = "1.0.20"
 url = {version = "2.5.7", optional = true}
 bytes = {version = "1.10.1", optional = true}
-tokio-rustls = {version = "0.26.4", optional = true}
+tokio_with_wasm = { version = "0.9.0", features = ["full"] }
+
 # native-tls = {version = "0.2.14", optional = true}
 # tokio-native-tls = {version = "0.3.0", optional = true}
-# tungstenite = {version = "0.20.0", optional = true}
-tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, features = ["rustls-tls-native-roots"] }
-# tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls"] }
-tokio-tungstenite = { path = "../tokio-tungstenite", optional = true, features = ["stream","rustls-tls-native-roots"] }
-rustls = {version = "0.23.36", optional = true }
-uuid.workspace = true
+# tungstenite = {version = "0.28.0", optional = true}
+# tokio-tungstenite-wasm = { path = "../tokio-tungstenite-wasm",optional=true, features = ["rustls-tls-native-roots"] }
+# tokio-tungstenite = { path = "../tokio-tungstenite", optional = true, features = ["stream","rustls-tls-native-roots"] }
+# uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+ws_stream_wasm = { version = "0.7.5", optional = true }
+uuid = { version = "1.18.0", default-features = false,features = [
+    "v7",
+    "serde",
+    "std",
+    "js"
+] }
 
+tokio = { version = "1", features = [
+    "rt",
+    # "rt-multi-thread",
+    "sync",
+    "macros",
+    # "time",
+] }
+
+# wasm_socket_handle = { path= "../wasm_socket_handle", optional = true}
+wasm_socket_handle = { git="https://github.com/mattbradbury/wasm_socket_handle.git", optional = true}
+###############################
+ 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "signal",
+    "time"
+] }
 
-[target.'cfg(target_arch = "wasm32")'.features]
-ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
-
-[target.'cfg(not(target_arch = "wasm32"))'.features]
-ws = ["remote","net", "dep:tokio-tungstenite", "dep:url", "dep:bytes"]
+tokio-tungstenite = { version = "0.28.0", 
+    optional = true, 
+    features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }
+tokio-rustls = {version = "0.26.4", optional = true}
+rustls = {version = "0.23.36", optional = true }
+uuid = { version = "1.18.0", default-features = false,features = [
+    "v7",
+    "serde",
+    "std",
+] }
 
 
 [dev-dependencies]
@@ -130,6 +157,6 @@ tui-textarea = "0.7.0"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2.3"
 trybuild = "1.0.111"
-anybus = { path = "./" , features = ["tokio","ipc"] }
+anybus = { path = "./" , features = ["tokio","ipc","ws","ws_server"] }
 # tokio = { version = "1.15", features = ["full", "tracing"] }
 # console-subscriber = "0.4.1"

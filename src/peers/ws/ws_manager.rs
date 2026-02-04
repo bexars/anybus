@@ -1,30 +1,40 @@
+use tokio_with_wasm::alias as tokio;
+
 use std::{fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::timeout;
 use tokio::{
     // io::{AsyncRead, AsyncWrite},
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         watch,
     },
-    time::timeout,
 };
+// use web_time::Instant;
 
-// #[cfg(not(feature = "wasm_ws"))]
-use tokio_tungstenite_wasm::connect;
-use tokio_tungstenite_wasm::{Message, WebSocketStream};
+#[cfg(not(target_family = "wasm"))]
+use tokio_tungstenite::connect_async;
+// use tokio_tungstenite_wasm::{Message, WebSocketStream};
 // #[cfg(feature = "wasm_ws")]
 // use tokio_tungstenite_wasm::WebSocketStream;
 
 use tracing::{debug, error, trace};
+#[cfg(target_family = "wasm")]
+use wasm_socket_handle::WsHandle;
 
+#[cfg(feature = "ws_server")]
+use crate::peers::ws::WsListenerOptions;
 use crate::{
     Handle,
     messages::BusControlMsg,
     peers::{
         Peer, WsRemoteOptions,
-        ws::{self, WsActivePeer, WsCommand, WsListenerOptions, WsMessage, WsPendingPeer},
+        ws::{
+            self, WebSockStream, WsActivePeer, WsCommand, WsMessage, WsPendingPeer,
+            ws_peer::InMessage,
+        },
     },
     routing::{NodeId, PeerEntry, Realm},
     spawn,
@@ -85,7 +95,7 @@ impl WebsocketManager {
 
     fn get_next_timeout(&self) -> Option<Duration> {
         self.disconnected_peers.first().map(|p| {
-            let now = tokio::time::Instant::now();
+            let now = web_time::Instant::now();
             if p.when_ready() <= now {
                 Duration::from_secs(0)
             } else {
@@ -96,7 +106,7 @@ impl WebsocketManager {
 
     fn get_next_ready_peer(&mut self) -> Option<WsPendingPeer> {
         if let Some(first) = self.disconnected_peers.first() {
-            let now = tokio::time::Instant::now();
+            let now = web_time::Instant::now();
             if first.when_ready() <= now {
                 return self.disconnected_peers.remove(0).into();
             }
@@ -136,7 +146,7 @@ struct HandleCommand(WsCommand);
 // #[cfg(not(feature = "wasm_ws"))]
 
 struct NewWsStream {
-    stream: WebSocketStream,
+    stream: WebSockStream,
 
     pending: Option<WsPendingPeer>,
 }
@@ -161,9 +171,9 @@ struct QueueReconnect {
 
 #[async_trait]
 impl State for Start {
-    async fn next(self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
+    async fn next(self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         #[cfg(feature = "ws_server")]
-        if let Some(ws_options) = state.ws_listener_options.take() {
+        if let Some(ws_options) = _state.ws_listener_options.take() {
             match create_listener(ws_options, state.tx.clone(), state.bus_control.clone()).await {
                 Ok(()) => b(Listen {}),
                 Err(e) => {
@@ -197,7 +207,8 @@ impl State for Listen {
 
         let timeout = state.get_next_timeout();
 
-        tokio::select! {
+        #[cfg(not(target_arch = "wasm32"))]
+        let select_result = tokio::select! {
             _ = async {
                 if let Some(dur) = timeout {
                     tokio::time::sleep(dur).await;
@@ -235,7 +246,39 @@ impl State for Listen {
                 error!("WebSocket Manager closed.  Shutting down Websockets.");
                 None
             }
-        }
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        use web_time::Instant;
+        let select_result = tokio::select! {
+            // Some(dur) = web_time::
+
+            Some(cmd) = state.rx.recv() => {
+                b(HandleCommand(cmd))
+                // Handle incoming commands
+            }
+            Ok(_msg) = state.bus_control.changed() => {
+                match *state.bus_control.borrow() {
+                    BusControlMsg::Shutdown => {
+                        for peer in state.current_peers.drain(..) {
+                            debug!("Shutting down connection to peer {}", peer.peer_id);
+                            let _ = peer.ws_control.send(ws::WsControl::Shutdown);
+                        }
+                        debug!("WebSocket Manager shutting down");
+                         None
+                    }
+                    _ => {
+                        b(Listen)
+                    }
+                }
+            }
+            else => {
+                error!("WebSocket Manager closed.  Shutting down Websockets.");
+                None
+            }
+        };
+
+        select_result
     }
 }
 
@@ -274,68 +317,84 @@ impl State for NewWsStream {
     async fn next(mut self: Box<Self>, state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // Handshake the Anybus protocol here
         let msg = WsMessage::Hello(state.node_id);
-        let msg = Message::Binary(msg.into());
+        // let msg = Message::Binary(msg.into());
         trace!("Sending Hello message: {:?}", msg);
-        if let Err(e) = self.stream.send(msg).await {
+        if let Err(e) = self.stream.send_msg(msg.into()).await {
             error!("Failed to send Hello message: {}", e);
         }
-        match timeout(Duration::from_secs(5), self.stream.next()).await {
-            Ok(Some(Err(e))) => {
-                error!("Error receiving Hello response : {}", e);
+        #[cfg(not(target_arch = "wasm32"))]
+        match timeout(Duration::from_secs(5), self.stream.next_msg()).await {
+            Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
+                debug!("Received Hello from peer: {} ", peer_id);
+                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
+                let peer = Peer::new(
+                    peer_id,
+                    state.node_id,
+                    state.handle.clone(),
+                    rx,
+                    Realm::Global, // WebSocket peers are always in the global realm
+                );
+                let peer_entry = PeerEntry {
+                    peer_tx: tx_nodemessage,
+                    realm: Realm::Global,
+                };
+                state.handle.register_peer(peer_id, peer_entry);
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                spawn(ws::ws_peer::run_ws_peer(
+                    self.stream,
+                    state.bus_control.clone(),
+                    state.tx.clone(),
+                    rx,
+                    peer,
+                ));
+                let peer = WsActivePeer {
+                    peer_id,
+                    url: self.pending.and_then(|p| Some(p.url)),
+                    ws_control: tx,
+                };
+                state.current_peers.push(peer);
             }
-            Ok(Some(Ok(msg))) => {
-                trace!("Received message: {:?}", msg);
-                match msg {
-                    Message::Binary(bin) => {
-                        match serde_cbor::from_slice::<WsMessage>(&bin) {
-                            Ok(WsMessage::Hello(peer_id)) => {
-                                debug!("Received Hello from peer: {} ", peer_id);
-                                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
-                                let peer = Peer::new(
-                                    peer_id,
-                                    state.node_id,
-                                    state.handle.clone(),
-                                    rx,
-                                    Realm::Global, // WebSocket peers are always in the global realm
-                                );
-                                let peer_entry = PeerEntry {
-                                    peer_tx: tx_nodemessage,
-                                    realm: Realm::Global,
-                                };
-                                state.handle.register_peer(peer_id, peer_entry);
-                                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                                spawn(ws::ws_peer::run_ws_peer(
-                                    self.stream,
-                                    state.bus_control.clone(),
-                                    state.tx.clone(),
-                                    rx,
-                                    peer,
-                                ));
-                                let peer = WsActivePeer {
-                                    peer_id,
-                                    url: self.pending.and_then(|p| Some(p.url)),
-                                    ws_control: tx,
-                                };
-                                state.current_peers.push(peer);
-                            }
-                            Ok(other) => {
-                                error!("Unexpected message: {:?}", other);
-                            }
-                            Err(e) => {
-                                error!("Failed to deserialize message: {}", e);
-                            }
-                        }
-                    }
-                    other => {
-                        error!("Unexpected WebSocket message: {:?}", other);
-                    }
-                }
-            }
-            Ok(None) => {
-                error!("Connection closed by peer");
+            Ok(other) => {
+                error!("Unexpected message: {:?}", other);
             }
             Err(_) => {
                 error!("Timeout waiting for Hello response");
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        match self.stream.next_msg().await {
+            InMessage::WsMessage(WsMessage::Hello(peer_id)) => {
+                debug!("Received Hello from peer: {} ", peer_id);
+                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
+                let peer = Peer::new(
+                    peer_id,
+                    state.node_id,
+                    state.handle.clone(),
+                    rx,
+                    Realm::Global, // WebSocket peers are always in the global realm
+                );
+                let peer_entry = PeerEntry {
+                    peer_tx: tx_nodemessage,
+                    realm: Realm::Global,
+                };
+                state.handle.register_peer(peer_id, peer_entry);
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                spawn(ws::ws_peer::run_ws_peer(
+                    self.stream,
+                    state.bus_control.clone(),
+                    state.tx.clone(),
+                    rx,
+                    peer,
+                ));
+                let peer = WsActivePeer {
+                    peer_id,
+                    url: self.pending.and_then(|p| Some(p.url)),
+                    ws_control: tx,
+                };
+                state.current_peers.push(peer);
+            }
+            other => {
+                error!("Unexpected message: {:?}", other);
             }
         }
 
@@ -347,18 +406,28 @@ impl State for NewWsStream {
 impl State for ConnectRemote {
     async fn next(mut self: Box<Self>, _state: &mut WebsocketManager) -> Option<Box<dyn State>> {
         // tokio_native_tls::native_tls::
-        let attempt = connect(self.pending.url.as_str()).await;
+        #[cfg(target_family = "wasm")]
+        let attempt = WsHandle::new(self.pending.url.as_str()).await;
+        #[cfg(not(target_family = "wasm"))]
+        let attempt = connect_async(self.pending.url.as_str()).await;
         match attempt {
             Ok(ws_stream) => {
-                // let addr = ws_stream
-                // debug!(
-                //     "Connected to remote WebSocket peer  with response {:?}",
-                //     response
-                // );
-                b(NewWsStream {
-                    stream: ws_stream,
-                    pending: Some(self.pending),
-                })
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let (stream, _response) = ws_stream;
+                    b(NewWsStream {
+                        stream: stream.into(),
+                        pending: Some(self.pending),
+                    })
+                }
+                #[cfg(target_family = "wasm")]
+                {
+                    let stream = ws_stream;
+                    b(NewWsStream {
+                        stream: stream.into(),
+                        pending: Some(self.pending),
+                    })
+                }
             }
             Err(e) => {
                 error!("Failed to connect to remote WebSocket peer: {}", e);

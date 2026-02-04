@@ -1,5 +1,6 @@
 pub(crate) mod router;
 pub(crate) mod routing_table;
+use tokio_with_wasm::alias as tokio;
 
 #[cfg(feature = "serde")]
 use erased_serde::Serializer;

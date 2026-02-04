@@ -8,6 +8,7 @@
 //! * Unicast - [Handle::register_unicast()]
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
+use tokio_with_wasm::alias as tokio;
 
 // pub use bus_listener::BusListener;
 pub use errors::ReceiveError;
@@ -158,8 +159,11 @@ impl AnyBus {
         let _router_task = spawn(router.start());
 
         #[cfg(feature = "ws")]
-        if self.options.ws_listener_options.is_some() || !self.options.ws_remote_options.is_empty()
-        {
+        let ws_enabled = !self.options.ws_remote_options.is_empty();
+        #[cfg(feature = "ws_server")]
+        let ws_enabled = self.options.ws_listener_options.is_some() || ws_enabled;
+        #[cfg(feature = "ws")]
+        if ws_enabled {
             trace!("Starting WebSocket Manager");
 
             let ws_listener = crate::peers::WebsocketManager::new(
@@ -200,6 +204,7 @@ impl Default for AnyBus {
 /// AnyBusBuilder is a builder pattern for constructing an AnyBus instance with options
 #[derive(Debug, Default, Clone)]
 pub struct AnyBusBuilder {
+    #[cfg(not(target_arch = "wasm32"))]
     enable_ctrlc_shutdown: bool,
     #[cfg(feature = "ipc")]
     enable_ipc: bool,
@@ -212,10 +217,11 @@ impl AnyBusBuilder {
     /// Creates a new AnyBusBuilder with default options
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             enable_ctrlc_shutdown: false,
             #[cfg(feature = "ipc")]
             enable_ipc: false,
-            #[cfg(feature = "ws")]
+            #[cfg(feature = "ws_server")]
             ws_listener_options: None,
             #[cfg(feature = "ws")]
             ws_remote_options: Vec::new(),
