@@ -20,6 +20,10 @@ use uuid::Uuid;
 #[command(name = "chat_tui")]
 #[command(about = "A terminal-based chat application using AnyBus", long_about = None)]
 struct Cli {
+    /// Enable IPC (inter-process communication)
+    #[arg(long, global = true)]
+    enable_ipc: bool,
+    
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -30,10 +34,6 @@ enum Commands {
     Ws {
         /// WebSocket URL to connect to (e.g., wss://example.com:10800/)
         url: String,
-        
-        /// Enable IPC (inter-process communication)
-        #[arg(long)]
-        enable_ipc: bool,
     },
     /// Start a WebSocket server
     Server {
@@ -56,10 +56,6 @@ enum Commands {
         /// Disable TLS (use plain WebSocket instead of secure WebSocket)
         #[arg(long)]
         no_tls: bool,
-        
-        /// Enable IPC (inter-process communication)
-        #[arg(long)]
-        enable_ipc: bool,
     },
     /// Use IPC-only mode (inter-process communication only)
     Ipc,
@@ -78,7 +74,7 @@ async fn main() -> color_eyre::Result<()> {
     let cli = Cli::parse();
 
     let app_result = match cli.command {
-        Some(Commands::Ws { url, enable_ipc }) => {
+        Some(Commands::Ws { url }) => {
             println!("Connecting to Server: {}", url);
             let parsed_url = Url::parse(&url)
                 .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
@@ -86,11 +82,11 @@ async fn main() -> color_eyre::Result<()> {
                 .ws_remote(WsRemoteOptions {
                     url: parsed_url,
                 })
-                .enable_ipc(enable_ipc)
+                .enable_ipc(cli.enable_ipc)
                 .init();
             App::new(bus).run().await
         }
-        Some(Commands::Server { addr, port, cert_path, key_path, no_tls, enable_ipc }) => {
+        Some(Commands::Server { addr, port, cert_path, key_path, no_tls }) => {
             println!("Starting Server on {}:{}", addr, port);
             
             let use_tls = !no_tls;
@@ -103,7 +99,7 @@ async fn main() -> color_eyre::Result<()> {
                     cert_path: if use_tls { Some(cert_path) } else { None },
                     key_path: if use_tls { Some(key_path) } else { None },
                 })
-                .enable_ipc(enable_ipc)
+                .enable_ipc(cli.enable_ipc)
                 .init();
             App::new(bus).run().await
         }
