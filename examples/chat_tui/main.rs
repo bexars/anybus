@@ -1,11 +1,12 @@
 mod chatview;
-use std::{collections::HashMap, env, net::Ipv4Addr};
+use std::{collections::HashMap, net::IpAddr};
 
 use anybus::{
     AnyBus, AnyBusBuilder, Realm, bus_uuid,
     peers::{WsListenerOptions, WsRemoteOptions},
 };
 use chatview::ChatViewWidget;
+use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,42 @@ use tokio::select;
 use tui_textarea::TextArea;
 use url::Url;
 use uuid::Uuid;
+
+/// Chat TUI application with configurable networking
+#[derive(Parser)]
+#[command(name = "chat_tui")]
+#[command(about = "A terminal-based chat application using AnyBus", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Connect to a remote WebSocket server
+    Ws {
+        /// WebSocket URL to connect to (e.g., wss://example.com:10800/)
+        url: String,
+    },
+    /// Start a WebSocket server
+    Server {
+        /// Listen address (default: 0.0.0.0)
+        #[arg(long, default_value = "0.0.0.0")]
+        addr: IpAddr,
+        
+        /// Listen port (default: 10900)
+        #[arg(long, default_value_t = 10900)]
+        port: u16,
+        
+        /// Path to TLS certificate file
+        #[arg(long)]
+        cert_path: Option<String>,
+        
+        /// Path to TLS key file
+        #[arg(long)]
+        key_path: Option<String>,
+    },
+}
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -23,34 +60,43 @@ async fn main() -> color_eyre::Result<()> {
         .with_max_level(tracing::Level::TRACE)
         .init();
     color_eyre::install()?;
-    // let mut terminal = ratatui::init();
-    let option = env::args().skip(1).next();
+    
+    let cli = Cli::parse();
 
-    let app_result = match option {
-        Some(option) if option.as_str().trim() == "ws" => {
-            println!("Connecting to Server");
+    let app_result = match cli.command {
+        Commands::Ws { url } => {
+            println!("Connecting to Server: {}", url);
+            let parsed_url = Url::parse(&url)
+                .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
             let bus = AnyBusBuilder::new()
                 .ws_remote(WsRemoteOptions {
-                    url: Url::parse("wss://anybus.bexars.com:10900").unwrap(),
+                    url: parsed_url,
                 })
                 .init();
             App::new(bus).run().await
         }
-        Some(option) if option.as_str().trim() == "server" => {
-            println!("Starting Server");
+        Commands::Server { addr, port, cert_path, key_path } => {
+            println!("Starting Server on {}:{}", addr, port);
+            
+            let use_tls = cert_path.is_some() && key_path.is_some();
+            if cert_path.is_some() != key_path.is_some() {
+                return Err(color_eyre::eyre::eyre!(
+                    "Both --cert-path and --key-path must be provided together for TLS"
+                ));
+            }
+            
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
-                    addr: Ipv4Addr::from_octets([0, 0, 0, 0]).into(),
-                    port: 10900,
-                    use_tls: true,
-                    cert_path: Some("/Users/bradbury/.secure/client.crt".into()),
-                    key_path: Some("/Users/bradbury/.secure/client.key".into()),
+                    addr: addr.into(),
+                    port,
+                    use_tls,
+                    cert_path: cert_path.map(Into::into),
+                    key_path: key_path.map(Into::into),
                 })
                 .enable_ipc(true)
                 .init();
             App::new(bus).run().await
         }
-        _ => App::default().run().await,
     };
 
     ratatui::restore();

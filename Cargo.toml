@@ -142,6 +142,7 @@ uuid = { version = "1.18.0", default-features = false,features = [
 
 
 [dev-dependencies]
+clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6.5"
 crossterm = { version = "0.28.0", features = ["event-stream", "serde"] }
 futures = "0.3.28"
