@@ -78,12 +78,13 @@ async fn main() -> color_eyre::Result<()> {
         Commands::Server { addr, port, cert_path, key_path } => {
             println!("Starting Server on {}:{}", addr, port);
             
-            let use_tls = cert_path.is_some() && key_path.is_some();
             if cert_path.is_some() != key_path.is_some() {
                 return Err(color_eyre::eyre::eyre!(
                     "Both --cert-path and --key-path must be provided together for TLS"
                 ));
             }
+            
+            let use_tls = cert_path.is_some() && key_path.is_some();
             
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
