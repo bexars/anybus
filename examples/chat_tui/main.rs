@@ -21,7 +21,7 @@ use uuid::Uuid;
 #[command(about = "A terminal-based chat application using AnyBus", long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -30,6 +30,10 @@ enum Commands {
     Ws {
         /// WebSocket URL to connect to (e.g., wss://example.com:10800/)
         url: String,
+        
+        /// Enable IPC (inter-process communication)
+        #[arg(long)]
+        enable_ipc: bool,
     },
     /// Start a WebSocket server
     Server {
@@ -41,14 +45,24 @@ enum Commands {
         #[arg(long, default_value_t = 10900)]
         port: u16,
         
-        /// Path to TLS certificate file
-        #[arg(long)]
-        cert_path: Option<String>,
+        /// Path to TLS certificate file (default: ./cert.pem)
+        #[arg(long, default_value = "./cert.pem")]
+        cert_path: String,
         
-        /// Path to TLS key file
+        /// Path to TLS key file (default: ./key.pem)
+        #[arg(long, default_value = "./key.pem")]
+        key_path: String,
+        
+        /// Disable TLS (use plain WebSocket instead of secure WebSocket)
         #[arg(long)]
-        key_path: Option<String>,
+        no_tls: bool,
+        
+        /// Enable IPC (inter-process communication)
+        #[arg(long)]
+        enable_ipc: bool,
     },
+    /// Use IPC-only mode (inter-process communication only)
+    Ipc,
 }
 
 #[tokio::main]
@@ -64,7 +78,7 @@ async fn main() -> color_eyre::Result<()> {
     let cli = Cli::parse();
 
     let app_result = match cli.command {
-        Commands::Ws { url } => {
+        Some(Commands::Ws { url, enable_ipc }) => {
             println!("Connecting to Server: {}", url);
             let parsed_url = Url::parse(&url)
                 .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
@@ -72,31 +86,30 @@ async fn main() -> color_eyre::Result<()> {
                 .ws_remote(WsRemoteOptions {
                     url: parsed_url,
                 })
+                .enable_ipc(enable_ipc)
                 .init();
             App::new(bus).run().await
         }
-        Commands::Server { addr, port, cert_path, key_path } => {
+        Some(Commands::Server { addr, port, cert_path, key_path, no_tls, enable_ipc }) => {
             println!("Starting Server on {}:{}", addr, port);
             
-            if cert_path.is_some() != key_path.is_some() {
-                return Err(color_eyre::eyre::eyre!(
-                    "Both --cert-path and --key-path must be provided together for TLS"
-                ));
-            }
-            
-            let use_tls = cert_path.is_some() && key_path.is_some();
+            let use_tls = !no_tls;
             
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
                     addr,
                     port,
                     use_tls,
-                    cert_path,
-                    key_path,
+                    cert_path: if use_tls { Some(cert_path) } else { None },
+                    key_path: if use_tls { Some(key_path) } else { None },
                 })
-                .enable_ipc(true)
+                .enable_ipc(enable_ipc)
                 .init();
             App::new(bus).run().await
+        }
+        Some(Commands::Ipc) | None => {
+            println!("Starting in IPC-only mode");
+            App::default().run().await
         }
     };
 
