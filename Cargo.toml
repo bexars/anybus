@@ -1,14 +1,14 @@
 [package]
 name = "anybus"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 resolver ="3"
 repository = "https://github.com/bexars/anybus"
 license = "MIT"
 authors = ["Matt Bradbury <matt@bexars.com"]
 categories = ["network-programming", "asynchronous"]
-keywords    = ["messaging", "ipc", "networking", "async", "dioxus"]
-description = "A serverless message bus for communicating between Rust applications easily (only IPC currently)"
+keywords    = ["messaging", "ipc", "networking", "async", "websocket"]
+description = "A serverless message bus for communicating between Rust applications easily (only IPC and Websocket currently)"
 # rust-version = "1.86"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -70,7 +70,7 @@ serde_cbor = "0.11"
 # rand = "*"
 itertools = "0.14"
 thiserror = "2"
-sorted-vec = "0.8.2"
+#sorted-vec = "0.8.2"
 # socket2 = "0.5.3"
 # lazy_static = "1.4.0"
 # binrw = "0.11.2"
@@ -79,7 +79,7 @@ futures = { version = "0.3.28", default-features = false, features = ["std"] }
 anybus-macro = { path = "./anybus-macro", version = "0.1.0" }
 dioxus = { version = "0.7.0-rc.0", optional = true }
 # futures-channel = "0.3.31"
-async-watch = "0.3.1"
+#async-watch = "0.3.1"
 tracing = "0.1"
 web-time = "1.1"
 
@@ -91,6 +91,7 @@ dyn-clone = "1.0.20"
 url = {version = "2.5.7", optional = true}
 bytes = {version = "1.10.1", optional = true}
 tokio_with_wasm = { version = "0.9.0", features = ["full"] }
+rustls-pemfile = "2.2.0"
 
 # native-tls = {version = "0.2.14", optional = true}
 # tokio-native-tls = {version = "0.3.0", optional = true}
@@ -116,7 +117,6 @@ tokio = { version = "1", features = [
     # "time",
 ] }
 
-# wasm_socket_handle = { path= "../wasm_socket_handle", optional = true}
 wasm_socket_handle = { git="https://github.com/mattbradbury/wasm_socket_handle.git", optional = true}
 ###############################
  
@@ -127,7 +127,8 @@ tokio = { version = "1", features = [
     "sync",
     "macros",
     "signal",
-    "time"
+    "time",
+    "fs"
 ] }
 
 tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }

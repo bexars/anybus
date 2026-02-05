@@ -1,5 +1,7 @@
 use std::{
     collections::HashSet,
+    fs::File,
+    io::BufReader,
     net::{IpAddr, SocketAddr},
 };
 use tokio_with_wasm::alias as tokio;
@@ -211,14 +213,22 @@ async fn create_listener(
         use std::sync::Arc;
 
         use rustls::pki_types::pem::PemObject;
-        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use rustls_pemfile::certs;
+        use tokio_rustls::rustls::pki_types::PrivateKeyDer;
 
         // let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
         // let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
-        let cert = CertificateDer::from_pem_file(&cert_path)?;
+        // // let certs = CertificateDer::from_pem_file(file_name)
+        let cert_file =
+            &mut BufReader::new(File::open(&cert_path).map_err(|e| e.to_string()).unwrap());
+        // let key_file =
+        //     &mut BufReader::new(File::open(&key_path).map_err(|e| e.to_string()).unwrap());
+        let certs = certs(cert_file).filter_map(|c| c.ok()).collect();
+
+        // let cert = CertificateDer::from_pem_file(&cert_path)?;
 
         let key = PrivateKeyDer::from_pem_file(&key_path)?;
-        let certs = vec![cert];
+        // let certs = vec![cert];
         // let key = key.
         // let key = PrivateKeyDer::Pkcs8(key);
         let config = rustls::ServerConfig::builder()
