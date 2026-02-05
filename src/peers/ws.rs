@@ -12,7 +12,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
-use web_time::Instant;
 
 use crate::{
     messages::BusControlMsg,

@@ -8,8 +8,8 @@ use dioxus::core::Task;
 #[cfg(not(feature = "dioxus"))]
 use tokio::task::JoinHandle;
 
-// #[cfg(not(feature = "dioxus"))]
-// use crate::Handle;
+#[cfg(not(feature = "dioxus"))]
+use crate::Handle;
 
 #[cfg(feature = "dioxus")]
 /// Convenience function for spawning a task in whichever runtime is being used
@@ -17,7 +17,18 @@ pub fn spawn(fut: impl Future<Output = ()> + 'static) -> Task {
     dioxus::prelude::spawn(fut)
 }
 
-#[cfg(not(feature = "dioxus"))]
+#[cfg(target_arch = "wasm32")]
+/// Convenience function for spawning a task in whichever runtime is being used
+#[track_caller]
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::spawn(future)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience function for spawning a task in whichever runtime is being used
 #[track_caller]
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>

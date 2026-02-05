@@ -11,6 +11,7 @@ use tracing::error;
 use crate::peers::ws::{WsMessage, ws_peer::InMessage};
 // From<tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>>
 
+#[derive(Debug)]
 pub enum WebSockStream {
     TgServer(WebSocketStream<ServerTlsStream<TcpStream>>),
     TgClient(WebSocketStream<MaybeTlsStream<TcpStream>>),

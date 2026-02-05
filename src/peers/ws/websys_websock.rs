@@ -9,6 +9,7 @@ use wasm_socket_handle::{WsError, WsHandle, WsMessage as WsHandleMessage};
 use crate::peers::ws::{WsMessage, ws_peer::InMessage};
 // From<tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>>
 
+#[derive(Debug)]
 pub enum WebSockStream {
     Wasm(WsHandle),
 }
