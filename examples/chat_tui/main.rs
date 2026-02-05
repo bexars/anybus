@@ -87,11 +87,11 @@ async fn main() -> color_eyre::Result<()> {
             
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
-                    addr: addr.into(),
+                    addr,
                     port,
                     use_tls,
-                    cert_path: cert_path.map(Into::into),
-                    key_path: key_path.map(Into::into),
+                    cert_path,
+                    key_path,
                 })
                 .enable_ipc(true)
                 .init();
