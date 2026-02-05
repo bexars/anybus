@@ -17,7 +17,7 @@ async fn main() {
 
     let bus = AnyBusBuilder::new()
         .ws_listener(anybus::peers::WsListenerOptions {
-            addr: Ipv4Addr::LOCALHOST.into(),
+            addr: Ipv4Addr::from_octets([0, 0, 0, 0]).into(),
             port: 10800,
             use_tls: true,
             cert_path: Some("./server.crt".into()),
