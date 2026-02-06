@@ -1,13 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(feature = "remote")]
+use std::collections::HashSet;
 
-use tracing::{debug, trace};
+use tracing::debug;
+#[cfg(feature = "remote")]
+use tracing::trace;
+#[cfg(feature = "remote")]
 use uuid::Uuid;
 
-use crate::routing::{
-    Address, EndpointId, ForwardTo, NodeId, Realm, Route, RouteKind, RouteTableError,
-};
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, router::PeerInfo};
+use crate::routing::{Address, Advertisement, ForwardTo, Realm, router::PeerInfo};
+use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RoutingTable {

@@ -43,6 +43,7 @@ use crate::peers::ws::create_listener;
 // }
 
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 enum ManagerState {
     #[default]
     Init,
@@ -215,6 +216,7 @@ impl WebsocketManager {
 
     async fn handle_command(&mut self, command: WsCommand) -> ManagerState {
         match command {
+            #[cfg(feature = "ws_server")]
             WsCommand::NewWsStream(stream, _addr) => ManagerState::NewWsStream {
                 stream: stream,
                 pending: None,

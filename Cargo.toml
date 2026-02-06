@@ -15,15 +15,15 @@ description = "A serverless message bus for communicating between Rust applicati
 
 [[example]]
 name = "counter"
-required-features = [ "tokio", "ipc"]
+required-features = [  "ipc"]
 
 [[example]]
 name = "bridge"
-required-features = [ "tokio", "ipc","ws","ws_server"]
+required-features = [  "ipc","ws","ws_server"]
 
 [[example]]
 name = "chat_tui"
-required-features = [ "tokio", "ipc","ws","ws_server"]
+required-features = [ "ipc","ws","ws_server"]
 
 
 
@@ -35,20 +35,15 @@ members = ["anybus-macro"]
 
 
 [features]
-tokio = ["tokio/rt-multi-thread", "tokio/time"]
+#tokio = ["tokio/rt-multi-thread", "tokio/time"]
 default = ["serde"]
-# default = ["tokio","serde","uuid","wasm_ws"]
-
-dioxus = ["dep:dioxus"]
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess",  "tokio/net"]
-#net = [ "tokio/net"]
-#ws = ["remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes", "dep:tokio-native-tls"]
 ws = ["remote", "dep:tokio-tungstenite", "dep:url", "dep:bytes","ws_rustls"
     ,"dep:wasm_socket_handle"
     ]
 ws_rustls = ["ws", "dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite","ws_rustls"]
-remote =["tokio/rt", "serde"]
+remote =[ "serde"]
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
@@ -109,7 +104,7 @@ uuid = { version = "1.18.0", default-features = false,features = [
     "js"
 ] }
 
-tokio = { version = "1", features = [
+tokio = { version = "1", optional = true,features = [
     "rt",
     # "rt-multi-thread",
     "sync",

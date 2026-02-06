@@ -1,6 +1,8 @@
 use tokio_with_wasm::alias as tokio;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(feature = "remote")]
+use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeMessage};

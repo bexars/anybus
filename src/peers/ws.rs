@@ -1,5 +1,6 @@
+use std::collections::HashSet;
+#[cfg(feature = "ws_server")]
 use std::{
-    collections::HashSet,
     fs::File,
     io::BufReader,
     net::{IpAddr, SocketAddr},
@@ -11,15 +12,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
 
+#[cfg(feature = "ws_server")]
 use tracing::error;
 use url::Url;
 use uuid::Uuid;
 
-use crate::{
-    messages::BusControlMsg,
-    routing::{Advertisement, WirePacket},
-    spawn,
-};
+#[cfg(feature = "ws_server")]
+use crate::{messages::BusControlMsg, spawn};
+
+use crate::routing::{Advertisement, WirePacket};
 
 pub(super) mod ws_manager;
 mod ws_peer;
@@ -51,6 +52,7 @@ pub(crate) enum WsControl {
 // #[derive(Debug)]
 enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
+    #[cfg(feature = "ws_server")]
     NewWsStream(WebSockStream, SocketAddr),
     PeerClosed(Uuid),
 }
@@ -58,6 +60,7 @@ enum WsCommand {
 impl Debug for WsCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "ws_server")]
             Self::NewWsStream(_arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),
         }
@@ -88,6 +91,7 @@ impl From<WsMessage> for Bytes {
 
 #[derive(Debug, thiserror::Error)]
 enum WsError {
+    #[cfg(feature = "ws_server")]
     #[error("Error binding to address {}", .0)]
     BindFailure(SocketAddr),
     #[error("TLS Error: {0}")]
@@ -199,6 +203,11 @@ async fn create_listener(
         ws_listener_options.cert_path.unwrap_or_default(),
         ws_listener_options.key_path.unwrap_or_default(),
     );
+
+    // let notls_acceptor = {
+
+    // }
+
     // let acceptor = {
     //     let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
     //     let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
@@ -209,7 +218,10 @@ async fn create_listener(
     //     );
     //     acceptor
     // };
-    let acceptor = {
+
+    let acceptor = if !ws_listener_options.use_tls {
+        None
+    } else {
         use std::sync::Arc;
 
         use rustls::pki_types::pem::PemObject;
@@ -235,12 +247,13 @@ async fn create_listener(
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+
         // let identity = Identity::from_pkcs8(&cert, &key)?; // .expect("Failed to create identity from pkcs8");
         // let acceptor = tokio_native_tls::TlsAcceptor::from(
         //     tokio_native_tls::native_tls::TlsAcceptor::builder(identity).build()?,
         //     // .expect("Failed to build TlsAcceptor"),
         // );
-        acceptor
+        Some(acceptor)
     };
     let sock_addr = std::net::SocketAddr::new(ws_listener_options.addr, ws_listener_options.port);
     let listener = tokio::net::TcpListener::bind(sock_addr)
@@ -258,32 +271,52 @@ async fn run_ws_listener(
     listener: tokio::net::TcpListener,
     ws_command: UnboundedSender<WsCommand>,
     mut bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
-    acceptor: tokio_rustls::TlsAcceptor,
+    acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) {
     loop {
         // use tokio_tungstenite::MaybeTlsStream;
+
+        use tokio_tungstenite::MaybeTlsStream;
 
         tokio::select! {
             accept_result = listener.accept() => {
                 match accept_result {
                     Ok((stream, addr)) => {
                         // Handle the new connection
-                        let stream = acceptor.accept(stream).await;
-                        // let s = stream..into_inner();
-                        let stream = match stream {
-                            Ok(s) => {
-                                // let s = rustls::client::TlsStream::fr
-                                // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
-                                tokio_tungstenite::accept_async(s).await.unwrap()}
-                            ,
-                            Err(e) => {
-                                error!("TLS handshake failed with {}: {}", addr, e);
-                                continue;
-                            }
+                        let command = match acceptor {
+                            Some(ref a) => match a.accept(stream).await {
+                                Ok(s) => {
+                                    // let s = rustls::client::TlsStream::fr
+                                    // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
+                                    let stream = tokio_tungstenite::accept_async(s).await.unwrap();
+                                    WsCommand::NewWsStream(stream.into(),addr)
+                                }
+                                ,
+                                Err(e) => {
+                                    error!("TLS handshake failed with {}: {}", addr, e);
+                                    continue;
+                                }
+                            },
+                            None => {
+                                let stream = tokio_tungstenite::accept_async(MaybeTlsStream::Plain(stream )).await.unwrap();
+                                    WsCommand::NewWsStream(stream.into(),addr)
+                                }
                         };
+                        // let s = stream..into_inner();
+                        // let stream = match stream {
+                        //     Ok(s) => {
+                        //         // let s = rustls::client::TlsStream::fr
+                        //         // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
+                        //         tokio_tungstenite::accept_async(s).await.unwrap()}
+                        //     ,
+                        //     Err(e) => {
+                        //         error!("TLS handshake failed with {}: {}", addr, e);
+                        //         continue;
+                        //     }
+                        // };
                         tracing::info!("Accepted connection from {}", addr);
 
-                        ws_command.send(WsCommand::NewWsStream(stream.into(),addr)).ok();
+                        ws_command.send(command).ok();
                     }
                     Err(e) => {
                         error!("Failed to accept connection: {}", e);

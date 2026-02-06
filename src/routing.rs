@@ -3,15 +3,10 @@ pub(crate) mod routing_table;
 use tokio_with_wasm::alias as tokio;
 
 #[cfg(feature = "serde")]
-use erased_serde::Serializer;
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{
-    any::Any,
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    ops::Deref,
-};
+#[cfg(feature = "remote")]
+use std::collections::HashMap;
+use std::{any::Any, collections::HashSet, fmt::Display, ops::Deref};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::trace;
@@ -193,6 +188,7 @@ impl ForwardingTable {
                 }
                 Ok(())
             }
+            #[allow(unused_variables)]
             ForwardTo::Broadcast(senders, realm) => {
                 #[cfg(feature = "remote")]
                 trace!(
@@ -287,6 +283,7 @@ impl From<WirePacket> for Packet {
     }
 }
 
+#[cfg(feature = "remote")]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct WirePacket {
     pub(crate) to: Address,
@@ -385,6 +382,8 @@ impl From<Payload> for Vec<u8> {
     fn from(value: Payload) -> Self {
         match value {
             Payload::BusRider(br) => {
+                use erased_serde::Serializer;
+
                 let mut v = Vec::new();
                 let cbor = &mut serde_cbor::Serializer::new(serde_cbor::ser::IoWrite::new(&mut v));
                 let mut cbor: Box<dyn Serializer> = Box::new(<dyn Serializer>::erase(cbor));
@@ -491,6 +490,7 @@ pub enum Realm {
     // BroadcastProxy(EndpointId),
 }
 
+#[cfg(feature = "remote")]
 impl Realm {
     pub(crate) fn allows_realm(&self, other: &Realm) -> bool {
         match self {

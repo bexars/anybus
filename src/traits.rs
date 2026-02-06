@@ -1,7 +1,8 @@
 use std::any::Any;
 
 use dyn_clone::DynClone;
-#[cfg(feature = "serde")]
+
+#[cfg(feature = "remote")]
 use erased_serde::Serialize;
 #[cfg(feature = "serde")]
 use serde::de::DeserializeOwned;
@@ -12,6 +13,10 @@ use uuid::Uuid;
 ///
 #[cfg(feature = "remote")]
 pub trait BusRider: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static {}
+
+/// Any message handled by [crate::AnyBus] must have these properties
+///
+///
 #[cfg(not(feature = "remote"))]
 pub trait BusRider: Any + DynClone + Send + Sync + std::fmt::Debug + 'static {}
 

@@ -57,6 +57,7 @@ impl Handle {
             .await
     }
 
+    #[allow(unused_variables)]
     async fn register_anycast_inner<T: BusRider + BusDeserialize + for<'de> Deserialize<'de>>(
         &mut self,
         endpoint_id: EndpointId,
@@ -102,6 +103,7 @@ impl Handle {
             .await
     }
 
+    #[allow(unused_variables)]
     async fn register_unicast_inner<T: BusRider + BusDeserialize>(
         &mut self,
         endpoint_id: EndpointId,
@@ -190,6 +192,7 @@ impl Handle {
         self.register_broadcast_inner(broadcast_id, Realm::Global)
             .await
     }
+    #[allow(unused_variables)]
     async fn register_broadcast_inner<T: BusRider + BusDeserialize>(
         &mut self,
         broadcast_id: EndpointId,
@@ -407,10 +410,12 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
+    #[allow(dead_code)]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
         _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
     }
     #[cfg(feature = "remote")]
+    #[allow(dead_code)]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
         _ = self
             .tx
@@ -434,6 +439,7 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
+    #[allow(dead_code)]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
         _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
     }
@@ -446,6 +452,7 @@ impl Handle {
         let _ = self.tx.send(BrokerMsg::Shutdown);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
         self.tx.send(msg).ok()
     }
