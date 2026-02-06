@@ -1,11 +1,12 @@
 mod chatview;
-use std::{collections::HashMap, env, net::Ipv4Addr};
+use std::{collections::HashMap, net::IpAddr};
 
 use anybus::{
     AnyBus, AnyBusBuilder, Realm, bus_uuid,
     peers::{WsListenerOptions, WsRemoteOptions},
 };
 use chatview::ChatViewWidget;
+use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,52 @@ use tokio::select;
 use tui_textarea::TextArea;
 use url::Url;
 use uuid::Uuid;
+
+/// Chat TUI application with configurable networking
+#[derive(Parser)]
+#[command(name = "chat_tui")]
+#[command(about = "A terminal-based chat application using AnyBus", long_about = None)]
+struct Cli {
+    /// Enable IPC (inter-process communication)
+    #[arg(long, global = true)]
+    enable_ipc: bool,
+    
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Connect to a remote WebSocket server
+    Ws {
+        /// WebSocket URL to connect to (e.g., wss://example.com:10800/)
+        url: String,
+    },
+    /// Start a WebSocket server
+    Server {
+        /// Listen address (default: 0.0.0.0)
+        #[arg(long, default_value = "0.0.0.0")]
+        addr: IpAddr,
+        
+        /// Listen port (default: 10900)
+        #[arg(long, default_value_t = 10900)]
+        port: u16,
+        
+        /// Path to TLS certificate file (default: ./cert.pem)
+        #[arg(long, default_value = "./cert.pem")]
+        cert_path: String,
+        
+        /// Path to TLS key file (default: ./key.pem)
+        #[arg(long, default_value = "./key.pem")]
+        key_path: String,
+        
+        /// Disable TLS (use plain WebSocket instead of secure WebSocket)
+        #[arg(long)]
+        no_tls: bool,
+    },
+    /// Use IPC-only mode (inter-process communication only)
+    Ipc,
+}
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -23,34 +70,43 @@ async fn main() -> color_eyre::Result<()> {
         .with_max_level(tracing::Level::TRACE)
         .init();
     color_eyre::install()?;
-    // let mut terminal = ratatui::init();
-    let option = env::args().skip(1).next();
+    
+    let cli = Cli::parse();
 
-    let app_result = match option {
-        Some(option) if option.as_str().trim() == "ws" => {
-            println!("Connecting to Server");
+    let app_result = match cli.command {
+        Some(Commands::Ws { url }) => {
+            println!("Connecting to Server: {}", url);
+            let parsed_url = Url::parse(&url)
+                .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
             let bus = AnyBusBuilder::new()
                 .ws_remote(WsRemoteOptions {
-                    url: Url::parse("wss://anybus.bexars.com:10900").unwrap(),
+                    url: parsed_url,
                 })
+                .enable_ipc(cli.enable_ipc)
                 .init();
             App::new(bus).run().await
         }
-        Some(option) if option.as_str().trim() == "server" => {
-            println!("Starting Server");
+        Some(Commands::Server { addr, port, cert_path, key_path, no_tls }) => {
+            println!("Starting Server on {}:{}", addr, port);
+            
+            let use_tls = !no_tls;
+            
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
-                    addr: Ipv4Addr::from_octets([0, 0, 0, 0]).into(),
-                    port: 10900,
-                    use_tls: true,
-                    cert_path: Some("/Users/bradbury/.secure/client.crt".into()),
-                    key_path: Some("/Users/bradbury/.secure/client.key".into()),
+                    addr,
+                    port,
+                    use_tls,
+                    cert_path: if use_tls { Some(cert_path) } else { None },
+                    key_path: if use_tls { Some(key_path) } else { None },
                 })
-                .enable_ipc(true)
+                .enable_ipc(cli.enable_ipc)
                 .init();
             App::new(bus).run().await
         }
-        _ => App::default().run().await,
+        Some(Commands::Ipc) | None => {
+            println!("Starting in IPC-only mode");
+            App::default().run().await
+        }
     };
 
     ratatui::restore();
