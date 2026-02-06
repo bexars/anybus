@@ -4,7 +4,7 @@ use tokio_with_wasm::alias as tokio;
 mod ipc;
 #[cfg(feature = "ws")]
 mod ws;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self};
 use uuid::Uuid;
 #[cfg(feature = "ws_server")]
 pub use ws::WsListenerOptions;
@@ -23,7 +23,7 @@ use crate::{Handle, messages::NodeMessage, routing::Realm};
 pub(crate) struct Peer {
     pub(crate) peer_id: Uuid,
     pub(crate) our_id: Uuid,
-    pub(crate) rx: UnboundedReceiver<NodeMessage>,
+    pub(crate) rx: mpsc::Receiver<NodeMessage>,
     pub(crate) handle: Handle,
     pub(crate) realm: Realm,
 }
@@ -33,7 +33,7 @@ impl Peer {
         peer_id: Uuid,
         our_id: Uuid,
         handle: Handle,
-        rx: UnboundedReceiver<NodeMessage>,
+        rx: mpsc::Receiver<NodeMessage>,
         realm: Realm,
     ) -> Self {
         Self {

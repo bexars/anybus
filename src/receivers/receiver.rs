@@ -1,6 +1,6 @@
 use futures::Stream;
 use serde::Deserialize;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self};
 
 use crate::{
     BusRider, ReceiveError, messages::ClientMessage, receivers::packet_receiver::PacketReceiver,
@@ -20,7 +20,7 @@ where
 {
     pub(crate) fn new(
         endpoint_id: EndpointId,
-        rx: UnboundedReceiver<ClientMessage>,
+        rx: mpsc::Receiver<ClientMessage>,
         handle: crate::Handle,
     ) -> Self {
         let packet_receiver = PacketReceiver::new(endpoint_id, rx, handle);

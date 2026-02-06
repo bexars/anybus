@@ -3,7 +3,7 @@ use tokio_with_wasm::alias as tokio;
 use std::{fmt::Debug, time::Duration};
 
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
+    mpsc::{self},
     watch,
 };
 // use web_time::Instant;
@@ -64,8 +64,8 @@ pub(crate) struct WebsocketManager {
     handle: Handle,
     bus_control: watch::Receiver<BusControlMsg>,
     current_peers: Vec<WsActivePeer>,
-    tx: UnboundedSender<WsCommand>,
-    rx: UnboundedReceiver<WsCommand>,
+    tx: mpsc::Sender<WsCommand>,
+    rx: mpsc::Receiver<WsCommand>,
     node_id: NodeId,
     #[cfg(feature = "ws_server")]
     ws_listener_options: Option<WsListenerOptions>,
@@ -81,7 +81,7 @@ impl WebsocketManager {
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WsListenerOptions>,
         ws_peers: Vec<WsRemoteOptions>,
     ) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
         Self {
             handle,
             bus_control,
@@ -257,7 +257,7 @@ impl WebsocketManager {
         match tokio::time::timeout(Duration::from_secs(5), stream.next_msg()).await {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
-                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
+                let (tx_nodemessage, rx) = tokio::sync::mpsc::channel(32);
                 let peer = Peer::new(
                     peer_id,
                     self.node_id,
@@ -269,8 +269,8 @@ impl WebsocketManager {
                     peer_tx: tx_nodemessage,
                     realm: Realm::Global,
                 };
-                self.handle.register_peer(peer_id, peer_entry);
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                self.handle.register_peer(peer_id, peer_entry).await;
+                let (tx, rx) = tokio::sync::mpsc::channel(32);
                 spawn(ws::ws_peer::run_ws_peer(
                     stream,
                     self.bus_control.clone(),

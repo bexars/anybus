@@ -13,7 +13,7 @@ use std::{
     ops::Deref,
 };
 use thiserror::Error;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{Sender, error::TrySendError};
 use tracing::trace;
 // use tracing::debug;
 use uuid::Uuid;
@@ -75,7 +75,7 @@ impl From<&Uuid> for EndpointId {
 #[cfg(feature = "remote")]
 #[derive(Debug, Clone)]
 pub(crate) struct PeerEntry {
-    pub(crate) peer_tx: UnboundedSender<NodeMessage>,
+    pub(crate) peer_tx: Sender<NodeMessage>,
     pub(crate) realm: Realm,
 }
 
@@ -172,39 +172,60 @@ impl ForwardingTable {
         let node_id: EndpointId = self.node_id.into();
         packet.from = Some(node_id.into());
 
-        self.inner_send(endpoint_id, packet).map_err(|p| {
-            trace!("No route to endpoint_id: {}", endpoint_id);
-            SendError::NoRoute(p.payload)
-        })
+        self.inner_send(endpoint_id, packet)
+        //         .map_err(|p| {
+        //         trace!("No route to endpoint_id: {}", endpoint_id);
+        //         SendError::NoRoute(p.payload)
+        //     })
     }
 
-    fn inner_send(&self, endpoint_id: Address, packet: Packet) -> Result<(), Packet> {
+    fn inner_send(&self, endpoint_id: Address, packet: Packet) -> Result<(), SendError> {
         // let mut packet = packet.into();
         let forward_to = self.lookup(&endpoint_id);
         let forward_to = if let Some(ft) = forward_to {
             ft
         } else {
-            return Err(packet);
+            return Err(SendError::NoRoute(packet.payload));
         };
         // let packet: Packet = packet.into();
+        let get_packet_payload = |cm: ClientMessage| {
+            if let ClientMessage::Message(packet) = cm {
+                packet.payload
+            } else {
+                unreachable!("Tried to send non-message to client")
+            }
+        };
+
+        let get_nodemessage_payload = |cm: NodeMessage| -> Payload {
+            if let NodeMessage::WirePacket(packet) = cm {
+                let p: Packet = packet.into();
+                p.payload
+            } else {
+                unreachable!("Tried to send non-message to client")
+            }
+        };
         match forward_to {
-            ForwardTo::Local(tx) => tx.send(ClientMessage::Message(packet)).map_err(|e| {
-                if let ClientMessage::Message(packet) = e.0 {
-                    packet
-                } else {
-                    unreachable!("Tried to send non-message to client")
-                }
-            }),
+            ForwardTo::Local(tx) => {
+                tx.try_send(ClientMessage::Message(packet))
+                    .map_err(|e| match e {
+                        TrySendError::Full(cm) => SendError::Full(get_packet_payload(cm)),
+                        TrySendError::Closed(cm) => SendError::NoRoute(get_packet_payload(cm)), // need to flag a dead sender
+                    })
+            }
             #[cfg(feature = "remote")]
             ForwardTo::Remote(tx, _node_id) => tx
-                .send(NodeMessage::WirePacket(packet.into()))
-                .map_err(|e| {
-                    if let NodeMessage::WirePacket(packet) = e.0 {
-                        packet.into()
-                    } else {
-                        unreachable!("Tried to send non-message to client")
-                    }
+                .try_send(NodeMessage::WirePacket(packet.into()))
+                .map_err(|e| match e {
+                    TrySendError::Full(nm) => SendError::Full(get_nodemessage_payload(nm)),
+                    TrySendError::Closed(nm) => SendError::NoRoute(get_nodemessage_payload(nm)), // need to flag a dead sender
                 }),
+            // .map_err(|e| {
+            //     if let NodeMessage::WirePacket(packet) = e.0 {
+            //         packet.into()
+            //     } else {
+            //         unreachable!("Tried to send non-message to client")
+            //     }
+            // }),
             ForwardTo::Multicast(addresses) => {
                 // let packet:Packet = packet;
                 for address in addresses {
@@ -284,10 +305,10 @@ impl From<&RoutingTable> for ForwardingTable {
 
 #[derive(Clone)]
 pub(crate) enum ForwardTo {
-    Local(UnboundedSender<ClientMessage>),
+    Local(Sender<ClientMessage>),
     #[cfg(feature = "remote")]
-    Remote(UnboundedSender<NodeMessage>, NodeId),
-    Broadcast(Vec<UnboundedSender<ClientMessage>>, Realm),
+    Remote(Sender<NodeMessage>, NodeId),
+    Broadcast(Vec<Sender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
 

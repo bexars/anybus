@@ -10,7 +10,7 @@ use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm, RouteKind};
 use tokio::{
     select,
     sync::{
-        mpsc::UnboundedReceiver,
+        mpsc::{self},
         watch::{self, Receiver, Sender},
     },
 };
@@ -34,13 +34,13 @@ pub(crate) struct Router {
     #[allow(dead_code)]
     anybus_id: NodeId,
     bus_control_rx: Receiver<BusControlMsg>,
-    broker_rx: UnboundedReceiver<BrokerMsg>,
+    broker_rx: mpsc::Receiver<BrokerMsg>,
 }
 
 impl Router {
     pub(crate) fn new(
         uuid: NodeId,
-        broker_rx: UnboundedReceiver<BrokerMsg>,
+        broker_rx: mpsc::Receiver<BrokerMsg>,
         bus_control_rx: Receiver<BusControlMsg>,
     ) -> Self {
         let forward_table = ForwardingTable::default();
@@ -132,7 +132,7 @@ impl Router {
                 let length = withdrawn.len();
                 let msg = NodeMessage::Withdraw(withdrawn);
 
-                if let Err(e) = peer_info.peer_entry.peer_tx.send(msg) {
+                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
                     trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
                 } else {
                     trace!("Sent {} route withdrawals to peer {}", peer_id, length);
@@ -142,7 +142,7 @@ impl Router {
                 let length = advertisements.len();
                 let msg = NodeMessage::Advertise(advertisements);
 
-                if let Err(e) = peer_info.peer_entry.peer_tx.send(msg) {
+                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
                     trace!(
                         "Failed to send route advertisement to peer {}: {}",
                         peer_id, e

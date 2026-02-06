@@ -9,7 +9,7 @@ use tokio::{
     select,
     sync::{
         RwLock,
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::{self},
     },
 };
 use tracing::{debug, error, info};
@@ -27,12 +27,13 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
     Some(Box::new(thing))
 }
 
+#[derive(Debug)]
 pub(crate) struct IpcPeer {
     // phantom: PhantomData<T>,
     stream: IpcPeerStream,
-    ipc_command: UnboundedSender<IpcCommand>,
-    ipc_control: UnboundedReceiver<IpcControl>,
-    ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
+    ipc_command: mpsc::Sender<IpcCommand>,
+    ipc_control: mpsc::Receiver<IpcControl>,
+    ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
     peer: Peer,
     is_master: bool,
 }
@@ -40,9 +41,9 @@ pub(crate) struct IpcPeer {
 impl IpcPeer {
     pub(crate) fn new(
         stream: IpcPeerStream,
-        ipc_command: UnboundedSender<IpcCommand>,
-        ipc_control: UnboundedReceiver<IpcControl>,
-        ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
+        ipc_command: mpsc::Sender<IpcCommand>,
+        ipc_control: mpsc::Receiver<IpcControl>,
+        ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
         peer: Peer,
         is_master: bool,
     ) -> IpcPeer {
@@ -60,6 +61,7 @@ impl IpcPeer {
         let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
         while let Some(old_state) = state.take() {
             debug!("Entering: {:?}", &old_state);
+            debug!("self: {:?}", &self);
             state = old_state.next(&mut self).await;
         }
     }

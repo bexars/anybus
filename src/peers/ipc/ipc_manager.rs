@@ -12,7 +12,7 @@ use tokio::{
     select,
     sync::{
         RwLock,
-        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+        mpsc::{self, channel},
         watch,
     },
 };
@@ -38,9 +38,9 @@ pub(crate) struct IpcManager {
     rendezvous: String,
     handle: Handle,
     bus_control: watch::Receiver<BusControlMsg>,
-    peers: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
-    tx: UnboundedSender<IpcCommand>,
-    rx: UnboundedReceiver<IpcCommand>,
+    peers: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
+    tx: mpsc::Sender<IpcCommand>,
+    rx: mpsc::Receiver<IpcCommand>,
     uuid: Uuid,
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
@@ -52,7 +52,7 @@ impl IpcManager {
         bus_control: watch::Receiver<BusControlMsg>,
         uuid: Uuid,
     ) -> Self {
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = channel(32);
 
         IpcManager {
             rendezvous,
@@ -198,7 +198,7 @@ impl State for AnnounceMaster {
             .read()
             .await
             .iter()
-            .map(|(id, tx)| (id, tx.send(IpcControl::IAmMaster)))
+            .map(|(id, tx)| (id, tx.try_send(IpcControl::IAmMaster))) // FIX need to handle full case correctly
             .filter_map(|(id, res)| if res.is_err() { Some(id) } else { None });
 
         b(Listen {})
@@ -388,8 +388,8 @@ struct CreateIpcPeer {
 #[async_trait]
 impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let (tx, rx) = unbounded_channel();
-        let (node_tx, node_rx) = unbounded_channel();
+        let (tx, rx) = channel(32);
+        let (node_tx, node_rx) = channel(32);
         let peer = Peer::new(
             self.peer_id,
             state.uuid,
@@ -410,7 +410,7 @@ impl State for CreateIpcPeer {
             realm: crate::routing::Realm::Userspace,
         };
         state.peers.write().await.push((self.peer_id, tx));
-        state.handle.register_peer(self.peer_id, peer_entry);
+        state.handle.register_peer(self.peer_id, peer_entry).await;
         _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once

@@ -102,7 +102,7 @@ impl AnyBus {
         // dbg!(&options);
         let id = Uuid::now_v7();
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
         let router = Router::new(id, rx, bc_rx.clone());
