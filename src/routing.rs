@@ -6,7 +6,12 @@ use tokio_with_wasm::alias as tokio;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "remote")]
 use std::collections::HashMap;
-use std::{any::Any, collections::HashSet, fmt::Display, ops::Deref};
+use std::{
+    any::Any,
+    collections::HashSet,
+    fmt::{Debug, Display},
+    ops::Deref,
+};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::trace;
@@ -83,12 +88,35 @@ pub(crate) struct PeerEntry {
 //     }
 // }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
     #[cfg(feature = "remote")]
     peers: HashMap<NodeId, PeerEntry>,
+}
+
+impl Debug for ForwardingTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Node: {}", self.node_id)?;
+        self.table
+            .iter()
+            .try_for_each(|(k, v)| -> std::fmt::Result {
+                write!(f, "{}", k)?;
+                write!(f, "{:?}", v)
+            })?;
+        self.peers
+            .iter()
+            .try_for_each(|(k, v)| -> std::fmt::Result {
+                write!(f, "Node: {} {:?}", k, v.realm)
+            })?;
+
+        f.debug_struct("ForwardingTable")
+            .field("table", &self.table)
+            .field("node_id", &self.node_id)
+            .field("peers", &self.peers)
+            .finish()
+    }
 }
 
 impl ForwardingTable {
@@ -254,13 +282,26 @@ impl From<&RoutingTable> for ForwardingTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) enum ForwardTo {
     Local(UnboundedSender<ClientMessage>),
     #[cfg(feature = "remote")]
     Remote(UnboundedSender<NodeMessage>, NodeId),
     Broadcast(Vec<UnboundedSender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
+}
+
+impl std::fmt::Debug for ForwardTo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local(_arg0) => f.debug_tuple("Local").finish(),
+            Self::Remote(_arg0, arg1) => f.debug_tuple("Remote").field(arg1).finish(),
+            Self::Broadcast(arg0, arg1) => {
+                write!(f, "Broadcast: {:?} {} entries", arg1, arg0.len())
+            }
+            Self::Multicast(arg0) => write!(f, "Multicast: {} entries", arg0.len()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +513,19 @@ pub enum RouteKind {
     Broadcast,
     Multicast,
     Node,
+}
+
+impl Display for RouteKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            RouteKind::Unicast => "Unicast",
+            RouteKind::Anycast => "Anycast",
+            RouteKind::Broadcast => "Broadcast",
+            RouteKind::Multicast => "Multicast",
+            RouteKind::Node => "Node",
+        };
+        f.pad(s)
+    }
 }
 
 /// Used to control how the route is advertised
