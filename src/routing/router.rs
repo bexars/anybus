@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeMessage};
-#[cfg(feature = "remote")]
-use crate::routing::{PeerEntry, Realm, RouteKind};
+use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm, RouteKind};
+
 use tokio::{
     select,
     sync::{
@@ -34,8 +33,6 @@ pub(crate) struct Router {
     routes_watch_rx: Receiver<ForwardingTable>,
     #[allow(dead_code)]
     anybus_id: NodeId,
-    // received_routes: HashMap<Uuid, usize>,
-    // sent_routes: HashMap<Uuid, usize>,
     bus_control_rx: Receiver<BusControlMsg>,
     broker_rx: UnboundedReceiver<BrokerMsg>,
 }
@@ -68,24 +65,25 @@ impl Router {
 
     pub(crate) async fn start(mut self) {
         use State::*;
-        let mut current_state = Some(Start);
-        while let Some(next_state) = current_state {
-            trace!("Entering {:?}", &next_state);
-            current_state = next_state.next(&mut self).await;
+        let mut next_state = Some(Start);
+        while let Some(current_state) = next_state {
+            trace!("Entering {:?}", &current_state);
+            next_state = current_state.next(&mut self).await;
         }
     }
 
     pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
         self.routes_watch_rx.clone()
     }
-    #[cfg(feature = "remote")]
 
+    #[cfg(feature = "remote")]
     fn send_route_updates(&mut self) {
+        trace!("Route Table: {:?}", self.route_table);
         trace!("Peers: {:?}", self.route_table.peers);
         for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
             use std::collections::HashSet;
 
-            trace!("routing table:{:#?}", self.route_table.table);
+            // trace!("routing table:{:#?}", self.route_table.table);
             let mut advertisements = HashSet::new();
             for (uuid, route_entry) in self.route_table.table.iter() {
                 use crate::routing::Advertisement;
@@ -453,15 +451,8 @@ impl State {
                 router.send_route_updates();
 
                 return Some(Listen);
-            } // ####### HandleError ##################################################
-              // HandleError(_e) => {
-              //     todo!()
-              // }
+            }
         }
-        // #[allow(unreachable_code)]
-        // unreachable!();
-        // error!("Fell through the brokermsg");
-        // return None;
     }
 }
 
@@ -470,22 +461,18 @@ impl State {
 #[allow(dead_code)]
 pub(crate) struct PeerInfo {
     pub(crate) peer_id: NodeId,
-    // pub(crate) peer_tx: UnboundedSender<NodeMessage>,
     pub(crate) received_routes: HashSet<Advertisement>,
     pub(crate) advertised_routes: HashSet<Advertisement>,
-    // pub(crate) realm: Realm,
     pub(crate) peer_entry: PeerEntry,
 }
-#[cfg(feature = "remote")]
 
+#[cfg(feature = "remote")]
 impl PeerInfo {
     fn new(peer_id: NodeId, peer_entry: PeerEntry) -> Self {
         Self {
             peer_id,
-            // peer_tx,
             received_routes: Default::default(),
             advertised_routes: Default::default(),
-            // realm,
             peer_entry,
         }
     }

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::routing::{Address, Advertisement, ForwardTo, Realm, router::PeerInfo};
 use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
@@ -88,6 +88,45 @@ impl RoutingTable {
             _ = self.add_route(endpoint_id, route);
         }
         Some(num_routes)
+    }
+}
+
+impl std::fmt::Debug for RoutingTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.table
+            .iter()
+            .try_for_each(|(k, v)| -> std::fmt::Result {
+                write!(f, "{k}: ")?;
+                writeln!(f, "kind: {} ", v.kind)?;
+                v.routes.iter().try_for_each(|r| -> std::fmt::Result {
+                    writeln!(
+                        f,
+                        "   cost:{:<4?} k1nd: {:<10} frm:{:?} rlm:{:<8?} fwd:{:<10?}",
+                        r.cost, r.kind, r.learned_from, r.realm, r.via
+                    )
+                })
+            })?;
+        self.peers
+            .iter()
+            .try_for_each(|(k, v)| -> std::fmt::Result {
+                writeln!(f, "Peer: {} {:?}", k, v.peer_entry.realm)?;
+                writeln!(f, "Advertised")?;
+                v.advertised_routes.iter().try_for_each(|r| {
+                    writeln!(
+                        f,
+                        "-  {} cost {:?} kind {:?}",
+                        r.endpoint_id, r.cost, r.kind
+                    )
+                })?;
+                writeln!(f, "Received")?;
+                v.received_routes.iter().try_for_each(|r| {
+                    writeln!(
+                        f,
+                        "-  {} cost {:?} kind {:?}",
+                        r.endpoint_id, r.cost, r.kind
+                    )
+                })
+            })
     }
 }
 
