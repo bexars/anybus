@@ -23,7 +23,7 @@ struct Cli {
     /// Enable IPC (inter-process communication)
     #[arg(long, global = true)]
     enable_ipc: bool,
-    
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -40,19 +40,19 @@ enum Commands {
         /// Listen address (default: 0.0.0.0)
         #[arg(long, default_value = "0.0.0.0")]
         addr: IpAddr,
-        
-        /// Listen port (default: 10900)
-        #[arg(long, default_value_t = 10900)]
+
+        /// Listen port (default: 12260)
+        #[arg(long, default_value_t = 12260)]
         port: u16,
-        
+
         /// Path to TLS certificate file (default: ./cert.pem)
         #[arg(long, default_value = "./cert.pem")]
         cert_path: String,
-        
+
         /// Path to TLS key file (default: ./key.pem)
         #[arg(long, default_value = "./key.pem")]
         key_path: String,
-        
+
         /// Disable TLS (use plain WebSocket instead of secure WebSocket)
         #[arg(long)]
         no_tls: bool,
@@ -70,27 +70,31 @@ async fn main() -> color_eyre::Result<()> {
         .with_max_level(tracing::Level::TRACE)
         .init();
     color_eyre::install()?;
-    
+
     let cli = Cli::parse();
 
     let app_result = match cli.command {
         Some(Commands::Ws { url }) => {
             println!("Connecting to Server: {}", url);
-            let parsed_url = Url::parse(&url)
-                .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
+            let parsed_url =
+                Url::parse(&url).map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
             let bus = AnyBusBuilder::new()
-                .ws_remote(WsRemoteOptions {
-                    url: parsed_url,
-                })
+                .ws_remote(WsRemoteOptions { url: parsed_url })
                 .enable_ipc(cli.enable_ipc)
                 .init();
             App::new(bus).run().await
         }
-        Some(Commands::Server { addr, port, cert_path, key_path, no_tls }) => {
+        Some(Commands::Server {
+            addr,
+            port,
+            cert_path,
+            key_path,
+            no_tls,
+        }) => {
             println!("Starting Server on {}:{}", addr, port);
-            
+
             let use_tls = !no_tls;
-            
+
             let bus = AnyBusBuilder::new()
                 .ws_listener(WsListenerOptions {
                     addr,
