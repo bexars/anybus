@@ -193,11 +193,12 @@ impl WebsocketManager {
                 // Handle incoming commands
             }
             Ok(_msg) = self.bus_control.changed() => {
-                match *self.bus_control.borrow() {
+                let msg = self.bus_control.borrow().clone();
+                match msg {
                     BusControlMsg::Shutdown => {
                         for peer in self.current_peers.drain(..) {
                             debug!("Shutting down connection to peer {}", peer.peer_id);
-                            let _ = peer.ws_control.send(ws::WsControl::Shutdown);
+                            peer.ws_control.send(ws::WsControl::Shutdown).await.ok();
                         }
                         debug!("WebSocket Manager shutting down");
                         ManagerState::Shutdown
