@@ -63,14 +63,14 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    let file_appender = tracing_appender::rolling::hourly("./logs/", "tui-chat.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_writer(non_blocking)
-        .with_max_level(tracing::Level::TRACE)
-        .init();
-    color_eyre::install()?;
-
+    // let file_appender = tracing_appender::rolling::hourly("./logs/", "tui-chat.log");
+    // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // tracing_subscriber::fmt()
+    //     .with_writer(non_blocking)
+    //     .with_max_level(tracing::Level::TRACE)
+    //     .init();
+    // color_eyre::install()?;
+    console_subscriber::init();
     let cli = Cli::parse();
 
     let app_result = match cli.command {
