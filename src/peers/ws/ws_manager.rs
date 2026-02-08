@@ -335,8 +335,19 @@ impl WebsocketManager {
 
     async fn connect_remote(&self, ws_pending_peer: WsPendingPeer) -> ManagerState {
         // tokio_native_tls::native_tls::
+        trace!("Connecting to: {}", ws_pending_peer.url.as_str());
+
         #[cfg(target_family = "wasm")]
         let attempt = WsHandle::new(ws_pending_peer.url.as_str()).await;
+        // #[cfg(not(target_family = "wasm"))]
+        // if let Some(domain) = ws_pending_peer.url.domain() {
+        //     let ip = tokio::net::lookup_host(domain).await;
+        //     if let Ok(ip) = ip {
+        //         for ip in ip {
+        //             trace!("Connecting to: {}", ip);
+        //         }
+        //     }
+        // }
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(ws_pending_peer.url.as_str()).await;
         match attempt {
