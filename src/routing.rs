@@ -105,17 +105,28 @@ impl Debug for ForwardingTable {
                 write!(f, "{}", k)?;
                 write!(f, "{:?}", v)
             })?;
+        #[cfg(feature = "remote")]
         self.peers
             .iter()
             .try_for_each(|(k, v)| -> std::fmt::Result {
                 write!(f, "Node: {} {:?}", k, v.realm)
             })?;
 
-        f.debug_struct("ForwardingTable")
-            .field("table", &self.table)
-            .field("node_id", &self.node_id)
-            .field("peers", &self.peers)
-            .finish()
+        #[cfg(feature = "remote")]
+        {
+            f.debug_struct("ForwardingTable")
+                .field("table", &self.table)
+                .field("node_id", &self.node_id)
+                .field("peers", &self.peers)
+                .finish()
+        }
+        #[cfg(not(feature = "remote"))]
+        {
+            f.debug_struct("ForwardingTable")
+                .field("table", &self.table)
+                .field("node_id", &self.node_id)
+                .finish()
+        }
     }
 }
 
@@ -196,6 +207,7 @@ impl ForwardingTable {
             }
         };
 
+        #[cfg(feature = "remote")]
         let get_nodemessage_payload = |cm: NodeMessage| -> Payload {
             if let NodeMessage::WirePacket(packet) = cm {
                 let p: Packet = packet.into();
@@ -316,6 +328,7 @@ impl std::fmt::Debug for ForwardTo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local(_arg0) => f.debug_tuple("Local").finish(),
+            #[cfg(feature = "remote")]
             Self::Remote(_arg0, arg1) => f.debug_tuple("Remote").field(arg1).finish(),
             Self::Broadcast(arg0, arg1) => {
                 write!(f, "Broadcast: {:?} {} entries", arg1, arg0.len())

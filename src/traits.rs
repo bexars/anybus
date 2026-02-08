@@ -8,6 +8,10 @@ use erased_serde::Serialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
+use async_trait::async_trait;
+
+use crate::errors::AnyBusHandleError;
+
 /// Any message handled by [crate::AnyBus] must have these properties
 ///
 ///
@@ -54,3 +58,49 @@ impl<T: Any + DeserializeOwned> BusDeserialize for T {}
 
 #[cfg(not(feature = "serde"))]
 impl<T: Any> BusDeserialize for T {}
+
+/// Identifier for a bus stop
+pub type BusStopId = Uuid;
+
+/// A ticket representing a message to be sent
+#[derive(Debug)]
+pub struct BusTicket {
+    pub rider: Box<dyn BusRider>,
+    pub dest: Uuid,
+}
+
+impl<T: BusRider + BusRiderWithUuid> From<T> for BusTicket {
+    fn from(rider: T) -> Self {
+        BusTicket {
+            rider: Box::new(rider),
+            dest: T::ANYBUS_UUID,
+        }
+    }
+}
+
+/// Trait for managed message handlers
+pub trait BusStop<T: BusRider> {
+    /// Process an incoming message and return tickets for responses
+    fn on_message(&self, message: T, handle: &crate::Handle) -> Vec<BusTicket>;
+    /// Called when the bus stop is loaded
+    fn on_load(&self, handle: &crate::Handle) -> Result<(), AnyBusHandleError> {
+        Ok(())
+    }
+    /// Called when shutting down
+    fn on_shutdown(&self, handle: &crate::Handle) {}
+}
+
+/// Trait for managed RPC services
+#[async_trait]
+pub trait BusDepot<T: BusRiderRpc>: Send + Sync {
+    /// Handle an incoming RPC request
+    async fn on_request(
+        &self,
+        request: crate::RpcRequest<T>,
+        handle: &crate::Handle,
+    ) -> T::Response;
+    /// Called when the depot is loaded and ready
+    fn on_load(&self, handle: &crate::Handle) {}
+    /// Called when shutting down
+    fn on_shutdown(&self, handle: &crate::Handle) {}
+}

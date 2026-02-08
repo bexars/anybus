@@ -99,13 +99,25 @@ impl std::fmt::Debug for RoutingTable {
                 write!(f, "{k}: ")?;
                 writeln!(f, "kind: {} ", v.kind)?;
                 v.routes.iter().try_for_each(|r| -> std::fmt::Result {
-                    writeln!(
-                        f,
-                        "   cost:{:<4?} k1nd: {:<10} frm:{:?} rlm:{:<8?} fwd:{:<10?}",
-                        r.cost, r.kind, r.learned_from, r.realm, r.via
-                    )
+                    #[cfg(feature = "remote")]
+                    {
+                        writeln!(
+                            f,
+                            "   cost:{:<4?} kind: {:<10} frm:{:?} rlm:{:<8?} fwd:{:<10?}",
+                            r.cost, r.kind, r.learned_from, r.realm, r.via
+                        )
+                    }
+                    #[cfg(not(feature = "remote"))]
+                    {
+                        writeln!(
+                            f,
+                            "   cost:{:<4?} kind: {:<10} fwd:{:<10?}",
+                            r.cost, r.kind, r.via
+                        )
+                    }
                 })
             })?;
+        #[cfg(feature = "remote")]
         self.peers
             .iter()
             .try_for_each(|(k, v)| -> std::fmt::Result {
@@ -126,7 +138,8 @@ impl std::fmt::Debug for RoutingTable {
                         r.endpoint_id, r.cost, r.kind
                     )
                 })
-            })
+            })?;
+        Ok(())
     }
 }
 

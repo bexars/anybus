@@ -59,8 +59,10 @@ use uuid::Uuid;
 mod common;
 pub mod errors;
 
+pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
 
+use crate::errors::AnyBusHandleError;
 use crate::messages::BusControlMsg;
 
 use crate::routing::router::Router;
@@ -188,6 +190,30 @@ impl AnyBus {
             );
             spawn(manager.start());
         };
+    }
+
+    /// Add a bus stop (placeholder for managed listeners)
+    pub fn add_bus_stop(&self, _bus_stop: (), _uuid: Uuid) -> Result<(), AnyBusHandleError> {
+        // TODO: implement storage and message routing
+        Ok(())
+    }
+
+    /// Remove a bus stop
+    pub fn remove_bus_stop(&self, _id: BusStopId) -> Result<(), AnyBusHandleError> {
+        // TODO: implement
+        Ok(())
+    }
+
+    /// Add a bus depot (placeholder for managed RPC services)
+    pub fn add_bus_depot(&self, _depot: (), _uuid: Uuid) -> Result<(), AnyBusHandleError> {
+        // TODO: implement storage and RPC routing
+        Ok(())
+    }
+
+    /// Remove a bus depot
+    pub fn remove_bus_depot(&self, _id: Uuid) -> Result<(), AnyBusHandleError> {
+        // TODO: implement
+        Ok(())
     }
 }
 
