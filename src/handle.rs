@@ -11,6 +11,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::BusDeserialize;
+use crate::BusTicket;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 // use crate::messages::BrokerMsg;
@@ -350,6 +351,18 @@ impl Handle {
             reply_to: None,
             from: None,
             payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
+        })
+        .map_err(AnyBusHandleError::SendError)
+    }
+
+    /// Sends a single BusTicket ( a wrapper around a BusRider and Destination)
+    pub fn send_busticket(&self, ticket: BusTicket) -> Result<(), AnyBusHandleError> {
+        let map = self.route_watch_rx.borrow();
+        map.send(Packet {
+            to: ticket.dest.into(),
+            reply_to: None,
+            from: None,
+            payload: Payload::BusRider(ticket.rider as Box<dyn BusRider>),
         })
         .map_err(AnyBusHandleError::SendError)
     }

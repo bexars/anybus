@@ -1,4 +1,5 @@
 use anybus::BusRiderRpc;
+use anybus::anybus_rpc;
 use anybus::bus_uuid;
 use serde::{Deserialize, Serialize};
 // use std::time::Duration;
@@ -142,6 +143,20 @@ async fn test_rpc_local() {
     drop(handle1);
     drop(handle2);
 }
+
+// #[tokio::test]
+// async fn test_rpc_macro() {
+//     #[anybus_rpc]
+//     trait Greeter {
+//         async fn hello(&self, input: String) -> String;
+//     }
+//     struct MyGreeter {};
+//     impl Greeter for MyGreeter {
+//         async fn hello(&self, mut input: String) -> {
+//             input.push_str(" World!");
+//         }
+//     }
+// }
 
 // #[cfg(feature = "tokio")]
 // #[tokio::test]

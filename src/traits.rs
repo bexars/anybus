@@ -64,6 +64,7 @@ pub type BusStopId = Uuid;
 
 /// A ticket representing a message to be sent
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub struct BusTicket {
     pub rider: Box<dyn BusRider>,
     pub dest: Uuid,
@@ -83,11 +84,11 @@ pub trait BusStop<T: BusRider> {
     /// Process an incoming message and return tickets for responses
     fn on_message(&self, message: T, handle: &crate::Handle) -> Vec<BusTicket>;
     /// Called when the bus stop is loaded
-    fn on_load(&self, handle: &crate::Handle) -> Result<(), AnyBusHandleError> {
+    fn on_load(&self, _handle: &crate::Handle) -> Result<(), AnyBusHandleError> {
         Ok(())
     }
     /// Called when shutting down
-    fn on_shutdown(&self, handle: &crate::Handle) {}
+    fn on_shutdown(&self, _handle: &crate::Handle) {}
 }
 
 /// Trait for managed RPC services
@@ -100,7 +101,41 @@ pub trait BusDepot<T: BusRiderRpc>: Send + Sync {
         handle: &crate::Handle,
     ) -> T::Response;
     /// Called when the depot is loaded and ready
-    fn on_load(&self, handle: &crate::Handle) {}
+    fn on_load(&self, _handle: &crate::Handle) {}
     /// Called when shutting down
-    fn on_shutdown(&self, handle: &crate::Handle) {}
+    fn on_shutdown(&self, _handle: &crate::Handle) {}
+}
+
+/// Trait for managed RPC services (type-erased for channels)
+#[async_trait]
+pub trait BusDepotService: Send + Sync {
+    /// Called when the depot is loaded and ready
+    fn on_load(&self, _handle: &crate::Handle) -> Result<(), crate::errors::AnyBusHandleError> {
+        Ok(())
+    }
+    /// Called when shutting down
+    fn on_shutdown(&self, _handle: &crate::Handle) {}
+    /// Run the depot service, registering the endpoint and handling incoming RPCs
+    async fn run(
+        &self,
+        handle: &crate::Handle,
+        uuid: uuid::Uuid,
+    ) -> Result<(), crate::errors::AnyBusHandleError>;
+}
+
+/// Trait for managed RPC services (type-erased for channels)
+#[async_trait]
+pub trait BusStopService: Send + Sync {
+    /// Called when the stop is loaded and ready
+    fn on_load(&self, _handle: &crate::Handle) -> Result<(), crate::errors::AnyBusHandleError> {
+        Ok(())
+    }
+    /// Called when shutting down
+    fn on_shutdown(&self, _handle: &crate::Handle) {}
+    /// Run the bus_stop service, registering the endpoint and handling incoming messages
+    async fn run(
+        &self,
+        handle: &crate::Handle,
+        uuid: uuid::Uuid,
+    ) -> Result<(), crate::errors::AnyBusHandleError>;
 }

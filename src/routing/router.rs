@@ -335,6 +335,7 @@ impl State {
                     // }
                     #[cfg(feature = "remote")]
                     BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => return Some(Listen),
+
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);
