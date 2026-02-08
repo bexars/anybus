@@ -239,9 +239,11 @@ impl State for IpcMessageReceived {
         match self.message {
             IpcMessage::Hello(_uuid) => {}
             IpcMessage::KnownPeers(uuids) => {
-                _ = state_machine
+                state_machine
                     .ipc_command
-                    .send(IpcCommand::LearnedPeers(uuids));
+                    .send(IpcCommand::LearnedPeers(uuids))
+                    .await
+                    .ok();
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
             IpcMessage::Packet(wire_packet) => {
@@ -283,18 +285,22 @@ struct ClosePeer {}
 #[async_trait]
 impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.stream.close().await;
-        _ = state_machine.ipc_command.send(IpcCommand::PeerClosed(
-            state_machine.peer.peer_id,
-            state_machine.is_master,
-        ));
+        state_machine.stream.close().await.ok();
+        state_machine
+            .ipc_command
+            .send(IpcCommand::PeerClosed(
+                state_machine.peer.peer_id,
+                state_machine.is_master,
+            ))
+            .await
+            .ok();
         state_machine
             .peer
             .handle
             .unregister_peer(state_machine.peer.peer_id);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
-        _ = state_machine.stream.close().await;
+        state_machine.stream.close().await.ok();
 
         None
     }
@@ -308,8 +314,12 @@ struct Shutdown {}
 #[async_trait]
 impl State for Shutdown {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.stream.send(IpcMessage::CloseConnection).await;
-        _ = state_machine.stream.close().await;
+        state_machine
+            .stream
+            .send(IpcMessage::CloseConnection)
+            .await
+            .ok();
+        state_machine.stream.close().await.ok();
         None
     }
 }

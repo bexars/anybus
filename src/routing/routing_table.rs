@@ -101,7 +101,7 @@ impl std::fmt::Debug for RoutingTable {
                 v.routes.iter().try_for_each(|r| -> std::fmt::Result {
                     writeln!(
                         f,
-                        "   cost:{:<4?} k1nd: {:<10} frm:{:?} rlm:{:<8?} fwd:{:<10?}",
+                        "   cost:{:<4?} kind: {:<10} frm:{:?} rlm:{:<8?} fwd:{:<10?}",
                         r.cost, r.kind, r.learned_from, r.realm, r.via
                     )
                 })

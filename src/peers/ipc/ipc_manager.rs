@@ -265,7 +265,7 @@ struct Shutdown {}
 impl State for Shutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         for (_id, tx) in state.peers.write().await.drain(..) {
-            let _ = tx.send(IpcControl::Shutdown);
+            tx.send(IpcControl::Shutdown).await.ok();
             // state.handle.unregister_peer(id);
         }
         None
