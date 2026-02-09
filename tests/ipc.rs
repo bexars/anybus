@@ -1,4 +1,6 @@
 mod common;
+use anybus::AnyBusBuilder;
+
 use crate::common::NumberMessage;
 // use tracing::info;
 
@@ -9,8 +11,8 @@ async fn test_unicast_two_buses() {
 
     use tokio::time;
 
-    let mb1 = anybus::AnyBus::new();
-    let mb2 = anybus::AnyBus::new();
+    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
@@ -27,12 +29,12 @@ async fn test_unicast_three_buses_with_drop() {
 
     use tokio::time;
 
-    let mb1 = anybus::AnyBus::new();
-    let mb2 = anybus::AnyBus::new();
+    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
-    time::sleep(std::time::Duration::from_millis(10)).await;
+    time::sleep(std::time::Duration::from_millis(100)).await;
     handle2.send(NumberMessage { value: 100 }).unwrap();
 
     let msg: NumberMessage = listener1.recv().await.unwrap();
@@ -42,9 +44,9 @@ async fn test_unicast_three_buses_with_drop() {
     drop(listener1);
     time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let mb3 = anybus::AnyBus::new();
+    let mb3 = AnyBusBuilder::new().enable_ipc(true).run();
     let mut handle3 = mb3.handle().clone();
-    let mut listener3 = handle3.register_unicast::<NumberMessage>().await.unwrap();
+    let mut listener3 = handle3.register_anycast::<NumberMessage>().await.unwrap();
     time::sleep(std::time::Duration::from_millis(10)).await;
 
     handle2.send(NumberMessage { value: 200 }).unwrap();
@@ -55,27 +57,30 @@ async fn test_unicast_three_buses_with_drop() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_rpc_two_busses() {
-    use tokio::task::yield_now;
-
     // tracing_subscriber::fmt::init();
-    let mb1 = anybus::AnyBus::new();
-    let mb2 = anybus::AnyBus::new();
+
+    use anybus::AnyBusBuilder;
+    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
+
     let mut handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_rpc::<common::RpcMessage>().await.unwrap();
-    tokio::spawn(async move {
+    dbg!(&listener1);
+    let join_handle = tokio::spawn(async move {
+        // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         let mut responder = listener1.recv().await.unwrap();
+        dbg!(&responder);
         let msg = responder.payload().unwrap();
         assert_eq!(msg.value, 41);
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
         responder.reply(common::RpcResponse { value: 123 }).unwrap();
     });
-    yield_now().await;
-    yield_now().await;
-    yield_now().await;
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(!join_handle.is_finished());
     let response = handle2
         .rpc_once(common::RpcMessage { value: 41 })
         .await
@@ -116,7 +121,7 @@ async fn test_anycast_two_busses_local_then_remote() {
     drop(listener2);
     // yield_now().await;
     // yield_now().await;
-    time::sleep(std::time::Duration::from_millis(10)).await;
+    time::sleep(std::time::Duration::from_millis(100)).await;
     handle2
         .send(common::StringMessage {
             value: "Hello, World!".into(),

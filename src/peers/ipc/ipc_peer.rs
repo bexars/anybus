@@ -58,11 +58,10 @@ impl IpcPeer {
         }
     }
     pub(crate) async fn start(mut self) {
-        let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
-        while let Some(old_state) = state.take() {
-            debug!("Entering: {:?}", &old_state);
-            debug!("self: {:?}", &self);
-            state = old_state.next(&mut self).await;
+        let mut next_state = Some(Box::new(NewConnection {}) as Box<dyn State>);
+        while let Some(cur_state) = next_state.take() {
+            debug!("Entering: {:?}", &cur_state);
+            next_state = cur_state.next(&mut self).await;
         }
     }
 }
