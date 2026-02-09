@@ -61,6 +61,7 @@ mod common;
 pub mod errors;
 
 pub use anybus_macro::bus_uuid;
+pub use anybus_macro::anybus_rpc;
 
 use crate::errors::AnyBusHandleError;
 use crate::messages::BusControlMsg;
