@@ -65,7 +65,7 @@ pub use anybus_macro::bus_uuid;
 use crate::errors::AnyBusHandleError;
 use crate::messages::BusControlMsg;
 
-use crate::routing::EndpointId;
+pub use crate::routing::EndpointId;
 use crate::routing::router::Router;
 
 impl AnyBus {}
@@ -284,11 +284,11 @@ impl AnyBus {
                 } // TODO send error message
             };
 
-            let bus_depot = bus_depot;
+            let mut bus_depot = bus_depot;
 
             loop {
                 while let Ok(mut request) = receiver.recv().await {
-                    let response = bus_depot.on_request(request.payload(), &handle);
+                    let response = bus_depot.on_request(request.payload(), &handle).await;
 
                     request.reply(response).ok();
                 }

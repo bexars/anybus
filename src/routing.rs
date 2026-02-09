@@ -27,6 +27,7 @@ use crate::{
 // pub(crate) type EndpointId = Uuid;
 pub(crate) type NodeId = Uuid;
 
+/// A newtype around Uuid
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EndpointId(Uuid);

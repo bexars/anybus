@@ -8,8 +8,6 @@ use erased_serde::Serialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use async_trait::async_trait;
-
 use crate::errors::AnyBusHandleError;
 
 /// Any message handled by [crate::AnyBus] must have these properties
@@ -38,12 +36,17 @@ impl<T: Any + DynClone + Send + Sync + std::fmt::Debug + 'static> BusRider for T
 pub trait BusRiderWithUuid: BusRider {
     /// The default Uuid that will be used if not overridden during registration
     const ANYBUS_UUID: Uuid;
+
+    /// Helper function to return the Uuid
+    fn get_uuid() -> Uuid {
+        Self::ANYBUS_UUID
+    }
 }
 
 /// Trait for denoting the type of a returned RPC response
 pub trait BusRiderRpc: BusRider {
     /// The type of the response that will be returned by the RPC call
-    type Response: BusRider;
+    type Response: BusRider + Send;
 }
 
 /// Helper trait for
@@ -92,10 +95,15 @@ pub trait BusStop<T: BusRider> {
 }
 
 /// Trait for managed RPC services
-#[async_trait]
-pub trait BusDepot<T: BusRiderRpc>: Send + Sync {
+// #[async_trait]
+pub trait BusDepot<T: BusRiderRpc + Send>: Send + Sync {
     /// Handle an incoming RPC request
-    fn on_request(&self, request: Option<T>, handle: &crate::Handle) -> T::Response;
+    fn on_request(
+        &mut self,
+        request: Option<T>,
+        handle: &crate::Handle,
+    ) -> impl std::future::Future<Output = T::Response> + std::marker::Send;
+    // async fn on_request(&mut self, request: Option<T>, handle: &crate::Handle) -> T::Response;
     /// Called when the depot is loaded and ready
     fn on_load(&self, _handle: &crate::Handle) {}
     /// Called when shutting down
