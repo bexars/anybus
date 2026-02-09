@@ -1,7 +1,7 @@
 use futures::Stream;
 use tokio_with_wasm::alias as tokio;
 
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self};
 
 use crate::{
     errors::ReceiveError,
@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct PacketReceiver {
     pub(crate) endpoint_id: EndpointId,
-    pub(crate) rx: UnboundedReceiver<ClientMessage>,
+    pub(crate) rx: mpsc::Receiver<ClientMessage>,
 
     pub(crate) handle: crate::Handle,
 }
@@ -20,7 +20,7 @@ pub(crate) struct PacketReceiver {
 impl PacketReceiver {
     pub(crate) fn new(
         endpoint_id: EndpointId,
-        rx: UnboundedReceiver<ClientMessage>,
+        rx: mpsc::Receiver<ClientMessage>,
         handle: crate::Handle,
     ) -> Self {
         Self {

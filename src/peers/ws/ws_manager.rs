@@ -3,7 +3,7 @@ use tokio_with_wasm::alias as tokio;
 use std::{fmt::Debug, time::Duration};
 
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
+    mpsc::{self},
     watch,
 };
 // use web_time::Instant;
@@ -64,8 +64,8 @@ pub(crate) struct WebsocketManager {
     handle: Handle,
     bus_control: watch::Receiver<BusControlMsg>,
     current_peers: Vec<WsActivePeer>,
-    tx: UnboundedSender<WsCommand>,
-    rx: UnboundedReceiver<WsCommand>,
+    tx: mpsc::Sender<WsCommand>,
+    rx: mpsc::Receiver<WsCommand>,
     node_id: NodeId,
     #[cfg(feature = "ws_server")]
     ws_listener_options: Option<WsListenerOptions>,
@@ -81,7 +81,7 @@ impl WebsocketManager {
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WsListenerOptions>,
         ws_peers: Vec<WsRemoteOptions>,
     ) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
         Self {
             handle,
             bus_control,
@@ -193,11 +193,12 @@ impl WebsocketManager {
                 // Handle incoming commands
             }
             Ok(_msg) = self.bus_control.changed() => {
-                match *self.bus_control.borrow() {
+                let msg = self.bus_control.borrow().clone();
+                match msg {
                     BusControlMsg::Shutdown => {
                         for peer in self.current_peers.drain(..) {
                             debug!("Shutting down connection to peer {}", peer.peer_id);
-                            let _ = peer.ws_control.send(ws::WsControl::Shutdown);
+                            peer.ws_control.send(ws::WsControl::Shutdown).await.ok();
                         }
                         debug!("WebSocket Manager shutting down");
                         ManagerState::Shutdown
@@ -257,7 +258,7 @@ impl WebsocketManager {
         match tokio::time::timeout(Duration::from_secs(5), stream.next_msg()).await {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
-                let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
+                let (tx_nodemessage, rx) = tokio::sync::mpsc::channel(32);
                 let peer = Peer::new(
                     peer_id,
                     self.node_id,
@@ -269,8 +270,8 @@ impl WebsocketManager {
                     peer_tx: tx_nodemessage,
                     realm: Realm::Global,
                 };
-                self.handle.register_peer(peer_id, peer_entry);
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                self.handle.register_peer(peer_id, peer_entry).await;
+                let (tx, rx) = tokio::sync::mpsc::channel(32);
                 spawn(ws::ws_peer::run_ws_peer(
                     stream,
                     self.bus_control.clone(),
@@ -334,8 +335,19 @@ impl WebsocketManager {
 
     async fn connect_remote(&self, ws_pending_peer: WsPendingPeer) -> ManagerState {
         // tokio_native_tls::native_tls::
+        trace!("Connecting to: {}", ws_pending_peer.url.as_str());
+
         #[cfg(target_family = "wasm")]
         let attempt = WsHandle::new(ws_pending_peer.url.as_str()).await;
+        // #[cfg(not(target_family = "wasm"))]
+        // if let Some(domain) = ws_pending_peer.url.domain() {
+        //     let ip = tokio::net::lookup_host(domain).await;
+        //     if let Ok(ip) = ip {
+        //         for ip in ip {
+        //             trace!("Connecting to: {}", ip);
+        //         }
+        //     }
+        // }
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(ws_pending_peer.url.as_str()).await;
         match attempt {

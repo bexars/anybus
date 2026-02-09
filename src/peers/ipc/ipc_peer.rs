@@ -9,7 +9,7 @@ use tokio::{
     select,
     sync::{
         RwLock,
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::{self},
     },
 };
 use tracing::{debug, error, info};
@@ -27,12 +27,13 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
     Some(Box::new(thing))
 }
 
+#[derive(Debug)]
 pub(crate) struct IpcPeer {
     // phantom: PhantomData<T>,
     stream: IpcPeerStream,
-    ipc_command: UnboundedSender<IpcCommand>,
-    ipc_control: UnboundedReceiver<IpcControl>,
-    ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
+    ipc_command: mpsc::Sender<IpcCommand>,
+    ipc_control: mpsc::Receiver<IpcControl>,
+    ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
     peer: Peer,
     is_master: bool,
 }
@@ -40,9 +41,9 @@ pub(crate) struct IpcPeer {
 impl IpcPeer {
     pub(crate) fn new(
         stream: IpcPeerStream,
-        ipc_command: UnboundedSender<IpcCommand>,
-        ipc_control: UnboundedReceiver<IpcControl>,
-        ipc_neighbors: Arc<RwLock<Vec<(Uuid, UnboundedSender<IpcControl>)>>>,
+        ipc_command: mpsc::Sender<IpcCommand>,
+        ipc_control: mpsc::Receiver<IpcControl>,
+        ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
         peer: Peer,
         is_master: bool,
     ) -> IpcPeer {
@@ -57,10 +58,10 @@ impl IpcPeer {
         }
     }
     pub(crate) async fn start(mut self) {
-        let mut state = Some(Box::new(NewConnection {}) as Box<dyn State>);
-        while let Some(old_state) = state.take() {
-            debug!("Entering: {:?}", &old_state);
-            state = old_state.next(&mut self).await;
+        let mut next_state = Some(Box::new(NewConnection {}) as Box<dyn State>);
+        while let Some(cur_state) = next_state.take() {
+            debug!("Entering: {:?}", &cur_state);
+            next_state = cur_state.next(&mut self).await;
         }
     }
 }
@@ -237,9 +238,11 @@ impl State for IpcMessageReceived {
         match self.message {
             IpcMessage::Hello(_uuid) => {}
             IpcMessage::KnownPeers(uuids) => {
-                _ = state_machine
+                state_machine
                     .ipc_command
-                    .send(IpcCommand::LearnedPeers(uuids));
+                    .send(IpcCommand::LearnedPeers(uuids))
+                    .await
+                    .ok();
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
             IpcMessage::Packet(wire_packet) => {
@@ -281,18 +284,22 @@ struct ClosePeer {}
 #[async_trait]
 impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.stream.close().await;
-        _ = state_machine.ipc_command.send(IpcCommand::PeerClosed(
-            state_machine.peer.peer_id,
-            state_machine.is_master,
-        ));
+        state_machine.stream.close().await.ok();
+        state_machine
+            .ipc_command
+            .send(IpcCommand::PeerClosed(
+                state_machine.peer.peer_id,
+                state_machine.is_master,
+            ))
+            .await
+            .ok();
         state_machine
             .peer
             .handle
             .unregister_peer(state_machine.peer.peer_id);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
-        _ = state_machine.stream.close().await;
+        state_machine.stream.close().await.ok();
 
         None
     }
@@ -306,8 +313,12 @@ struct Shutdown {}
 #[async_trait]
 impl State for Shutdown {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        _ = state_machine.stream.send(IpcMessage::CloseConnection).await;
-        _ = state_machine.stream.close().await;
+        state_machine
+            .stream
+            .send(IpcMessage::CloseConnection)
+            .await
+            .ok();
+        state_machine.stream.close().await.ok();
         None
     }
 }

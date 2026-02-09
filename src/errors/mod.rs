@@ -43,11 +43,14 @@ impl<E> From<tokio::sync::mpsc::error::SendError<E>> for ReceiveError {
     }
 }
 
+/// WIP to revamp error into Exn
+// pub struct AnyBusError {}
+
 /// Errors from various parts of AnyBus
 #[derive(Error, Debug)]
 pub enum AnyBusHandleError {
-    /// Send failed for unknown reason.  Original message is returned in the error
-    #[error("Unable to send.  The passed Message is returned within this error")]
+    /// Send failed for unknown reason.
+    #[error("Unable to send.")]
     // SendError(Box<dyn BusRider>),
     SendError(SendError),
     /// The destination [Uuid](uuid::Uuid) is unknown
@@ -67,6 +70,9 @@ pub enum AnyBusHandleError {
     /// Error in the receive calls
     #[error("Error in the RPC response")]
     ReceiveError(ReceiveError),
+    // /// Endpoint isn't keeping up with the messaging
+    // #[error("The queue for that endpoint is full")]
+    // QueueFull,
 }
 
 #[derive(Error, Debug)]
@@ -75,4 +81,8 @@ pub enum SendError {
     /// No route found in forwarding table
     #[error("No Route to Endpoint")]
     NoRoute(Payload),
+
+    /// Destination Queue is full
+    #[error("Queue full")]
+    Full(Payload),
 }

@@ -14,7 +14,7 @@ impl BusRiderRpc for NumberMessage {
 fn main() {
     use anybus::AnyBusBuilder;
 
-    let bus = AnyBusBuilder::new().build();
+    let bus = AnyBusBuilder::new().init();
     bus.run();
     let handle = bus.handle().clone();
     handle

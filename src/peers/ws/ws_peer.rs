@@ -5,7 +5,7 @@ use tokio::{
     // io::{AsyncRead, AsyncWrite},
     select,
     sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::{self},
         watch,
     },
 };
@@ -185,8 +185,8 @@ pub(crate) async fn run_ws_peer(
     mut stream: WebSockStream,
     // addr: SocketAddr,
     mut bus_control: watch::Receiver<BusControlMsg>,
-    tx_command: UnboundedSender<WsCommand>,
-    mut rx_control: UnboundedReceiver<WsControl>,
+    tx_command: mpsc::Sender<WsCommand>,
+    mut rx_control: mpsc::Receiver<WsControl>,
     mut peer: Peer,
 ) {
     trace!("Entered run_ws_peer");
@@ -199,7 +199,7 @@ pub(crate) async fn run_ws_peer(
             trace!("WsPeer sending out_message: {:?}", &out_message);
             match out_message {
                 OutMessage::WsCommand(cmd) => {
-                    if let Err(e) = tx_command.send(cmd) {
+                    if let Err(e) = tx_command.send(cmd).await {
                         eprintln!("Failed to send WsCommand: {}", e);
                         break 'outer; // everything is broken, exit loop
                     }
@@ -213,7 +213,7 @@ pub(crate) async fn run_ws_peer(
                     }
                 }
                 OutMessage::BrokerMessage(msg) => {
-                    if peer.handle.send_broker_msg(msg).is_none() {
+                    if peer.handle.send_broker_msg(msg).await.is_none() {
                         error!("Failed to send BrokerMsg to handle");
                         break 'outer; // everything is broken, exit loop
                     }

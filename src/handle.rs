@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use tokio::sync::mpsc;
 use tokio_with_wasm::alias as tokio;
 
 #[cfg(feature = "serde")]
@@ -6,11 +7,11 @@ use serde::Deserialize;
 // #[cfg(feature = "serde")]
 // use serde::de::DeserializeOwned;
 // use std::net::Shutdown;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::BusDeserialize;
+use crate::BusTicket;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 // use crate::messages::BrokerMsg;
@@ -33,7 +34,7 @@ use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 /// The handle for talking to the [AnyBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]
 pub struct Handle {
-    pub(crate) tx: UnboundedSender<BrokerMsg>,
+    pub(crate) tx: mpsc::Sender<BrokerMsg>,
     pub(crate) route_watch_rx: RoutesWatchRx,
 }
 
@@ -64,7 +65,7 @@ impl Handle {
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
         // let endpoint_id = T::ANYBUS_UUID.into();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
@@ -77,7 +78,7 @@ impl Handle {
         };
 
         let register_msg = BrokerMsg::RegisterRoute(endpoint_id, route);
-        self.tx.send(register_msg)?;
+        self.tx.send(register_msg).await?;
         info!("Sent register_msg");
         self.wait_for_registration(&mut rx, endpoint_id).await?;
         return Ok(crate::receivers::Receiver::new(
@@ -109,7 +110,7 @@ impl Handle {
         endpoint_id: EndpointId,
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
         let register_msg = BrokerMsg::RegisterRoute(
             endpoint_id,
@@ -125,7 +126,7 @@ impl Handle {
         );
         info!("Send register_msg {:?}", register_msg);
 
-        self.tx.send(register_msg)?;
+        self.tx.send(register_msg).await?;
         self.wait_for_registration(&mut rx, endpoint_id).await?;
         Ok(Receiver::new(endpoint_id, rx, self.clone()))
     }
@@ -151,7 +152,7 @@ impl Handle {
         &mut self,
         endpoint_id: EndpointId,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
         // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
 
@@ -169,7 +170,7 @@ impl Handle {
         );
         info!("Send register_msg {:?}", register_msg);
 
-        self.tx.send(register_msg)?;
+        self.tx.send(register_msg).await?;
         self.wait_for_registration(&mut rx, endpoint_id).await?;
         Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
     }
@@ -198,7 +199,7 @@ impl Handle {
         broadcast_id: EndpointId,
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
         let broadcast_msg = BrokerMsg::RegisterRoute(
             broadcast_id,
@@ -213,7 +214,7 @@ impl Handle {
                 learned_from: Uuid::nil(),
             },
         );
-        self.tx.send(broadcast_msg)?;
+        self.tx.send(broadcast_msg).await?;
         self.wait_for_registration(&mut rx, broadcast_id).await?;
 
         Ok(Receiver::new(broadcast_id, rx, self.clone()))
@@ -244,7 +245,7 @@ impl Handle {
         broadcast_id: EndpointId,
     ) -> Result<Receiver<T>, ReceiveError> {
         // let broadcast_id = T::ANYBUS_UUID.into();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let local_id = Uuid::now_v7().into();
         let register_msg = BrokerMsg::RegisterRoute(
             local_id,
@@ -260,7 +261,7 @@ impl Handle {
         );
         info!("Send register_msg {:?}", register_msg);
 
-        self.tx.send(register_msg)?;
+        self.tx.send(register_msg).await?;
         self.wait_for_registration(&mut rx, local_id).await?;
 
         let broadcast_msg = BrokerMsg::RegisterRoute(
@@ -277,7 +278,7 @@ impl Handle {
                 learned_from: Uuid::nil(),
             },
         );
-        self.tx.send(broadcast_msg)?;
+        self.tx.send(broadcast_msg).await?;
         self.wait_for_registration(&mut rx, local_id).await?;
 
         Ok(Receiver::new(local_id, rx, self.clone()))
@@ -285,7 +286,7 @@ impl Handle {
 
     async fn wait_for_registration(
         &self,
-        rx: &mut UnboundedReceiver<ClientMessage>,
+        rx: &mut mpsc::Receiver<ClientMessage>,
         endpoint_id: EndpointId,
     ) -> Result<(), ReceiveError> {
         let registration_response = if let Some(msg) = rx.recv().await {
@@ -354,6 +355,18 @@ impl Handle {
         .map_err(AnyBusHandleError::SendError)
     }
 
+    /// Sends a single BusTicket ( a wrapper around a BusRider and Destination)
+    pub fn send_busticket(&self, ticket: BusTicket) -> Result<(), AnyBusHandleError> {
+        let map = self.route_watch_rx.borrow();
+        map.send(Packet {
+            to: ticket.dest.into(),
+            reply_to: None,
+            from: None,
+            payload: Payload::BusRider(ticket.rider as Box<dyn BusRider>),
+        })
+        .map_err(AnyBusHandleError::SendError)
+    }
+
     /// Returns a helper that keeps open a response channel for multiple RPC requests
     pub async fn rpc_helper(
         &self,
@@ -362,7 +375,7 @@ impl Handle {
         let response_uuid = Uuid::now_v7().into();
         // let to_address = T::ANYBUS_UUID.into();
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
         let register_msg = BrokerMsg::RegisterRoute(
             response_uuid,
@@ -378,6 +391,7 @@ impl Handle {
         );
         self.tx
             .send(register_msg)
+            .await
             .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
         let returned_uuid =
             if let Some(ClientMessage::SuccessfulRegistration(uuid)) = rx.recv().await {
@@ -412,18 +426,20 @@ impl Handle {
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
-        _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
+        self.tx
+            .try_send(BrokerMsg::AddPeerEndpoints(uuid, ads))
+            .ok();
     }
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
-        _ = self
-            .tx
-            .send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes));
+        self.tx
+            .try_send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes))
+            .ok();
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn register_peer(
+    pub(crate) async fn register_peer(
         &self,
         uuid: NodeId,
         peer_entry: PeerEntry,
@@ -432,7 +448,11 @@ impl Handle {
     ) {
         use tracing::debug;
 
-        match self.tx.send(BrokerMsg::RegisterPeer(uuid, peer_entry)) {
+        match self
+            .tx
+            .send(BrokerMsg::RegisterPeer(uuid, peer_entry))
+            .await
+        {
             Ok(_) => {}
             Err(e) => debug!("Error sending RegisterPeer packet: {:?}", e),
         }
@@ -441,20 +461,20 @@ impl Handle {
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
-        _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
+        self.tx.try_send(BrokerMsg::UnRegisterPeer(uuid)).ok();
     }
 
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
-        _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
+        self.tx.try_send(BrokerMsg::DeadLink(endpoint_id)).ok();
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn shutdown(&self) {
-        let _ = self.tx.send(BrokerMsg::Shutdown);
+        self.tx.try_send(BrokerMsg::Shutdown).ok();
     }
 
     #[allow(dead_code)]
-    pub(crate) fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
-        self.tx.send(msg).ok()
+    pub(crate) async fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
+        self.tx.send(msg).await.ok()
     }
 
     /// Start building a registration with the builder pattern
@@ -475,7 +495,7 @@ impl Handle {
 pub struct RequestHelper {
     response_endpoint_id: EndpointId,
     // to_address: Address,
-    rx: UnboundedReceiver<ClientMessage>,
+    rx: mpsc::Receiver<ClientMessage>,
     handle: Handle,
 }
 
@@ -483,7 +503,7 @@ impl RequestHelper {
     fn new(
         response_endpoint_id: EndpointId,
         // to_address: Address,
-        rx: UnboundedReceiver<ClientMessage>,
+        rx: mpsc::Receiver<ClientMessage>,
         handle: Handle,
     ) -> Self {
         Self {

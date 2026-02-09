@@ -18,6 +18,11 @@ uuid = { version = "1.18.0", default-features = false,features = [
     "std",
 ] }
 darling = "0.21.0"
+# heck = "0.5"
+
+
+[dev-dependencies]
+# trybuild = "1.0.111"
 
 
 [lib]

@@ -10,7 +10,7 @@ use tokio_with_wasm::alias as tokio;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "ws_server")]
 use tracing::error;
@@ -147,7 +147,7 @@ impl WsPendingPeer {
 struct WsActivePeer {
     url: Option<Url>,
     peer_id: Uuid,
-    ws_control: UnboundedSender<WsControl>,
+    ws_control: Sender<WsControl>,
 }
 
 impl From<&WsRemoteOptions> for WsPendingPeer {
@@ -193,7 +193,7 @@ impl Default for WsListenerOptions {
 #[cfg(feature = "ws_server")]
 async fn create_listener(
     ws_listener_options: WsListenerOptions,
-    ws_command: tokio::sync::mpsc::UnboundedSender<WsCommand>,
+    ws_command: tokio::sync::mpsc::Sender<WsCommand>,
     bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
 ) -> Result<(), WsError> {
     // Create the listener here
@@ -269,7 +269,7 @@ async fn create_listener(
 #[cfg(feature = "ws_server")]
 async fn run_ws_listener(
     listener: tokio::net::TcpListener,
-    ws_command: UnboundedSender<WsCommand>,
+    ws_command: Sender<WsCommand>,
     mut bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
     acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) {
@@ -316,7 +316,7 @@ async fn run_ws_listener(
                         // };
                         tracing::info!("Accepted connection from {}", addr);
 
-                        ws_command.send(command).ok();
+                        ws_command.send(command).await.ok();
                     }
                     Err(e) => {
                         error!("Failed to accept connection: {}", e);

@@ -19,6 +19,7 @@ pub use helper::spawn;
 // pub use messages::RegistrationStatus;
 use tokio::sync::watch::Sender;
 
+use tracing::error;
 use tracing::trace;
 pub use traits::*;
 // mod bus_listener;
@@ -37,7 +38,9 @@ pub use receivers::rpc_receiver::RpcRequest;
 // mod route_table;
 mod routing;
 pub use routing::Realm;
+mod services;
 mod traits;
+
 #[cfg(feature = "ipc")]
 use peers::IpcManager;
 
@@ -59,11 +62,15 @@ use uuid::Uuid;
 mod common;
 pub mod errors;
 
+pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
 
+use crate::errors::AnyBusHandleError;
 use crate::messages::BusControlMsg;
 
+pub use crate::routing::EndpointId;
 use crate::routing::router::Router;
+use crate::services::BusStopService;
 
 impl AnyBus {}
 
@@ -102,7 +109,7 @@ impl AnyBus {
         // dbg!(&options);
         let id = Uuid::now_v7();
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
         let router = Router::new(id, rx, bc_rx.clone());
@@ -188,6 +195,61 @@ impl AnyBus {
             );
             spawn(manager.start());
         };
+    }
+
+    /// WIP to implement add_bus_stop correctly.  Stupid Grok
+    pub fn _add_bus_stop<T: BusRider + for<'de> serde::Deserialize<'de>>(
+        &mut self,
+        bus_stop: impl BusStop<T> + 'static + Send,
+        id: EndpointId,
+    ) {
+        let handle = self.handle.clone();
+        let service = BusStopService::new(bus_stop, id, handle);
+        // service.run()
+        tokio::spawn(service.bus_stop_service());
+    }
+
+    /// Remove a bus stop
+    pub fn remove_bus_stop(&self, _id: BusStopId) -> Result<(), AnyBusHandleError> {
+        // TODO: implement stopping the task
+        Ok(())
+    }
+
+    /// WIP Adds a BusDepot object that will be called by the system when a Rpc request is received
+    /// for that EndpointId
+    pub fn _add_bus_depot<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+        &self,
+        bus_depot: impl BusDepot<T> + 'static + Send,
+        id: EndpointId,
+    ) {
+        let handle = self.handle.clone();
+
+        tokio::spawn(async move {
+            let handle = handle;
+            let mut receiver = match handle.listener().endpoint(id).rpc().register::<T>().await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("BusStop send failure {}", e);
+                    return;
+                } // TODO send error message
+            };
+
+            let mut bus_depot = bus_depot;
+
+            loop {
+                while let Ok(mut request) = receiver.recv().await {
+                    let response = bus_depot.on_request(request.payload(), &handle).await;
+
+                    request.reply(response).ok();
+                }
+            }
+        });
+    }
+
+    /// Remove a bus depot
+    pub fn remove_bus_depot(&self, _id: Uuid) -> Result<(), AnyBusHandleError> {
+        // TODO: implement stopping the task
+        Ok(())
     }
 }
 
