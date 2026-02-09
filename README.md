@@ -56,10 +56,15 @@ There is cobbled together routing algorithm that allows for network loops to be 
 #### Advertisements
 Route advertisements are controlled by which Realm an endpoint is registered in.  Process won't be advertised, Userspace will only be advertised via IPC, and Global will be advertised to all connected nodes.  Route propagation is done in a tree fashion to prevent routing loops.
 
+## Logging
+All logs are sent using the 'tracing' crate.  Not well organized and fairly messy, but you'll get some feedback.
+
 ## Examples
 ### chat-tui
 A chat client built in ratatui that allows for serverless chat over IPC and Websockets.  Very basic right now, but to configure the websocket endpoints, edit the file directly.  Call with 'ws' option to make a websocket connection.  Use 'server' to listen and no option will listen on IPC
 - This program will output logs in a ./logs/ directory off of the CWD
+- Use /nick and /dm in the chat to change username and /dm <username> <msg>  to send a message to only one person
+  
 ### bridge 
 This is a simple program that listens to both websocket and IPC connections for testing.  Can bridge chat-tui clients between websocket and IPC.  
 
@@ -79,5 +84,11 @@ This is very much a work in progress, but i've eaten the dogfood on some small p
 - Local ipv6 and bluetooth auto-discovery and connectivity.  On Ethernet should it just peer with every neighbor, or do something smarter with multicast.  
 - Non-websocket point-to-point connectivity???
 - Make a service to handle event loop tasks.  You hand a bus_uuid object to Anybus and it runs the loop calling an attached closure
-- Possibly a true RPC mechanism where you just call a function and it automagically puts the request on the bus and waits for the response.
+- [Mostly Done!!] A true RPC mechanism where you just call a function and it automagically puts the request on the bus and waits for the response.
 - More examples needed, especially of web setups and of Rpc in action
+
+### Demo server
+- wss://turtle.trivarity.com:10800/
+  - Run the chat_tui example and see if anyone responds!  I always keep a window open to it.  It's the current test server and it's probably a few revs behind but it shouldn't matter
+- wss://turtle.trivarity.com:10801/
+- - Sometimes up and running, but they route to each other and it's gonna be the failover path soonish
