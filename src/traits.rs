@@ -95,47 +95,9 @@ pub trait BusStop<T: BusRider> {
 #[async_trait]
 pub trait BusDepot<T: BusRiderRpc>: Send + Sync {
     /// Handle an incoming RPC request
-    async fn on_request(
-        &self,
-        request: crate::RpcRequest<T>,
-        handle: &crate::Handle,
-    ) -> T::Response;
+    fn on_request(&self, request: Option<T>, handle: &crate::Handle) -> T::Response;
     /// Called when the depot is loaded and ready
     fn on_load(&self, _handle: &crate::Handle) {}
     /// Called when shutting down
     fn on_shutdown(&self, _handle: &crate::Handle) {}
-}
-
-/// Trait for managed RPC services (type-erased for channels)
-#[async_trait]
-pub trait BusDepotService: Send + Sync {
-    /// Called when the depot is loaded and ready
-    fn on_load(&self, _handle: &crate::Handle) -> Result<(), crate::errors::AnyBusHandleError> {
-        Ok(())
-    }
-    /// Called when shutting down
-    fn on_shutdown(&self, _handle: &crate::Handle) {}
-    /// Run the depot service, registering the endpoint and handling incoming RPCs
-    async fn run(
-        &self,
-        handle: &crate::Handle,
-        uuid: uuid::Uuid,
-    ) -> Result<(), crate::errors::AnyBusHandleError>;
-}
-
-/// Trait for managed RPC services (type-erased for channels)
-#[async_trait]
-pub trait BusStopService: Send + Sync {
-    /// Called when the stop is loaded and ready
-    fn on_load(&self, _handle: &crate::Handle) -> Result<(), crate::errors::AnyBusHandleError> {
-        Ok(())
-    }
-    /// Called when shutting down
-    fn on_shutdown(&self, _handle: &crate::Handle) {}
-    /// Run the bus_stop service, registering the endpoint and handling incoming messages
-    async fn run(
-        &self,
-        handle: &crate::Handle,
-        uuid: uuid::Uuid,
-    ) -> Result<(), crate::errors::AnyBusHandleError>;
 }
