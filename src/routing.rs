@@ -174,7 +174,7 @@ impl ForwardingTable {
             }
         }
         let endpoint_id = packet.to;
-        _ = self.inner_send(endpoint_id, packet.into());
+        self.inner_send(endpoint_id, packet.into()).ok();
     }
 
     pub(crate) fn send(&self, packet: impl Into<Packet>) -> Result<(), SendError> {
@@ -243,7 +243,7 @@ impl ForwardingTable {
                 for address in addresses {
                     // TODO Currently ignoring errors when broadcasting
                     // Should we collect and return them all?
-                    _ = self.inner_send(*address, packet.clone());
+                    self.inner_send(*address, packet.clone()).ok();
 
                     // ft.send(packet.clone())?;
                 }
@@ -260,7 +260,7 @@ impl ForwardingTable {
                 #[cfg(not(feature = "remote"))]
                 trace!("Broadcasting packet to {} clients", senders.len(),);
                 for tx in senders {
-                    _ = tx.send(ClientMessage::Message(packet.clone()));
+                    tx.try_send(ClientMessage::Message(packet.clone())).ok();
                 }
                 #[cfg(feature = "remote")]
                 for (nid, peer_entry) in self.peers.iter() {
@@ -272,9 +272,10 @@ impl ForwardingTable {
                         continue;
                     }
                     trace!("Broadcasting to peer {}", nid);
-                    _ = peer_entry
+                    peer_entry
                         .peer_tx
-                        .send(NodeMessage::WirePacket(packet.clone().into()));
+                        .try_send(NodeMessage::WirePacket(packet.clone().into()))
+                        .ok();
                 }
 
                 Ok(())

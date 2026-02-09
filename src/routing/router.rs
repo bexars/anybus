@@ -350,7 +350,9 @@ impl State {
                     Ok(_) => {
                         match forward_to {
                             ForwardTo::Local(tx) => {
-                                _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                                tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                                    .await
+                                    .ok();
                             }
                             #[cfg(feature = "remote")]
                             ForwardTo::Remote(_unbounded_sender, _node_id) => {
@@ -359,7 +361,9 @@ impl State {
                             ForwardTo::Broadcast(listener, _) => {
                                 for tx in listener {
                                     // There should only be one in here on creation
-                                    _ = tx.send(ClientMessage::SuccessfulRegistration(endpoint_id));
+                                    tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                                        .await
+                                        .ok();
                                 }
                             }
                             ForwardTo::Multicast(items) => {
@@ -375,9 +379,11 @@ impl State {
                                             .lookup(&local_endpoint_id.into())
                                             .unwrap()
                                         {
-                                            _ = tx.send(ClientMessage::SuccessfulRegistration(
+                                            tx.send(ClientMessage::SuccessfulRegistration(
                                                 endpoint_id,
-                                            ));
+                                            ))
+                                            .await
+                                            .ok();
                                         }
                                     }
                                     _ => {}
@@ -394,10 +400,12 @@ impl State {
                             ..
                         } = route
                         {
-                            _ = tx.send(ClientMessage::FailedRegistration(
+                            tx.send(ClientMessage::FailedRegistration(
                                 endpoint_id,
                                 e.to_string(),
-                            ));
+                            ))
+                            .await
+                            .ok();
                         }
                         Some(Listen)
                     }
@@ -409,7 +417,7 @@ impl State {
                 info!("Shutting down");
                 #[cfg(feature = "remote")]
                 for peer in router.route_table.peers.values() {
-                    _ = peer.peer_entry.peer_tx.send(NodeMessage::Close);
+                    peer.peer_entry.peer_tx.send(NodeMessage::Close).await.ok();
                 }
                 router
                     .route_table
@@ -421,14 +429,14 @@ impl State {
                             .iter()
                             .for_each(|route| match &route.via {
                                 ForwardTo::Local(tx) => {
-                                    let _ = tx.send(ClientMessage::Shutdown);
+                                    tx.try_send(ClientMessage::Shutdown).ok();
                                 }
                                 #[cfg(feature = "remote")]
                                 ForwardTo::Remote(_tx, _node_id) => {}
                                 ForwardTo::Multicast(_forward_tos) => {}
                                 ForwardTo::Broadcast(listeners, _) => {
                                     for listener in listeners {
-                                        let _ = listener.send(ClientMessage::Shutdown);
+                                        listener.try_send(ClientMessage::Shutdown).ok();
                                     }
                                 }
                             });
@@ -445,7 +453,7 @@ impl State {
                 let forward_table = router.forward_table.clone();
                 trace!("New forwarding table: {:#?}", forward_table);
 
-                let _ = router.routes_watch_tx.send(forward_table).unwrap();
+                router.routes_watch_tx.send(forward_table).unwrap();
                 // trace!("Updated forwarding table: Router: {:#?}", router);
                 // Notify peers of route changes
                 #[cfg(feature = "remote")]

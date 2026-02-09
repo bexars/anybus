@@ -426,14 +426,16 @@ impl Handle {
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
-        _ = self.tx.send(BrokerMsg::AddPeerEndpoints(uuid, ads));
+        self.tx
+            .try_send(BrokerMsg::AddPeerEndpoints(uuid, ads))
+            .ok();
     }
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
-        _ = self
-            .tx
-            .send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes));
+        self.tx
+            .try_send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes))
+            .ok();
     }
 
     #[cfg(feature = "remote")]
@@ -459,15 +461,15 @@ impl Handle {
     #[cfg(feature = "remote")]
     #[allow(dead_code)]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
-        _ = self.tx.send(BrokerMsg::UnRegisterPeer(uuid));
+        self.tx.try_send(BrokerMsg::UnRegisterPeer(uuid)).ok();
     }
 
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
-        _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
+        self.tx.try_send(BrokerMsg::DeadLink(endpoint_id)).ok();
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn shutdown(&self) {
-        let _ = self.tx.send(BrokerMsg::Shutdown);
+        self.tx.try_send(BrokerMsg::Shutdown).ok();
     }
 
     #[allow(dead_code)]
