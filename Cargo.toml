@@ -44,6 +44,7 @@ ws = [ "remote", "dep:tokio-tungstenite", "dep:url", "dep:bytes","ws_rustls"
 ws_rustls = ["ws", "dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite","ws_rustls"]
 remote =[ "tokio","serde"]
+serde = ["dep:serde"]
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
