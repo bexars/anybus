@@ -215,9 +215,9 @@ impl AnyBus {
         Ok(())
     }
 
-    /// WIP Adds a BusDepot object that will be called by the system when a Rpc request is received
+    /// Adds a BusDepot object that will be called by the system when a Rpc request is received
     /// for that EndpointId
-    pub fn _add_bus_depot<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+    pub fn add_bus_depot<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
         &self,
         bus_depot: impl BusDepot<T> + 'static + Send,
         id: EndpointId,
