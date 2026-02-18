@@ -13,7 +13,7 @@ mod macro_test {
     #[derive(Debug, Clone, Serialize)]
     struct TestImpl;
 
-    #[anybus_rpc(uuid = "12345678_1234_1234_1234_123456789")]
+    #[anybus_rpc(uuid = "12345678-1234-1234-1234-123456789abc")]
     impl TestTrait for TestImpl {
         async fn greet(&mut self, name: String) -> String {
             format!("Hello, {}!", name)

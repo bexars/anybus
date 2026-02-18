@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse::Parse, parse::ParseStream, parse_macro_input, ItemImpl, Meta, Result};
 use syn::spanned::Spanned;
+use syn::{ItemImpl, Meta, Result, parse::Parse, parse::ParseStream, parse_macro_input};
 
 struct RpcAttr {
     uuid: Option<u128>,
@@ -17,9 +17,12 @@ impl Parse for RpcAttr {
             Meta::NameValue(nv) if nv.path.is_ident("uuid") => {
                 if let syn::Expr::Lit(lit) = nv.value {
                     if let syn::Lit::Str(s) = lit.lit {
-                        let uuid_str = s.value().replace('_', "");
-                        let uuid = uuid_str.parse::<u128>().map_err(|_| syn::Error::new(s.span(), "Invalid UUID"))?;
-                        Ok(Self { uuid: Some(uuid) })
+                        let uuid_str = s.value();
+                        let uuid = uuid::Uuid::parse_str(&uuid_str)
+                            .map_err(|_| syn::Error::new(s.span(), "Invalid UUID"))?;
+                        Ok(Self {
+                            uuid: Some(uuid.as_u128()),
+                        })
                     } else {
                         Err(syn::Error::new(lit.lit.span(), "Expected string literal"))
                     }
@@ -62,7 +65,16 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let response_ident = format_ident!("{}RpcResponse", trait_ident);
     let client_ident = format_ident!("{}Client", trait_ident);
     let request_variants = methods.iter().map(|(name, args, _)| {
-        let name_pascal = format_ident!("{}", name.to_string().to_uppercase().chars().next().unwrap().to_string() + &name.to_string()[1..]);
+        let name_pascal = format_ident!(
+            "{}",
+            name.to_string()
+                .to_uppercase()
+                .chars()
+                .next()
+                .unwrap()
+                .to_string()
+                + &name.to_string()[1..]
+        );
         if args.is_empty() {
             quote!( #name_pascal )
         } else {
@@ -71,7 +83,16 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     });
     let response_variants = methods.iter().map(|(name, _, ret)| {
-        let name_pascal = format_ident!("{}", name.to_string().to_uppercase().chars().next().unwrap().to_string() + &name.to_string()[1..]);
+        let name_pascal = format_ident!(
+            "{}",
+            name.to_string()
+                .to_uppercase()
+                .chars()
+                .next()
+                .unwrap()
+                .to_string()
+                + &name.to_string()[1..]
+        );
         quote!( #name_pascal(#ret) )
     });
     let bus_rider_rpc_impl = quote! {
@@ -102,7 +123,16 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let client_methods = methods.iter().map(|(name, args, ret)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
         let arg_tys = args.iter().map(|(_, t)| t).collect::<Vec<_>>();
-        let request_variant = format_ident!("{}", name.to_string().to_uppercase().chars().next().unwrap().to_string() + &name.to_string()[1..]);
+        let request_variant = format_ident!(
+            "{}",
+            name.to_string()
+                .to_uppercase()
+                .chars()
+                .next()
+                .unwrap()
+                .to_string()
+                + &name.to_string()[1..]
+        );
         let request_creation = if args.is_empty() {
             quote!( #request_ident::#request_variant )
         } else {
@@ -139,7 +169,16 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let depot_match_arms = methods.iter().map(|(name, args, _)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
-        let request_variant = format_ident!("{}", name.to_string().to_uppercase().chars().next().unwrap().to_string() + &name.to_string()[1..]);
+        let request_variant = format_ident!(
+            "{}",
+            name.to_string()
+                .to_uppercase()
+                .chars()
+                .next()
+                .unwrap()
+                .to_string()
+                + &name.to_string()[1..]
+        );
         let call = quote!( self.#name(#(#arg_names),*).await );
         if args.is_empty() {
             quote!( #request_ident::#request_variant => #response_ident::#request_variant(#call) )
