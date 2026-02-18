@@ -1,13 +1,15 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{ItemImpl, Meta, Result, parse::Parse, parse::ParseStream, parse_macro_input};
+use syn::{
+    ItemTrait, Meta, Result, parse::Parse, parse::ParseStream, parse_macro_input, parse_quote,
+};
 
-struct RpcAttr {
+struct Rpc2Attr {
     uuid: Option<u128>,
 }
 
-impl Parse for RpcAttr {
+impl Parse for Rpc2Attr {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.is_empty() {
             return Ok(Self { uuid: None });
@@ -36,21 +38,25 @@ impl Parse for RpcAttr {
 }
 
 pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as RpcAttr);
-    let impl_item = parse_macro_input!(item as ItemImpl);
-    let trait_path = &impl_item.trait_.as_ref().unwrap().1;
-    let trait_ident = &trait_path.segments.last().unwrap().ident;
-    let self_ty = &impl_item.self_ty;
+    let attr = parse_macro_input!(attr as Rpc2Attr);
+    let trait_item = parse_macro_input!(item as ItemTrait);
+    let trait_ident = &trait_item.ident;
     let mut methods = vec![];
-    for item in &impl_item.items {
-        if let syn::ImplItem::Fn(method) = item {
+    for item in &trait_item.items {
+        if let syn::TraitItem::Fn(method) = item {
             let sig = &method.sig;
             let name = &sig.ident;
+            let mut receiver = None;
             let mut args = vec![];
             for arg in &sig.inputs {
-                if let syn::FnArg::Typed(pat_type) = arg {
-                    if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                        args.push((pat_ident.ident.clone(), (*pat_type.ty).clone()));
+                match arg {
+                    syn::FnArg::Receiver(recv) => {
+                        receiver = Some(recv.clone());
+                    }
+                    syn::FnArg::Typed(pat_type) => {
+                        if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                            args.push((pat_ident.ident.clone(), (*pat_type.ty).clone()));
+                        }
                     }
                 }
             }
@@ -58,13 +64,13 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 syn::ReturnType::Default => quote!(()),
                 syn::ReturnType::Type(_, ty) => quote!(#ty),
             };
-            methods.push((name.clone(), args, ret));
+            methods.push((name.clone(), receiver, args, ret));
         }
     }
     let request_ident = format_ident!("{}Request", trait_ident);
-    let response_ident = format_ident!("{}RpcResponse", trait_ident);
+    let response_ident = format_ident!("{}Response", trait_ident);
     let client_ident = format_ident!("{}Client", trait_ident);
-    let request_variants = methods.iter().map(|(name, args, _)| {
+    let request_variants = methods.iter().map(|(name, _, args, _)| {
         let name_pascal = format_ident!(
             "{}",
             name.to_string()
@@ -82,7 +88,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote!( #name_pascal { #(#fields),* } )
         }
     });
-    let response_variants = methods.iter().map(|(name, _, ret)| {
+    let response_variants = methods.iter().map(|(name, _, _, ret)| {
         let name_pascal = format_ident!(
             "{}",
             name.to_string()
@@ -109,18 +115,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
-    let get_uuid_impl = if let Some(uuid) = attr.uuid {
-        quote! {
-            impl #self_ty {
-                fn get_uuid() -> uuid::Uuid {
-                    uuid::Uuid::from_u128(#uuid)
-                }
-            }
-        }
-    } else {
-        quote!()
-    };
-    let client_methods = methods.iter().map(|(name, args, ret)| {
+    let client_methods = methods.iter().map(|(name, receiver, args, ret)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
         let arg_tys = args.iter().map(|(_, t)| t).collect::<Vec<_>>();
         let request_variant = format_ident!(
@@ -141,8 +136,13 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         let response_match = quote! {
             #response_ident::#request_variant(result) => result
         };
+        let self_ref = if receiver.as_ref().map_or(false, |r| r.mutability.is_some()) {
+            quote!(&mut self)
+        } else {
+            quote!(&self)
+        };
         quote! {
-            async fn #name(&mut self, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
+            async fn #name(#self_ref, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
                 let request = #request_creation;
                 let response = self.rpc_helper.request_to_uuid(request, self.endpoint_uuid).await?;
                 let result = match response {
@@ -167,7 +167,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
-    let depot_match_arms = methods.iter().map(|(name, args, _)| {
+    let depot_match_arms = methods.iter().map(|(name, receiver, args, _)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
         let request_variant = format_ident!(
             "{}",
@@ -179,7 +179,11 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .to_string()
                 + &name.to_string()[1..]
         );
-        let call = quote!( self.#name(#(#arg_names),*).await );
+        let call = if receiver.as_ref().map_or(false, |r| r.mutability.is_some()) {
+            quote!( self.#name(#(#arg_names),*).await )
+        } else {
+            quote!( self.#name(#(#arg_names),*).await )
+        };
         if args.is_empty() {
             quote!( #request_ident::#request_variant => #response_ident::#request_variant(#call) )
         } else {
@@ -187,7 +191,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     });
     let depot_impl = quote! {
-        impl ::anybus::BusDepot<#request_ident> for #self_ty {
+        impl ::anybus::BusDepot<#request_ident> for Box<dyn #trait_ident + Send + Sync> {
             async fn on_request(&mut self, request: Option<#request_ident>, _handle: &::anybus::Handle) -> #response_ident {
                 match request.unwrap() {
                     #(#depot_match_arms),*
@@ -195,8 +199,11 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
+    let async_trait_attr: syn::Attribute = parse_quote!(#[async_trait::async_trait]);
+    let mut modified_trait = trait_item.clone();
+    modified_trait.attrs.push(async_trait_attr);
     let expanded = quote! {
-        #impl_item
+        #modified_trait
         #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
         pub enum #request_ident {
             #(#request_variants),*
@@ -207,7 +214,6 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         #bus_rider_rpc_impl
         #bus_rider_with_uuid_impl
-        #get_uuid_impl
         #[derive(Debug)]
         pub struct #client_ident {
             rpc_helper: ::anybus::RequestHelper,
