@@ -34,7 +34,7 @@ mod macro_test {
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
         let depot = TestTraitDepot::new(TestImpl {});
-        bus.add_bus_depot(depot, id.clone().into());
+        bus.add_bus_depot_with_endpoint(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
         let mut client = TestTraitClient::new_with_uuid(helper, id);
@@ -48,7 +48,7 @@ mod macro_test {
         let handle = bus.handle().clone();
         // let id = Uuid::now_v7();
         let depot = TestTraitDepot::new(TestImpl {});
-        bus.add_bus_depot(depot, TestTraitRequest::ANYBUS_UUID.into());
+        bus.add_bus_depot_with_endpoint(depot, TestTraitRequest::ANYBUS_UUID.into());
 
         let helper = handle.rpc_helper().await.unwrap();
         let mut client = TestTraitClient::new(helper);
@@ -81,7 +81,7 @@ mod macro_test {
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
         let depot = MathTraitDepot::new(MathImpl {});
-        bus.add_bus_depot(depot, id.clone().into());
+        bus.add_bus_depot_with_endpoint(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
         let mut client = MathTraitClient::new_with_uuid(helper, id);
@@ -116,7 +116,7 @@ mod macro_test {
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
         let depot = CalcTraitDepot::new(CalcImpl {});
-        bus.add_bus_depot(depot, id.clone().into());
+        bus.add_bus_depot_with_endpoint(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
         let mut client = CalcTraitClient::new_with_uuid(helper, id);
@@ -147,7 +147,7 @@ mod macro_test {
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
         let depot = ReadOnlyTraitDepot::new(ReadOnlyImpl {});
-        bus.add_bus_depot(depot, id.clone().into());
+        bus.add_bus_depot_with_endpoint(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
         let mut client = ReadOnlyTraitClient::new_with_uuid(helper, id);

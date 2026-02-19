@@ -214,10 +214,19 @@ impl AnyBus {
         // TODO: implement stopping the task
         Ok(())
     }
+    /// Adds a BusDepot object that will be called by the system when a Rpc request is received
+    /// for that EndpointId
+    pub fn add_bus_depot<T: BusRiderWithUuid + BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+        &self,
+        bus_depot: impl BusDepot<T> + 'static + Send,
+    ) {
+        let endpoint = T::ANYBUS_UUID.into();
+        self.add_bus_depot_with_endpoint(bus_depot, endpoint);
+    }
 
     /// Adds a BusDepot object that will be called by the system when a Rpc request is received
     /// for that EndpointId
-    pub fn add_bus_depot<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+    pub fn add_bus_depot_with_endpoint<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
         &self,
         bus_depot: impl BusDepot<T> + 'static + Send,
         id: EndpointId,
