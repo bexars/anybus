@@ -141,7 +141,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote!(&self)
         };
         quote! {
-            async fn #name(#self_ref, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
+            pub async fn #name(#self_ref, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
                 let request = #request_creation;
                 let response = self.rpc_helper.request_to_uuid(request, self.endpoint_uuid).await?;
                 let result = match response {
@@ -187,7 +187,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     });
     let depot_struct = quote! {
         pub struct #depot_ident {
-            inner: Box<dyn #trait_ident + Send + Sync>,
+            pub inner: Box<dyn #trait_ident + Send + Sync>,
         }
         impl #depot_ident {
             pub fn new<T: #trait_ident + Send + Sync + 'static>(inner: T) -> Self {
