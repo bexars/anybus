@@ -1,15 +1,13 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{
-    ItemTrait, Meta, Result, parse::Parse, parse::ParseStream, parse_macro_input, parse_quote,
-};
+use syn::{ItemTrait, Meta, Result, parse::Parse, parse::ParseStream, parse_macro_input};
 
-struct Rpc2Attr {
+struct RpcAttr {
     uuid: Option<u128>,
 }
 
-impl Parse for Rpc2Attr {
+impl Parse for RpcAttr {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.is_empty() {
             return Ok(Self { uuid: None });
@@ -38,7 +36,7 @@ impl Parse for Rpc2Attr {
 }
 
 pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as Rpc2Attr);
+    let attr = parse_macro_input!(attr as RpcAttr);
     let trait_item = parse_macro_input!(item as ItemTrait);
     let trait_ident = &trait_item.ident;
     let mut methods = vec![];
@@ -70,6 +68,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let request_ident = format_ident!("{}Request", trait_ident);
     let response_ident = format_ident!("{}Response", trait_ident);
     let client_ident = format_ident!("{}Client", trait_ident);
+    let depot_ident = format_ident!("{}Depot", trait_ident);
     let request_variants = methods.iter().map(|(name, _, args, _)| {
         let name_pascal = format_ident!(
             "{}",
@@ -167,7 +166,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
-    let depot_match_arms = methods.iter().map(|(name, receiver, args, _)| {
+    let depot_match_arms = methods.iter().map(|(name, _receiver, args, _)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
         let request_variant = format_ident!(
             "{}",
@@ -179,31 +178,35 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .to_string()
                 + &name.to_string()[1..]
         );
-        let call = if receiver.as_ref().map_or(false, |r| r.mutability.is_some()) {
-            quote!( self.#name(#(#arg_names),*).await )
-        } else {
-            quote!( self.#name(#(#arg_names),*).await )
-        };
+        let call = quote!( self.inner.#name(#(#arg_names),*).await );
         if args.is_empty() {
             quote!( #request_ident::#request_variant => #response_ident::#request_variant(#call) )
         } else {
             quote!( #request_ident::#request_variant { #(#arg_names),* } => #response_ident::#request_variant(#call) )
         }
     });
-    let depot_impl = quote! {
-        impl ::anybus::BusDepot<#request_ident> for Box<dyn #trait_ident + Send + Sync> {
-            async fn on_request(&mut self, request: Option<#request_ident>, _handle: &::anybus::Handle) -> #response_ident {
-                match request.unwrap() {
-                    #(#depot_match_arms),*
+    let depot_struct = quote! {
+        pub struct #depot_ident {
+            inner: Box<dyn #trait_ident + Send + Sync>,
+        }
+        impl #depot_ident {
+            pub fn new<T: #trait_ident + Send + Sync + 'static>(inner: T) -> Self {
+                Self { inner: Box::new(inner) }
+            }
+        }
+        impl ::anybus::BusDepot<#request_ident> for #depot_ident {
+            fn on_request(&mut self, request: Option<#request_ident>, _handle: &::anybus::Handle) -> impl std::future::Future<Output = #response_ident> + std::marker::Send {
+                async move {
+                    match request.unwrap() {
+                        #(#depot_match_arms),*
+                    }
                 }
             }
         }
     };
-    let async_trait_attr: syn::Attribute = parse_quote!(#[async_trait::async_trait]);
-    let mut modified_trait = trait_item.clone();
-    modified_trait.attrs.push(async_trait_attr);
     let expanded = quote! {
-        #modified_trait
+        #[async_trait::async_trait]
+        #trait_item
         #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
         pub enum #request_ident {
             #(#request_variants),*
@@ -224,7 +227,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             #new_with_uuid
             #new
         }
-        #depot_impl
+        #depot_struct
     };
     expanded.into()
 }
