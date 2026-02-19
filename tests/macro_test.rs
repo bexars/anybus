@@ -33,7 +33,7 @@ mod macro_test {
         let bus = AnyBus::build().run();
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
-        let depot: Box<dyn TestTrait + Send + Sync> = Box::new(TestImpl {});
+        let depot = TestTraitDepot::new(TestImpl {});
         bus.add_bus_depot(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
@@ -47,7 +47,7 @@ mod macro_test {
         let bus = AnyBus::build().run();
         let handle = bus.handle().clone();
         // let id = Uuid::now_v7();
-        let depot: Box<dyn TestTrait + Send + Sync> = Box::new(TestImpl {});
+        let depot = TestTraitDepot::new(TestImpl {});
         bus.add_bus_depot(depot, TestTraitRequest::ANYBUS_UUID.into());
 
         let helper = handle.rpc_helper().await.unwrap();
@@ -80,7 +80,7 @@ mod macro_test {
         let bus = AnyBus::build().run();
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
-        let depot: Box<dyn MathTrait + Send + Sync> = Box::new(MathImpl {});
+        let depot = MathTraitDepot::new(MathImpl {});
         bus.add_bus_depot(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
@@ -115,7 +115,7 @@ mod macro_test {
         let bus = AnyBus::build().run();
         let handle = bus.handle().clone();
         let id = Uuid::now_v7();
-        let depot: Box<dyn CalcTrait + Send + Sync> = Box::new(CalcImpl {});
+        let depot = CalcTraitDepot::new(CalcImpl {});
         bus.add_bus_depot(depot, id.clone().into());
 
         let helper = handle.rpc_helper().await.unwrap();
@@ -124,5 +124,34 @@ mod macro_test {
         assert_eq!(res_sub, 7);
         let res_div = client.divide(20, 4).await.unwrap();
         assert_eq!(res_div, 5);
+    }
+
+    #[anybus_rpc]
+    pub trait ReadOnlyTrait {
+        async fn read(&mut self, key: String) -> String;
+    }
+
+    #[derive(Debug, Clone)]
+    struct ReadOnlyImpl;
+
+    #[async_trait::async_trait]
+    impl ReadOnlyTrait for ReadOnlyImpl {
+        async fn read(&mut self, key: String) -> String {
+            format!("Value for {}", key)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_macro_readonly() {
+        let bus = AnyBus::build().run();
+        let handle = bus.handle().clone();
+        let id = Uuid::now_v7();
+        let depot = ReadOnlyTraitDepot::new(ReadOnlyImpl {});
+        bus.add_bus_depot(depot, id.clone().into());
+
+        let helper = handle.rpc_helper().await.unwrap();
+        let mut client = ReadOnlyTraitClient::new_with_uuid(helper, id);
+        let res = client.read("test".to_string()).await.unwrap();
+        assert_eq!(res, "Value for test");
     }
 }
