@@ -12,12 +12,12 @@ description = "Procedural macros for Anybus"
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
-uuid = { version = "1.18.0", default-features = false,features = [
+uuid = { version = "1.21.0", default-features = false,features = [
     "v7",
     "serde",
     "std",
 ] }
-darling = "0.21.0"
+darling = "0.23.0"
 # heck = "0.5"
 
 
