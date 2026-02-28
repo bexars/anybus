@@ -39,6 +39,10 @@ pub struct Handle {
 }
 
 impl Handle {
+    pub(crate) fn shutdown(&self) {
+        self.tx.try_send(BrokerMsg::Shutdown).ok();
+    }
+
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [Receiver] for receiving
     /// messages sent to the [Uuid].  Anycast allows multiple listeners to be registered and the lowest cost route will
     /// be used to deliver the message.
@@ -466,10 +470,6 @@ impl Handle {
 
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
         self.tx.try_send(BrokerMsg::DeadLink(endpoint_id)).ok();
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn shutdown(&self) {
-        self.tx.try_send(BrokerMsg::Shutdown).ok();
     }
 
     #[allow(dead_code)]
