@@ -43,7 +43,7 @@ impl Handle {
     /// messages sent to the [Uuid].  Anycast allows multiple listeners to be registered and the lowest cost route will
     /// be used to deliver the message.
     pub async fn register_anycast<T: BusRiderWithUuid + BusDeserialize>(
-        &mut self,
+        &self,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global)
             .await
@@ -51,7 +51,7 @@ impl Handle {
 
     /// Same as register_anycast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_anycast_uuid<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_anycast_inner(endpoint_id.into(), Realm::Global)
@@ -60,7 +60,7 @@ impl Handle {
 
     #[allow(unused_variables)]
     async fn register_anycast_inner<T: BusRider + BusDeserialize + for<'de> Deserialize<'de>>(
-        &mut self,
+        &self,
         endpoint_id: EndpointId,
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -90,14 +90,14 @@ impl Handle {
 
     /// Similar to anycast but only one receiver can be registered at a time
     pub async fn register_unicast<T: BusRiderWithUuid + BusDeserialize>(
-        &mut self,
+        &self,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_unicast_inner(T::ANYBUS_UUID.into(), Realm::Global)
             .await
     }
     /// Same as register_unicast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_unicast_uuid<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         endpoint_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_unicast_inner(endpoint_id.into(), Realm::Global)
@@ -106,7 +106,7 @@ impl Handle {
 
     #[allow(unused_variables)]
     async fn register_unicast_inner<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         endpoint_id: EndpointId,
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -133,7 +133,7 @@ impl Handle {
 
     /// Register a RPC service with the broker.
     pub async fn register_rpc<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
-        &mut self,
+        &self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = T::ANYBUS_UUID.into();
         self.register_rpc_inner(endpoint_id).await
@@ -141,7 +141,7 @@ impl Handle {
 
     /// Register a RPC service with the given Uuid as the endpoint
     pub async fn register_rpc_uuid<T: BusRiderRpc + BusDeserialize>(
-        &mut self,
+        &self,
         endpoint_id: Uuid,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = endpoint_id.into();
@@ -149,7 +149,7 @@ impl Handle {
     }
 
     async fn register_rpc_inner<T: BusRiderRpc + BusDeserialize>(
-        &mut self,
+        &self,
         endpoint_id: EndpointId,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
@@ -177,7 +177,7 @@ impl Handle {
 
     /// Broadcast registration, all receivers will get a copy of the message
     pub async fn register_broadcast<T: BusRiderWithUuid + BusDeserialize>(
-        &mut self,
+        &self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
         self.register_broadcast_inner(broadcast_id, Realm::Global)
@@ -186,7 +186,7 @@ impl Handle {
 
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
     pub async fn register_broadcast_uuid<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
@@ -195,7 +195,7 @@ impl Handle {
     }
     #[allow(unused_variables)]
     async fn register_broadcast_inner<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         broadcast_id: EndpointId,
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
@@ -224,7 +224,7 @@ impl Handle {
     /// Multicast registration, all receivers will get a copy of the message
     #[allow(dead_code)]
     pub(crate) async fn register_multicast<T: BusRiderWithUuid + BusDeserialize>(
-        &mut self,
+        &self,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = T::ANYBUS_UUID.into();
         self.register_multicast_inner(broadcast_id).await
@@ -234,14 +234,14 @@ impl Handle {
     #[allow(dead_code)]
 
     pub(crate) async fn register_multicast_uuid<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         broadcast_id: Uuid,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
         self.register_multicast_inner(broadcast_id).await
     }
     async fn register_multicast_inner<T: BusRider + BusDeserialize>(
-        &mut self,
+        &self,
         broadcast_id: EndpointId,
     ) -> Result<Receiver<T>, ReceiveError> {
         // let broadcast_id = T::ANYBUS_UUID.into();
