@@ -133,6 +133,7 @@ impl AnyBus {
     /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this AnyBus
     ///
     pub fn shutdown(&mut self) {
+        self.handle.shutdown();
         self.bc_tx
             .send(BusControlMsg::Shutdown)
             .map_err(|e| trace!("Send shutdown error {:?}", e))
