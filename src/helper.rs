@@ -9,7 +9,18 @@ use tokio_with_wasm::alias as tokio;
 //     dioxus::prelude::spawn(fut)
 // }
 
-// #[cfg(target_arch = "wasm32")]
+#[cfg(target_arch = "wasm32")]
+/// Convenience function for spawning a task in whichever runtime is being used
+#[track_caller]
+pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::spawn(future)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience function for spawning a task in whichever runtime is being used
 #[track_caller]
 pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
@@ -19,17 +30,6 @@ where
 {
     tokio::spawn(future)
 }
-
-// #[cfg(not(target_arch = "wasm32"))]
-// /// Convenience function for spawning a task in whichever runtime is being used
-// #[track_caller]
-// pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
-// where
-//     F: Future + Send + 'static,
-//     F::Output: Send + 'static,
-// {
-//     tokio::spawn(future)
-// }
 
 /// Wrapper struct for handling Ctrl-C input from the terminal.  Receiving Ctrl-C will trigger this to call [BusControlHandle::shutdown()]
 ///
