@@ -9,8 +9,7 @@ error[E0599]: no method named `rpc` found for struct `anybus::handle::Registrati
    | |_________|
    |
    |
-   = note: the method was found for
-           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
+   = note: the method was found for `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
 
 error[E0599]: no method named `broadcast` found for struct `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::NoCast, anybus::handle::RpcSet>` in the current scope
   --> tests/builder/test1.rs:28:10
@@ -23,8 +22,7 @@ error[E0599]: no method named `broadcast` found for struct `anybus::handle::Regi
    | |_________|
    |
    |
-   = note: the method was found for
-           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
+   = note: the method was found for `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
 
 error[E0599]: no method named `rpc` found for struct `anybus::handle::RegistrationBuilder<anybus::handle::NoEndpointId, anybus::handle::CastSet, anybus::handle::NoRpc>` in the current scope
   --> tests/builder/test1.rs:33:10
@@ -37,5 +35,4 @@ error[E0599]: no method named `rpc` found for struct `anybus::handle::Registrati
    | |_________|
    |
    |
-   = note: the method was found for
-           - `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`
+   = note: the method was found for `anybus::handle::RegistrationBuilder<EP, anybus::handle::NoCast, anybus::handle::NoRpc>`

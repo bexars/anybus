@@ -13,7 +13,7 @@ async fn test_unicast_two_buses() {
 
     let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
     let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
     time::sleep(std::time::Duration::from_secs(1)).await;
@@ -31,7 +31,7 @@ async fn test_unicast_three_buses_with_drop() {
 
     let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
     let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
     time::sleep(std::time::Duration::from_millis(100)).await;
@@ -45,7 +45,7 @@ async fn test_unicast_three_buses_with_drop() {
     time::sleep(std::time::Duration::from_millis(10)).await;
 
     let mb3 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mut handle3 = mb3.handle().clone();
+    let handle3 = mb3.handle().clone();
     let mut listener3 = handle3.register_anycast::<NumberMessage>().await.unwrap();
     time::sleep(std::time::Duration::from_millis(10)).await;
 
@@ -63,7 +63,7 @@ async fn test_rpc_two_busses() {
     let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
     let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
 
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_rpc::<common::RpcMessage>().await.unwrap();
     dbg!(&listener1);
@@ -99,8 +99,8 @@ async fn test_anycast_two_busses_local_then_remote() {
     let builder = anybus::AnyBusBuilder::new().enable_ipc(true);
     let mb1 = builder.run();
     let mb2 = builder.run();
-    let mut handle1 = mb1.handle().clone();
-    let mut handle2 = mb2.handle().clone();
+    let handle1 = mb1.handle().clone();
+    let handle2 = mb2.handle().clone();
     let mut listener1 = handle1
         .register_anycast::<common::StringMessage>()
         .await

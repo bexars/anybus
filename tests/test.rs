@@ -37,7 +37,7 @@ struct RpcResponse {
 #[tokio::test]
 async fn test_unicast_local_message_sending() {
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let mut listener = handle1.register_unicast().await.unwrap();
 
     handle1.send(NumberMessage { value: 100 }).unwrap();
@@ -51,9 +51,9 @@ async fn test_unicast_local_message_sending() {
 
 async fn test_unicast_local_one_registration_allowed() {
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let _listener = handle1.register_unicast::<NumberMessage>().await.unwrap();
-    let mut handle2 = mb1.handle().clone();
+    let handle2 = mb1.handle().clone();
     let mut listener2 = handle2.register_unicast::<NumberMessage>().await.unwrap();
     handle1.send(NumberMessage { value: 100 }).unwrap();
     let msg: NumberMessage = listener2.recv().await.unwrap();
@@ -64,7 +64,7 @@ async fn test_unicast_local_one_registration_allowed() {
 #[tokio::test]
 async fn test_unicast_local_two_handles() {
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let _listener = handle1.register_unicast::<NumberMessage>().await.unwrap();
     let _handle2 = mb1.handle().clone();
 }
@@ -73,7 +73,7 @@ async fn test_unicast_local_two_handles() {
 #[tokio::test]
 async fn test_unicast_local_two_message_types_one_handle() {
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let handle2 = mb1.handle().clone();
 
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
@@ -97,9 +97,9 @@ async fn test_anycast_local_two_registration_allowed() {
     use tokio::select;
 
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     let mut listener1 = handle1.register_anycast::<NumberMessage>().await.unwrap();
-    let mut handle2 = mb1.handle().clone();
+    let handle2 = mb1.handle().clone();
     let mut listener2 = handle2.register_anycast::<NumberMessage>().await.unwrap();
     handle1.send(NumberMessage { value: 100 }).unwrap();
 
@@ -119,7 +119,7 @@ async fn test_rpc_local() {
     use anybus::spawn;
 
     let mb1 = anybus::AnyBus::new();
-    let mut handle1 = mb1.handle().clone();
+    let handle1 = mb1.handle().clone();
     // dbg!("Before Spawn: {:?}", &handle1);
     let mut listener1 = handle1.register_rpc().await.unwrap();
 

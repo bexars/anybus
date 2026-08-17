@@ -5,7 +5,7 @@ use std::{
     io::BufReader,
     net::{IpAddr, SocketAddr},
 };
-use tokio_with_wasm::alias as tokio;
+// use tokio_with_wasm::alias as tokio;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};

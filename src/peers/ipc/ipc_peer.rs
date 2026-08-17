@@ -1,5 +1,5 @@
 // Cribbed the state machine from: https://moonbench.xyz/projects/rust-event-driven-finite-state-machine
-use tokio_with_wasm::alias as tokio;
+// use tokio_with_wasm::alias as tokio;
 
 use std::sync::Arc;
 
