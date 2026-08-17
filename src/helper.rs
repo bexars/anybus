@@ -1,26 +1,28 @@
-use tokio_with_wasm::alias as tokio;
+// use tokio_with_wasm::alias as tokio;
+#[cfg(feature = "dioxus")]
+use dioxus::dioxus_core::Task;
 
 // #[cfg(not(feature = "dioxus"))]
 // use crate::Handle;
 
-// #[cfg(feature = "dioxus")]
-// /// Convenience function for spawning a task in whichever runtime is being used
-// pub fn spawn(fut: impl Future<Output = ()> + 'static) -> Task {
-//     dioxus::prelude::spawn(fut)
-// }
+#[cfg(feature = "dioxus")]
+/// Convenience function for spawning a task in whichever runtime is being used
+pub fn spawn(fut: impl Future<Output = ()> + 'static) -> Task {
+    dioxus::prelude::spawn(fut)
+}
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(feature = "dioxus")))]
 /// Convenience function for spawning a task in whichever runtime is being used
 #[track_caller]
 pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
-    F: Future + 'static,
+    F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
     tokio::spawn(future)
 }
-
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "dioxus")))]
+// #[cfg(not(target_arch = "wasm32"))]
 /// Convenience function for spawning a task in whichever runtime is being used
 #[track_caller]
 pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
