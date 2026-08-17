@@ -2,7 +2,7 @@
 mod macro_test {
     use anybus::anybus_rpc;
 
-    use anybus::{AnyBus, BusRiderWithUuid, errors::AnyBusHandleError};
+    use anybus::{AnyBus, BusRiderWithUuid};
     use serde::Serialize;
     use uuid::Uuid;
 

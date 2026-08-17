@@ -286,9 +286,10 @@ impl State {
                         return Some(RegisterRoute(endpoint_id, route));
                     }
                     BrokerMsg::DeadLink(endpoint_id) => {
+                        let mut changed = false;
                         let route_entry = router.route_table.table.get_mut(&endpoint_id);
                         if let Some(route_entry) = route_entry {
-                            let before = route_entry.routes.len();
+                            let before_len = route_entry.routes.len();
                             route_entry.routes.retain_mut(|route| match route.via {
                                 ForwardTo::Local(ref tx) => !tx.is_closed(),
                                 #[cfg(feature = "remote")]
@@ -300,17 +301,20 @@ impl State {
                                 }
                             });
 
-                            let after = route_entry.routes.len();
-                            if before != after {
-                                trace!(
-                                    "Removed {} dead routes for endpoint {}",
-                                    before - after,
-                                    endpoint_id
-                                );
-                                return Some(RouteChange);
+                            if route_entry.routes.len() != before_len {
+                                changed = true;
+                            };
+
+                            if route_entry.routes.len() == 0 {
+                                router.route_table.table.remove(&endpoint_id);
+                                changed = true;
                             }
                         }
-                        return Some(Listen);
+                        if changed {
+                            return Some(RouteChange);
+                        } else {
+                            return Some(Listen);
+                        }
                     }
                     #[cfg(feature = "remote")]
                     BrokerMsg::RegisterPeer(uuid, peer_entry) => {
