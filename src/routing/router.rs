@@ -293,11 +293,10 @@ impl State {
                                 ForwardTo::Local(ref tx) => !tx.is_closed(),
                                 #[cfg(feature = "remote")]
                                 ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
-                                ForwardTo::Multicast(ref _forward_tos) => true,
+                                ForwardTo::Multicast(ref set) => !set.is_empty(),
                                 ForwardTo::Broadcast(ref mut senders, _) => {
                                     senders.retain(|sender| !sender.is_closed());
-                                    // once a broadcast endpoint, always a broadcast endpoint
-                                    true
+                                    !senders.is_empty()
                                 }
                             });
 
