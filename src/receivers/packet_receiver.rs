@@ -1,5 +1,5 @@
 use futures::Stream;
-use tokio_with_wasm::alias as tokio;
+// use tokio_with_wasm::alias as tokio;
 
 use tokio::sync::mpsc::{self};
 

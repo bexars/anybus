@@ -1,4 +1,4 @@
-use tokio_with_wasm::alias as tokio;
+// use tokio_with_wasm::alias as tokio;
 
 use std::collections::HashMap;
 #[cfg(feature = "remote")]
