@@ -76,72 +76,140 @@ impl Router {
         self.routes_watch_rx.clone()
     }
 
+    // #[cfg(feature = "remote")]
+    // fn send_route_updates(&mut self) {
+    //     trace!("Route Table: {:?}", self.route_table);
+    //     trace!("Peers: {:?}", self.route_table.peers);
+    //     for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
+    //         use std::collections::HashSet;
+
+    //         // trace!("routing table:{:#?}", self.route_table.table);
+    //         let mut advertisements = HashSet::new();
+    //         for (uuid, route_entry) in self.route_table.table.iter() {
+    //             use crate::routing::Advertisement;
+
+    //             let mut advertisement = Advertisement {
+    //                 endpoint_id: *uuid,
+    //                 kind: route_entry.kind,
+    //                 cost: 0,
+    //             };
+    //             if let Some(best_route) = route_entry.best_route() {
+    //                 advertisement.cost = best_route.cost + 5;
+    //                 // Don't send routes back to the peer we learned them from
+    //                 if best_route.learned_from == *peer_id {
+    //                     continue;
+    //                 }
+    //                 // Don't send routes the peer already learned from us
+    //                 if peer_info.advertised_routes.contains(&advertisement) {
+    //                     continue;
+    //                 }
+    //                 // Don't send local routes to peers
+    //                 if best_route.realm == Realm::Process {
+    //                     continue;
+    //                 }
+    //                 advertisements.insert(advertisement);
+    //             }
+    //         }
+    //         trace!(
+    //             "Peer {}: {} new advertisements to send",
+    //             peer_id,
+    //             advertisements.len()
+    //         );
+    //         let withdrawn: HashSet<_> = peer_info
+    //             .advertised_routes
+    //             .difference(&peer_info.advertised_routes)
+    //             .cloned()
+    //             .collect();
+    //         // peer_info.advertised_routes = advertisements.clone();
+    //         let ads: Vec<_> = advertisements
+    //             .difference(&peer_info.advertised_routes)
+    //             .cloned()
+    //             .collect();
+    //         for ad in ads {
+    //             peer_info.advertised_routes.insert(ad);
+    //         }
+    //         if !withdrawn.is_empty() {
+    //             let length = withdrawn.len();
+    //             let msg = NodeMessage::Withdraw(withdrawn);
+
+    //             if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
+    //                 trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
+    //             } else {
+    //                 trace!("Sent {} route withdrawals to peer {}", peer_id, length);
+    //             }
+    //         }
+    //         if !advertisements.is_empty() {
+    //             let length = advertisements.len();
+    //             let msg = NodeMessage::Advertise(advertisements);
+
+    //             if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
+    //                 trace!(
+    //                     "Failed to send route advertisement to peer {}: {}",
+    //                     peer_id, e
+    //                 );
+    //             } else {
+    //                 trace!("Sent {} route advertisements to peer {}", peer_id, length);
+    //             }
+    //         }
+    //     }
+    // }
+
     #[cfg(feature = "remote")]
     fn send_route_updates(&mut self) {
         trace!("Route Table: {:?}", self.route_table);
         trace!("Peers: {:?}", self.route_table.peers);
+
         for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
-            use std::collections::HashSet;
+            let mut new_advertisements = HashSet::new();
 
-            // trace!("routing table:{:#?}", self.route_table.table);
-            let mut advertisements = HashSet::new();
             for (uuid, route_entry) in self.route_table.table.iter() {
-                use crate::routing::Advertisement;
-
-                let mut advertisement = Advertisement {
-                    endpoint_id: *uuid,
-                    kind: route_entry.kind,
-                    cost: 0,
-                };
                 if let Some(best_route) = route_entry.best_route() {
-                    advertisement.cost = best_route.cost + 5;
-                    // Don't send routes back to the peer we learned them from
-                    if best_route.learned_from == *peer_id {
+                    // Skip Process realm and routes learned from this peer
+                    if best_route.realm == Realm::Process || best_route.learned_from == *peer_id {
                         continue;
                     }
-                    // Don't send routes the peer already learned from us
-                    if peer_info.advertised_routes.contains(&advertisement) {
-                        continue;
-                    }
-                    // Don't send local routes to peers
-                    if best_route.realm == Realm::Process {
-                        continue;
-                    }
-                    advertisements.insert(advertisement);
+
+                    let advertisement = Advertisement {
+                        endpoint_id: *uuid,
+                        kind: route_entry.kind,
+                        cost: best_route.cost.saturating_add(5),
+                    };
+
+                    new_advertisements.insert(advertisement);
                 }
             }
-            trace!(
-                "Peer {}: {} new advertisements to send",
-                peer_id,
-                advertisements.len()
-            );
+
+            // Real withdrawals = previously advertised but no longer present
             let withdrawn: HashSet<_> = peer_info
                 .advertised_routes
+                .difference(&new_advertisements)
+                .cloned()
+                .collect();
+
+            // Real new ads = present now but not previously advertised
+            let to_advertise: HashSet<_> = new_advertisements
                 .difference(&peer_info.advertised_routes)
                 .cloned()
                 .collect();
-            // peer_info.advertised_routes = advertisements.clone();
-            let ads: Vec<_> = advertisements
-                .difference(&peer_info.advertised_routes)
-                .cloned()
-                .collect();
-            for ad in ads {
-                peer_info.advertised_routes.insert(ad);
-            }
+
+            // Update the tracking set
+            peer_info.advertised_routes = new_advertisements;
+
+            // Send withdrawals first
             if !withdrawn.is_empty() {
                 let length = withdrawn.len();
                 let msg = NodeMessage::Withdraw(withdrawn);
-
                 if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
                     trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
                 } else {
                     trace!("Sent {} route withdrawals to peer {}", peer_id, length);
                 }
             }
-            if !advertisements.is_empty() {
-                let length = advertisements.len();
-                let msg = NodeMessage::Advertise(advertisements);
 
+            // Then send new advertisements
+            if !to_advertise.is_empty() {
+                let length = to_advertise.len();
+                let msg = NodeMessage::Advertise(to_advertise);
                 if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
                     trace!(
                         "Failed to send route advertisement to peer {}: {}",
@@ -334,7 +402,38 @@ impl State {
                     //     return Some(Listen);
                     // }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::RemovePeerEndpoints(_uuid, _uuids) => return Some(Listen),
+                    BrokerMsg::RemovePeerEndpoints(peer_id, advertisements) => {
+                        if let Some(peer_info) = router.route_table.peers.get_mut(&peer_id) {
+                            for ad in &advertisements {
+                                peer_info.received_routes.remove(ad);
+                            }
+                        }
+
+                        // Remove matching routes that were learned from this peer
+                        let mut changed = false;
+                        router.route_table.table.retain(|endpoint_id, route_entry| {
+                            let before = route_entry.routes.len();
+                            route_entry.routes.retain(|route| {
+                                // Keep the route unless it matches one of the withdrawn advertisements
+                                // and was learned from this peer
+                                !advertisements.iter().any(|ad| {
+                                    ad.endpoint_id == *endpoint_id
+                                        && ad.kind == route.kind
+                                        && route.learned_from == peer_id
+                                })
+                            });
+                            if route_entry.routes.len() != before {
+                                changed = true;
+                            }
+                            !route_entry.routes.is_empty()
+                        });
+
+                        if changed {
+                            Some(RouteChange)
+                        } else {
+                            Some(Listen)
+                        }
+                    }
 
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
