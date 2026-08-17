@@ -287,6 +287,7 @@ impl State {
                     }
                     BrokerMsg::DeadLink(endpoint_id) => {
                         let mut changed = false;
+                        let mut is_empty = false;
                         let route_entry = router.route_table.table.get_mut(&endpoint_id);
                         if let Some(route_entry) = route_entry {
                             let before_len = route_entry.routes.len();
@@ -305,11 +306,17 @@ impl State {
                                 changed = true;
                             };
 
-                            if route_entry.routes.len() == 0 {
-                                router.route_table.table.remove(&endpoint_id);
-                                changed = true;
+                            if route_entry.routes.is_empty() {
+                                is_empty = true;
                             }
                         }
+
+                        // avoids later edits touching route_entry after it's removed
+                        if is_empty {
+                            router.route_table.table.remove(&endpoint_id);
+                            changed = true;
+                        }
+
                         if changed {
                             return Some(RouteChange);
                         } else {
