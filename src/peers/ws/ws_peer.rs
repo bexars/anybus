@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 // use tokio_with_wasm::alias as tokio;
 
 use tokio::{
@@ -18,19 +18,21 @@ use tokio::{
 use tracing::{debug, error, trace};
 
 use crate::{
-    messages::{BrokerMsg, BusControlMsg, NodeMessage},
+    messages::{BusControlMsg, NodeMessage},
     peers::{
         Peer,
         ws::{WebSockStream, WsCommand, WsControl, WsMessage},
     },
-    routing::{NodeId, WirePacket},
+    routing::{Advertisement, NodeId, WirePacket},
 };
 
 #[derive(Debug)]
 enum OutMessage {
     WsCommand(WsCommand),
     WsMessage(WsMessage),
-    BrokerMessage(BrokerMsg),
+    AddPeerEndpoints(HashSet<Advertisement>),
+    RemovePeerEndpoints(HashSet<Advertisement>),
+    UnregisterPeer,
     ClosePeer,
     ForwardPacket(WirePacket),
 }
@@ -97,18 +99,14 @@ impl WsPeer {
                         // Protocol violation, initiate shutdown
                         self.output
                             .push_back(OutMessage::WsMessage(WsMessage::CloseConnection));
-                        self.output.push_back(OutMessage::BrokerMessage(
-                            BrokerMsg::UnRegisterPeer(self.peer_id),
-                        ));
+                        self.output.push_back(OutMessage::UnregisterPeer);
                         self.output.push_back(OutMessage::ClosePeer);
                         self.output
                             .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
                         self.state = State::Shutdown;
                     }
                     WsMessage::CloseConnection => {
-                        self.output.push_back(OutMessage::BrokerMessage(
-                            BrokerMsg::UnRegisterPeer(self.peer_id),
-                        ));
+                        self.output.push_back(OutMessage::UnregisterPeer);
                         self.output.push_back(OutMessage::ClosePeer);
                         self.output
                             .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
@@ -120,14 +118,12 @@ impl WsPeer {
                             .push_back(OutMessage::ForwardPacket(wire_packet));
                     }
                     WsMessage::Advertise(hash_set) => {
-                        self.output.push_back(OutMessage::BrokerMessage(
-                            BrokerMsg::AddPeerEndpoints(self.peer_id, hash_set),
-                        ));
+                        self.output
+                            .push_back(OutMessage::AddPeerEndpoints(hash_set));
                     }
                     WsMessage::Withdraw(hash_set) => {
-                        self.output.push_back(OutMessage::BrokerMessage(
-                            BrokerMsg::RemovePeerEndpoints(self.peer_id, hash_set),
-                        ));
+                        self.output
+                            .push_back(OutMessage::RemovePeerEndpoints(hash_set));
                     }
                 }
             }
@@ -141,9 +137,7 @@ impl WsPeer {
                     NodeMessage::Close => {
                         self.output.push_back(OutMessage::ClosePeer);
 
-                        self.output.push_back(OutMessage::BrokerMessage(
-                            BrokerMsg::UnRegisterPeer(self.peer_id),
-                        ));
+                        self.output.push_back(OutMessage::UnregisterPeer);
                         self.output
                             .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
 
@@ -160,10 +154,7 @@ impl WsPeer {
                 }
             }
             InMessage::WsPeerClosed => {
-                self.output
-                    .push_back(OutMessage::BrokerMessage(BrokerMsg::UnRegisterPeer(
-                        self.peer_id,
-                    )));
+                self.output.push_back(OutMessage::UnregisterPeer);
                 self.output
                     .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
                 self.state = State::Shutdown;
@@ -212,13 +203,14 @@ pub(crate) async fn run_ws_peer(
                         break;
                     }
                 }
-                OutMessage::BrokerMessage(msg) => {
-                    if peer.handle.send_broker_msg(msg).await.is_none() {
-                        error!("Failed to send BrokerMsg to handle");
-                        break 'outer; // everything is broken, exit loop
-                    }
-
-                    // Handle Broker message sending here
+                OutMessage::AddPeerEndpoints(ads) => {
+                    peer.handle.add_peer_endpoints(peer.peer_id, ads);
+                }
+                OutMessage::RemovePeerEndpoints(ads) => {
+                    peer.handle.remove_peer_endpoints(peer.peer_id, ads);
+                }
+                OutMessage::UnregisterPeer => {
+                    peer.handle.unregister_peer(peer.peer_id);
                 }
                 OutMessage::ClosePeer => {
                     stream.close_conn().await.ok();

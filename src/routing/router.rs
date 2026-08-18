@@ -287,7 +287,7 @@ impl State {
                     }
                     BrokerMsg::DeadLink(endpoint_id) => {
                         let mut changed = false;
-                        let mut is_empty = false;
+                        let mut delete_route = false;
                         let route_entry = router.route_table.table.get_mut(&endpoint_id);
                         if let Some(route_entry) = route_entry {
                             let before_len = route_entry.routes.len();
@@ -298,25 +298,23 @@ impl State {
                                 ForwardTo::Multicast(ref set) => !set.is_empty(),
                                 ForwardTo::Broadcast(ref mut senders, _) => {
                                     senders.retain(|sender| !sender.is_closed());
-                                    !senders.is_empty()
+                                    true
                                 }
                             });
-
                             if route_entry.routes.len() != before_len {
                                 changed = true;
                             };
-
-                            if route_entry.routes.is_empty() {
-                                is_empty = true;
+                            if (route_entry.kind == RouteKind::Unicast
+                                || route_entry.kind == RouteKind::Anycast)
+                                && route_entry.routes.is_empty()
+                            {
+                                delete_route = true;
                             }
                         }
-
-                        // avoids later edits touching route_entry after it's removed
-                        if is_empty {
+                        if delete_route {
                             router.route_table.table.remove(&endpoint_id);
                             changed = true;
                         }
-
                         if changed {
                             return Some(RouteChange);
                         } else {

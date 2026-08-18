@@ -271,7 +271,7 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .remove_peer_endpoints(state_machine.peer.our_id, uuids);
+                    .remove_peer_endpoints(state_machine.peer.peer_id, uuids);
             }
         }
         Some(Box::new(WaitForMessages {}))

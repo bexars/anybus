@@ -428,14 +428,12 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    #[allow(dead_code)]
     pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
         self.tx
             .try_send(BrokerMsg::AddPeerEndpoints(uuid, ads))
             .ok();
     }
     #[cfg(feature = "remote")]
-    #[allow(dead_code)]
     pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
         self.tx
             .try_send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes))
@@ -463,7 +461,6 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    #[allow(dead_code)]
     pub(crate) fn unregister_peer(&self, uuid: NodeId) {
         self.tx.try_send(BrokerMsg::UnRegisterPeer(uuid)).ok();
     }
