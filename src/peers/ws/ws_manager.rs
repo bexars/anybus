@@ -64,7 +64,7 @@ pub(crate) struct WebsocketManager {
     handle: Handle,
     bus_control: watch::Receiver<BusControlMsg>,
     current_peers: Vec<WsActivePeer>,
-    tx: mpsc::Sender<WsCommand>,
+    pub(crate) tx: mpsc::Sender<WsCommand>,
     rx: mpsc::Receiver<WsCommand>,
     node_id: NodeId,
     #[cfg(feature = "ws_server")]
@@ -238,6 +238,10 @@ impl WebsocketManager {
                             .map(|pos| self.disconnected_peers.insert(pos, pending));
                     }
                 }
+                ManagerState::Listen
+            }
+            WsCommand::AddPeer(url) => {
+                self.pending_peers.push(WsPendingPeer::from_url(url));
                 ManagerState::Listen
             }
         }

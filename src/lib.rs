@@ -21,6 +21,7 @@ use tokio::sync::watch::Sender;
 
 use tracing::error;
 use tracing::trace;
+
 pub use traits::*;
 // mod bus_listener;
 mod handle;
@@ -86,6 +87,8 @@ pub struct AnyBus {
     options: AnyBusBuilder,
     bc_rx: watch::Receiver<BusControlMsg>,
     router: Option<Router>,
+    #[cfg(feature = "ws")]
+    ws_command: Option<tokio::sync::mpsc::Sender<peers::ws::WsCommand>>,
 }
 
 impl AnyBus {
@@ -124,6 +127,8 @@ impl AnyBus {
             options,
             bc_rx,
             router: Some(router),
+            #[cfg(feature = "ws")]
+            ws_command: None,
         };
         msg_bus
     }
@@ -154,6 +159,20 @@ impl AnyBus {
         _ = spawn(helper::watch_ctrlc(self.handle.clone()));
     }
 
+    #[cfg(feature = "ws")]
+    fn start_ws_manager(&mut self) {
+        let ws_listener = crate::peers::WebsocketManager::new(
+            self.id,
+            self.handle.clone(),
+            self.bc_rx.clone(),
+            #[cfg(feature = "ws_server")]
+            self.options.ws_listener_options.clone(),
+            self.options.ws_remote_options.clone(),
+        );
+        self.ws_command = Some(ws_listener.tx.clone());
+        spawn(ws_listener.start());
+    }
+
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -173,17 +192,7 @@ impl AnyBus {
         #[cfg(feature = "ws")]
         if ws_enabled {
             trace!("Starting WebSocket Manager");
-
-            let ws_listener = crate::peers::WebsocketManager::new(
-                self.id,
-                self.handle.clone(),
-                self.bc_rx.clone(),
-                #[cfg(feature = "ws_server")]
-                self.options.ws_listener_options.clone(),
-                self.options.ws_remote_options.clone(),
-            );
-
-            spawn(ws_listener.start());
+            self.start_ws_manager();
         }
 
         #[cfg(feature = "ipc")]
@@ -260,6 +269,21 @@ impl AnyBus {
     pub fn remove_bus_depot(&self, _id: Uuid) -> Result<(), AnyBusHandleError> {
         // TODO: implement stopping the task
         Ok(())
+    }
+
+    /// Add a remote websocket peer after system startup
+    #[cfg(feature = "ws")]
+    pub fn add_websocket_peer(&mut self, url: url::Url) {
+        if self.ws_command.is_none() {
+            self.start_ws_manager();
+        }
+
+        if let Some(ws_command) = &self.ws_command {
+            let res = ws_command.try_send(peers::ws::WsCommand::AddPeer(url));
+            if let Err(e) = res {
+                error!("Failed to send AddPeer command to WebSocketManager: {}", e);
+            }
+        }
     }
 }
 

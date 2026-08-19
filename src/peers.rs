@@ -3,7 +3,7 @@
 #[cfg(feature = "ipc")]
 mod ipc;
 #[cfg(feature = "ws")]
-mod ws;
+pub(crate) mod ws;
 use tokio::sync::mpsc::{self};
 use uuid::Uuid;
 #[cfg(feature = "ws_server")]
