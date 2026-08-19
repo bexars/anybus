@@ -50,11 +50,12 @@ pub(crate) enum WsControl {
 // }
 
 // #[derive(Debug)]
-enum WsCommand {
+pub(crate) enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
     #[cfg(feature = "ws_server")]
     NewWsStream(WebSockStream, SocketAddr),
     PeerClosed(Uuid),
+    AddPeer(Url),
 }
 
 impl Debug for WsCommand {
@@ -63,6 +64,7 @@ impl Debug for WsCommand {
             #[cfg(feature = "ws_server")]
             Self::NewWsStream(_arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),
+            Self::AddPeer(socket_addr) => f.debug_tuple("AddPeer").field(socket_addr).finish(),
         }
     }
 }

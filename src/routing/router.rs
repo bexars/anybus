@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm, RouteKind};
+use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm};
+
+use crate::routing::RouteKind;
 
 use tokio::{
     select,
