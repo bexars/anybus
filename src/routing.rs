@@ -28,12 +28,8 @@ use crate::{
 pub(crate) type NodeId = Uuid;
 
 /// A newtype around Uuid
-#[cfg(feature = "serde")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EndpointId(Uuid);
-
-#[cfg(not(feature = "serde"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EndpointId(Uuid);
 
 impl Display for EndpointId {
@@ -382,7 +378,8 @@ impl From<Packet> for WirePacket {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Address {
     Endpoint(EndpointId),
     Remote(EndpointId, NodeId), // EndpointId, NodeId
@@ -530,7 +527,8 @@ impl Ord for Route {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RouteKind {
     Unicast,
     Anycast,
@@ -553,7 +551,8 @@ impl Display for RouteKind {
 }
 
 /// Used to control how the route is advertised
-#[derive(Debug, Copy, Clone, PartialEq, Default, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Default, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[allow(dead_code)]
 pub enum Realm {
     /// Only within the current process

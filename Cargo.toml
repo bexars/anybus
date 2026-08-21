@@ -36,16 +36,16 @@ members = ["anybus-macro"]
 
 [features]
 #tokio = ["tokio/rt-multi-thread", "tokio/time"]
-default = ["serde","tokio"]
+default = ["tokio"]
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess",  "tokio/net"]
 ws = [ "remote", "dep:tokio-tungstenite", "dep:url", "dep:bytes","ws_rustls"
     ,"dep:wasm_socket_handle"
     ]
 ws_rustls = ["dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite"]
-remote =[ "tokio","serde"]
-dioxus = ["serde", "dep:dioxus"]
-serde = ["dep:serde"]
+remote = ["tokio", "serde", "dep:bincode", "bincode/serde"]
+dioxus = ["dep:dioxus"]
+serde = ["dep:serde", "uuid/serde", "anybus-macro/serde"]
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
@@ -80,7 +80,7 @@ web-time = "1.1"
 
 async-bincode = { version = "0.8.0", optional = true}
 async-trait = "0.1.89"
-bincode = { version = "2.0.1", features = ["serde"] }
+bincode = { version = "2.0.1", optional = true }
 #bincode2 = "2.0.1"
 dyn-clone = "1.0.20"
 url = {version = "2.5.7", optional = true}
@@ -100,7 +100,6 @@ dioxus = { version = "0.7.10", optional = true }
 ws_stream_wasm = { version = "0.7.5", optional = true }
 uuid = { version = "1.18.0", default-features = false,features = [
     "v7",
-    "serde",
     "std",
     "js"
 ] }
@@ -132,7 +131,6 @@ tokio-rustls = {version = "0.26.4", optional = true}
 rustls = {version = "0.23.36", optional = true }
 uuid = { version = "1.18.0", default-features = false,features = [
     "v7",
-    "serde",
     "std",
 ] }
 

@@ -1,8 +1,7 @@
-use serde::Deserialize;
 use tokio::sync::mpsc::{self};
 
 use crate::{
-    BusRiderRpc, Handle, ReceiveError,
+    BusDeserialize, BusRiderRpc, Handle, ReceiveError,
     errors::AnyBusHandleError,
     messages::ClientMessage,
     receivers::packet_receiver::PacketReceiver,
@@ -16,10 +15,7 @@ pub struct RpcReceiver<T: crate::BusRiderRpc> {
     packet_receiver: PacketReceiver,
 }
 
-impl<T: crate::BusRiderRpc> RpcReceiver<T>
-where
-    for<'de> T: Deserialize<'de>,
-{
+impl<T: crate::BusRiderRpc + BusDeserialize> RpcReceiver<T> {
     pub(crate) fn new(
         endpoint_id: EndpointId,
         rx: mpsc::Receiver<ClientMessage>,

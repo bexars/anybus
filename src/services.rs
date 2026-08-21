@@ -1,6 +1,6 @@
 use tracing::error;
 
-use crate::{BusRider, BusStop, EndpointId, Handle};
+use crate::{BusDeserialize, BusRider, BusStop, EndpointId, Handle};
 
 #[allow(dead_code)] //temporary WIP TODO
 pub(super) enum ServiceCommand {
@@ -9,13 +9,13 @@ pub(super) enum ServiceCommand {
     Shutdown,
 }
 
-pub struct BusStopService<T: BusRider + for<'de> serde::Deserialize<'de>> {
+pub struct BusStopService<T: BusRider + BusDeserialize> {
     bus_stop: Box<dyn BusStop<T> + 'static + Send>,
     id: EndpointId,
     handle: Handle,
 }
 
-impl<T: BusRider + for<'de> serde::Deserialize<'de>> BusStopService<T> {
+impl<T: BusRider + BusDeserialize> BusStopService<T> {
     pub fn new(
         bus_stop: impl BusStop<T> + 'static + Send,
         id: EndpointId,

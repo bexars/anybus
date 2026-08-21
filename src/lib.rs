@@ -211,7 +211,7 @@ impl AnyBus {
     }
 
     /// WIP to implement add_bus_stop correctly.  
-    pub fn _add_bus_stop<T: BusRider + for<'de> serde::Deserialize<'de>>(
+    pub fn _add_bus_stop<T: BusRider + BusDeserialize>(
         &mut self,
         bus_stop: impl BusStop<T> + 'static + Send,
         id: EndpointId,
@@ -229,7 +229,7 @@ impl AnyBus {
     }
     /// Adds a BusDepot object that will be called by the system when a Rpc request is received
     /// for that EndpointId
-    pub fn add_bus_depot<T: BusRiderWithUuid + BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+    pub fn add_bus_depot<T: BusRiderWithUuid + BusRiderRpc + BusDeserialize>(
         &self,
         bus_depot: impl BusDepot<T> + 'static + Send,
     ) {
@@ -239,7 +239,7 @@ impl AnyBus {
 
     /// Adds a BusDepot object that will be called by the system when a Rpc request is received
     /// for that EndpointId
-    pub fn add_bus_depot_with_endpoint<T: BusRiderRpc + for<'de> serde::Deserialize<'de>>(
+    pub fn add_bus_depot_with_endpoint<T: BusRiderRpc + BusDeserialize>(
         &self,
         bus_depot: impl BusDepot<T> + 'static + Send,
         id: EndpointId,

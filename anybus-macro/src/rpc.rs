@@ -204,14 +204,22 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
+    #[cfg(feature = "serde")]
+    let type_derives = quote! {
+        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    };
+    #[cfg(not(feature = "serde"))]
+    let type_derives = quote! {
+        #[derive(Debug, Clone)]
+    };
     let expanded = quote! {
         #[async_trait::async_trait]
         #trait_item
-        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+        #type_derives
         pub enum #request_ident {
             #(#request_variants),*
         }
-        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+        #type_derives
         pub enum #response_ident {
             #(#response_variants),*
         }

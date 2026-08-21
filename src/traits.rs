@@ -56,11 +56,11 @@ pub trait BusRiderRpc: BusRider {
     type Response: BusRider + Send;
 }
 
-/// Helper trait for
+/// Helper trait for using Serde throughout the code base
 #[cfg(not(feature = "serde"))]
 pub trait BusDeserialize {}
 #[cfg(feature = "serde")]
-/// WIP for removing Serde from Anybus
+/// Helper trait for using Serde throughout the code base
 pub trait BusDeserialize: DeserializeOwned {}
 
 #[cfg(feature = "serde")]

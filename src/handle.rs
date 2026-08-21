@@ -2,11 +2,6 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 // use tokio_with_wasm::alias as tokio;
 
-#[cfg(feature = "serde")]
-use serde::Deserialize;
-// #[cfg(feature = "serde")]
-// use serde::de::DeserializeOwned;
-// use std::net::Shutdown;
 use tracing::info;
 use uuid::Uuid;
 
@@ -63,7 +58,7 @@ impl Handle {
     }
 
     #[allow(unused_variables)]
-    async fn register_anycast_inner<T: BusRider + BusDeserialize + for<'de> Deserialize<'de>>(
+    async fn register_anycast_inner<T: BusRider + BusDeserialize>(
         &self,
         endpoint_id: EndpointId,
         realm: Realm,
@@ -420,8 +415,7 @@ impl Handle {
         payload: T,
     ) -> Result<T::Response, AnyBusHandleError>
     where
-        for<'de> T::Response: BusDeserialize,
-        // for<'de> T::Response: serde::de::Deserialize<'de>,
+        T::Response: BusDeserialize,
     {
         let mut helper = self.rpc_helper().await?;
         helper.request(payload).await
@@ -517,8 +511,7 @@ impl RequestHelper {
         payload: T,
     ) -> Result<T::Response, AnyBusHandleError>
     where
-        for<'de> <T as BusRiderRpc>::Response: BusDeserialize,
-        // for<'de> <T as BusRiderRpc>::Response: Deserialize<'de>,
+        <T as BusRiderRpc>::Response: BusDeserialize,
     {
         // let map = self.handle.route_watch_rx.borrow();
         let node_id = self.handle.route_watch_rx.borrow().get_node_id();
@@ -555,8 +548,7 @@ impl RequestHelper {
         endpoint_id: Uuid,
     ) -> Result<U::Response, AnyBusHandleError>
     where
-        for<'de> <U as BusRiderRpc>::Response: BusDeserialize,
-        // for<'de> <U as BusRiderRpc>::Response: Deserialize<'de>,
+        <U as BusRiderRpc>::Response: BusDeserialize,
     {
         // let map = self.handle.route_watch_rx.borrow();
         let to_address: Address = endpoint_id.into();
