@@ -69,8 +69,8 @@ impl From<Option<Result<WsHandleMessage, WsError>>> for InMessage {
             Some(Ok(message)) => {
                 match message {
                     WsHandleMessage::Binary(data) => {
-                        let msg = serde_cbor::from_slice::<WsMessage>(&data)
-                            .map(|msg| InMessage::WsMessage(msg))
+                        let msg = crate::codec::decode::<WsMessage>(data.as_ref())
+                            .map(InMessage::WsMessage)
                             .unwrap_or_else(|e| {
                                 error!("Failed to deserialize WsMessage: {}", e);
                                 InMessage::WsPeerClosed

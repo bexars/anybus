@@ -2,8 +2,6 @@ use std::any::Any;
 
 use dyn_clone::DynClone;
 
-#[cfg(feature = "remote")]
-use erased_serde::Serialize;
 #[cfg(feature = "serde")]
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
@@ -14,7 +12,10 @@ use crate::errors::AnyBusHandleError;
 ///
 ///
 #[cfg(feature = "remote")]
-pub trait BusRider: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static {}
+pub trait BusRider: Any + DynClone + Send + Sync + std::fmt::Debug + 'static {
+    /// Encode this message to bytes for a remote hop.
+    fn encode_payload(&self) -> Vec<u8>;
+}
 
 /// Any message handled by [crate::AnyBus] must have these properties
 ///
@@ -28,7 +29,13 @@ dyn_clone::clone_trait_object!(BusRider);
 ///
 
 #[cfg(feature = "remote")]
-impl<T: Any + DynClone + Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
+impl<T: Any + DynClone + serde::Serialize + Send + Sync + std::fmt::Debug + 'static> BusRider
+    for T
+{
+    fn encode_payload(&self) -> Vec<u8> {
+        crate::codec::encode(self).expect("failed to encode bus payload")
+    }
+}
 #[cfg(not(feature = "remote"))]
 impl<T: Any + DynClone + Send + Sync + std::fmt::Debug + 'static> BusRider for T {}
 
