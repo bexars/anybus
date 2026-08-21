@@ -80,13 +80,13 @@ pub(crate) enum WsMessage {
 
 impl From<WsMessage> for Vec<u8> {
     fn from(msg: WsMessage) -> Self {
-        serde_cbor::to_vec(&msg).expect("")
+        crate::codec::encode(&msg).expect("failed to encode websocket message")
     }
 }
 
 impl From<WsMessage> for Bytes {
     fn from(msg: WsMessage) -> Self {
-        let vec = serde_cbor::to_vec(&msg).expect("");
+        let vec = crate::codec::encode(&msg).expect("failed to encode websocket message");
         Bytes::from(vec)
     }
 }

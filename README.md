@@ -45,7 +45,7 @@ The system is agnostic to the type of Uuids that it can use for routing decision
 There is an IPC auto-discovery mechanism that could probably be published as it's own crate since there is no configured master server.  At runtime it tries to talk to master, if none exists it becomes master.  When a node connects to the master, it gets a list of all known nodes and connects to them as well.  If a node notices that it's master has died, it will try to become master.  
 
 ### Websocket
-While a server socket must be configured, once the connection is established the protocol is agnostic to which side initiated the conversation.  It's the same protocol that runs over the IPC links at the message level.  They are not byte-similar and the byte layout is not well defined.  It's all serde and cbor inside Byte Websocket messages.
+While a server socket must be configured, once the connection is established the protocol is agnostic to which side initiated the conversation.  It's the same protocol that runs over the IPC links at the message level.  They are not byte-similar and the byte layout is not well defined.  It's all serde and bincode inside binary Websocket messages.
 
 #### Reconnect
 The client will automatically try to reconnect to the server with a ^2 backoff timer (1s, 2s, 4s, etc).  Currently no upper bound is set

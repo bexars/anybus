@@ -445,10 +445,7 @@ impl Payload {
                 let res = (br as Box<dyn Any>).downcast::<T>().map(|b| *b);
                 res.map_err(|e| e.into())
             }
-            Payload::Bytes(bytes) => {
-                let result = serde_cbor::from_slice(&bytes);
-                result.map_err(|_| bytes.into())
-            }
+            Payload::Bytes(bytes) => crate::codec::decode(&bytes).map_err(|_| bytes.into()),
         }
         // result.ok_or(self)
     }
@@ -458,16 +455,7 @@ impl Payload {
 impl From<Payload> for Vec<u8> {
     fn from(value: Payload) -> Self {
         match value {
-            Payload::BusRider(br) => {
-                use erased_serde::Serializer;
-
-                let mut v = Vec::new();
-                let cbor = &mut serde_cbor::Serializer::new(serde_cbor::ser::IoWrite::new(&mut v));
-                let mut cbor: Box<dyn Serializer> = Box::new(<dyn Serializer>::erase(cbor));
-                _ = br.erased_serialize(&mut cbor);
-                drop(cbor);
-                v
-            }
+            Payload::BusRider(br) => br.encode_payload(),
 
             Payload::Bytes(b) => b,
         }

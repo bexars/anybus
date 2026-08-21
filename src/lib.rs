@@ -39,6 +39,8 @@ pub use receivers::rpc_receiver::RpcRequest;
 // mod route_table;
 mod routing;
 pub use routing::Realm;
+#[cfg(feature = "remote")]
+mod codec;
 mod services;
 mod traits;
 
@@ -195,6 +197,7 @@ impl AnyBus {
             self.start_ws_manager();
         }
 
+        //TODO allow ipc rendezvous filename to be configured by user
         #[cfg(feature = "ipc")]
         if self.options.enable_ipc {
             let manager = IpcManager::new(
@@ -207,7 +210,7 @@ impl AnyBus {
         };
     }
 
-    /// WIP to implement add_bus_stop correctly.  Stupid Grok
+    /// WIP to implement add_bus_stop correctly.  
     pub fn _add_bus_stop<T: BusRider + for<'de> serde::Deserialize<'de>>(
         &mut self,
         bus_stop: impl BusStop<T> + 'static + Send,
