@@ -1,10 +1,9 @@
 use futures::Stream;
-use serde::Deserialize;
 use tokio::sync::mpsc::{self};
 
 use crate::{
-    BusRider, ReceiveError, messages::ClientMessage, receivers::packet_receiver::PacketReceiver,
-    routing::EndpointId,
+    BusDeserialize, BusRider, ReceiveError, messages::ClientMessage,
+    receivers::packet_receiver::PacketReceiver, routing::EndpointId,
 };
 
 /// A Receiver receives messages sent to the registered endpoint.
@@ -14,10 +13,7 @@ pub struct Receiver<T: crate::BusRider> {
     packet_receiver: PacketReceiver,
 }
 
-impl<T: crate::BusRider> Receiver<T>
-where
-    for<'de> T: Deserialize<'de>,
-{
+impl<T: crate::BusRider + BusDeserialize> Receiver<T> {
     pub(crate) fn new(
         endpoint_id: EndpointId,
         rx: mpsc::Receiver<ClientMessage>,
@@ -53,10 +49,7 @@ where
     }
 }
 
-impl<T: BusRider + Unpin> Stream for Receiver<T>
-where
-    for<'de> T: Deserialize<'de>,
-{
+impl<T: BusRider + BusDeserialize + Unpin> Stream for Receiver<T> {
     type Item = T;
     fn poll_next(
         self: std::pin::Pin<&mut Self>,

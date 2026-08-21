@@ -18,7 +18,7 @@ When you register an endpoint you can select how reachable the endpoint is.  The
 
 
 ### BusRider trait
-All objects that traverse the network need the BusRider trait.  It's automatically implemented for all types that are Clone and serializable with serde::Serialize and serde::Deserialize
+All objects that traverse the bus need the BusRider trait.  It's automatically implemented for in-process types that are Clone + Send + Sync + Debug.  Types that cross a process or network hop also need serde::Serialize and serde::Deserialize (enabled by the `remote` / `ipc` / `ws` features).
 
 ### Rpc
 #### Listening
