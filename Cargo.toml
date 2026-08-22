@@ -153,5 +153,10 @@ tracing-appender = "0.2.3"
 trybuild = "1.0.111"
 anybus = { path = "./" , features = ["tokio","ipc","ws","ws_server"] }
 console-subscriber = "0.5.0"
+uuid = { version = "1.18.0", default-features = false,features = [
+    "v4",
+    "v7",
+    "std",
+] }
 # tokio = { version = "1.15", features = ["full", "tracing"] }
 # console-subscriber = "0.4.1"
