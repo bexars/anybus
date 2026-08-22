@@ -7,7 +7,7 @@ use std::collections::HashSet;
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm};
 
-use crate::routing::RouteKind;
+use crate::{Handle, routing::RouteKind};
 
 use tokio::{
     select,
@@ -19,7 +19,7 @@ use tokio::{
 use tracing::{info, trace};
 
 use crate::{
-    messages::{BrokerMsg, BusControlMsg, ClientMessage},
+    messages::{BrokerMsg, ClientMessage},
     routing::{
         Address, EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable,
     },
@@ -32,29 +32,27 @@ pub(crate) struct Router {
     forward_table: ForwardingTable,
     route_table: RoutingTable,
     routes_watch_tx: Sender<ForwardingTable>,
-    routes_watch_rx: Receiver<ForwardingTable>,
     #[allow(dead_code)]
     anybus_id: NodeId,
-    bus_control_rx: Receiver<BusControlMsg>,
     broker_rx: mpsc::Receiver<BrokerMsg>,
+    handle: Handle,
 }
 
 impl Router {
-    pub(crate) fn new(
-        uuid: NodeId,
-        broker_rx: mpsc::Receiver<BrokerMsg>,
-        bus_control_rx: Receiver<BusControlMsg>,
-    ) -> Self {
+    pub(crate) fn new(uuid: NodeId) -> Self {
         let forward_table = ForwardingTable::default();
         let (tx, rx) = watch::channel(forward_table.clone());
+
+        let (broker_tx, broker_rx) = tokio::sync::mpsc::channel(32);
+        let handle = Handle {
+            tx: broker_tx,
+            route_watch_rx: rx,
+        };
+
         Self {
             forward_table,
             routes_watch_tx: tx,
-            routes_watch_rx: rx,
             anybus_id: uuid,
-            // received_routes: HashMap::new(),
-            // sent_routes: HashMap::new(),
-            bus_control_rx,
             broker_rx,
             route_table: RoutingTable {
                 table: HashMap::new(),
@@ -62,6 +60,7 @@ impl Router {
                 #[cfg(feature = "remote")]
                 peers: HashMap::new(),
             },
+            handle,
         }
     }
 
@@ -74,8 +73,8 @@ impl Router {
         }
     }
 
-    pub(crate) fn get_watcher(&self) -> RoutesWatchRx {
-        self.routes_watch_rx.clone()
+    pub(crate) fn get_handle(&self) -> Handle {
+        self.handle.clone()
     }
 
     // #[cfg(feature = "remote")]
@@ -249,24 +248,12 @@ impl State {
             // ####### Listen ##################################################
             Listen => {
                 select! {
-                    res = router.bus_control_rx.changed() => {
-                        trace!("bus_control_rx.changed() = {:?}", res);
-                        if res.is_err() { return Some(Shutdown)}
-                        match *router.bus_control_rx.borrow_and_update() {
-                            BusControlMsg::Run => {
-                                trace!("Router received Run");
-                            }
-                            BusControlMsg::Shutdown => {
-                                info!("Router shutting down");
-                                return Some(Shutdown);
-                            }
-                        }
-                        return Some(Listen);
-                    }
                     msg = router.broker_rx.recv() => {
                         match msg {
                             None => {
                                 info!("Broker channel closed, shutting down router");
+                                // all handles were dropped is probably hard to do since we own a handle,
+                                // but it means we can't notify so can't call handle.shutdown()
                                 return Some(Shutdown);
                             }
                             Some(msg) => {
@@ -444,7 +431,6 @@ impl State {
                             Some(Listen)
                         }
                     }
-
                     BrokerMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);

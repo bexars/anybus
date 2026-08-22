@@ -4,10 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use tokio::{
     // io::{AsyncRead, AsyncWrite},
     select,
-    sync::{
-        mpsc::{self},
-        watch,
-    },
+    sync::mpsc::{self},
 };
 
 // #[cfg(not(feature = "wasm_ws"))]
@@ -18,7 +15,7 @@ use tokio::{
 use tracing::{debug, error, trace};
 
 use crate::{
-    messages::{BusControlMsg, NodeMessage},
+    messages::NodeMessage,
     peers::{
         Peer,
         ws::{WebSockStream, WsCommand, WsControl, WsMessage},
@@ -43,7 +40,7 @@ pub(crate) enum InMessage {
     WsMessage(WsMessage),
     NodeMessage(NodeMessage),
     WsPeerClosed,
-    Shutdown,
+    // Shutdown,
     Unknown,
 }
 
@@ -159,12 +156,12 @@ impl WsPeer {
                     .push_back(OutMessage::WsCommand(WsCommand::PeerClosed(self.peer_id)));
                 self.state = State::Shutdown;
             }
-            InMessage::Shutdown => {
-                self.output
-                    .push_back(OutMessage::WsMessage(WsMessage::CloseConnection));
-                self.output.push_back(OutMessage::ClosePeer);
-                self.state = State::Shutdown;
-            }
+            // InMessage::Shutdown => {
+            //     self.output
+            //         .push_back(OutMessage::WsMessage(WsMessage::CloseConnection));
+            //     self.output.push_back(OutMessage::ClosePeer);
+            //     self.state = State::Shutdown;
+            // }
             InMessage::Unknown => {
                 debug!("Got an unknown packet from the remote Websocket")
             } //TODO Needs to  be smarter
@@ -174,8 +171,7 @@ impl WsPeer {
 
 pub(crate) async fn run_ws_peer(
     mut stream: WebSockStream,
-    // addr: SocketAddr,
-    mut bus_control: watch::Receiver<BusControlMsg>,
+
     tx_command: mpsc::Sender<WsCommand>,
     mut rx_control: mpsc::Receiver<WsControl>,
     mut peer: Peer,
@@ -263,17 +259,6 @@ pub(crate) async fn run_ws_peer(
                 }
                 Some(msg) = peer.rx.recv() => {
                     Some(InMessage::NodeMessage(msg))
-                }
-
-                Ok(_msg) = bus_control.changed() => {
-                    let msg = *bus_control.borrow();
-                    match msg {
-                        BusControlMsg::Shutdown => {
-                            // ws_peer.state = State::Shutdown;
-                            Some(InMessage::Shutdown)
-                        }
-                        _ => None,
-                    }
                 }
             }
         } else {

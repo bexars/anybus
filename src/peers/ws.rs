@@ -18,7 +18,7 @@ use url::Url;
 use uuid::Uuid;
 
 #[cfg(feature = "ws_server")]
-use crate::{messages::BusControlMsg, spawn};
+use crate::spawn;
 
 use crate::routing::{Advertisement, WirePacket};
 
@@ -196,7 +196,6 @@ impl Default for WsListenerOptions {
 async fn create_listener(
     ws_listener_options: WsListenerOptions,
     ws_command: tokio::sync::mpsc::Sender<WsCommand>,
-    bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
 ) -> Result<(), WsError> {
     // Create the listener here
     //
@@ -264,7 +263,7 @@ async fn create_listener(
             error!("Failed to bind to address {}: {}", sock_addr, e);
             WsError::BindFailure(sock_addr)
         })?;
-    spawn(run_ws_listener(listener, ws_command, bus_control, acceptor));
+    spawn(run_ws_listener(listener, ws_command, acceptor));
     Ok(())
 }
 
@@ -272,7 +271,6 @@ async fn create_listener(
 async fn run_ws_listener(
     listener: tokio::net::TcpListener,
     ws_command: Sender<WsCommand>,
-    mut bus_control: tokio::sync::watch::Receiver<BusControlMsg>,
     acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) {
     loop {
@@ -323,15 +321,6 @@ async fn run_ws_listener(
                     Err(e) => {
                         error!("Failed to accept connection: {}", e);
                     }
-                }
-            }
-            Ok(_msg) = bus_control.changed() => {
-                let msg = *bus_control.borrow();
-                match msg {
-                    BusControlMsg::Shutdown => {
-                        break;
-                    }
-                    _ => {}
                 }
             }
 

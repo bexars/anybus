@@ -1,11 +1,8 @@
 use tokio_with_wasm::alias as tokio;
 
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, mem::take, time::Duration};
 
-use tokio::sync::{
-    mpsc::{self},
-    watch,
-};
+use tokio::sync::mpsc::{self};
 // use web_time::Instant;
 
 #[cfg(not(target_family = "wasm"))]
@@ -21,8 +18,7 @@ use wasm_socket_handle::WsHandle;
 #[cfg(feature = "ws_server")]
 use crate::peers::ws::WsListenerOptions;
 use crate::{
-    Handle,
-    messages::BusControlMsg,
+    AnyBusStatusMsg, Handle, Receiver,
     peers::{
         Peer, WsRemoteOptions,
         ws::{
@@ -62,7 +58,6 @@ enum ManagerState {
 #[derive(Debug)]
 pub(crate) struct WebsocketManager {
     handle: Handle,
-    bus_control: watch::Receiver<BusControlMsg>,
     current_peers: Vec<WsActivePeer>,
     pub(crate) tx: mpsc::Sender<WsCommand>,
     rx: mpsc::Receiver<WsCommand>,
@@ -71,20 +66,23 @@ pub(crate) struct WebsocketManager {
     ws_listener_options: Option<WsListenerOptions>,
     pending_peers: Vec<WsPendingPeer>,
     disconnected_peers: Vec<WsPendingPeer>,
+    anybus_status: Receiver<AnyBusStatusMsg>,
 }
 
 impl WebsocketManager {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         node_id: NodeId,
         handle: Handle,
-        bus_control: watch::Receiver<BusControlMsg>,
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WsListenerOptions>,
         ws_peers: Vec<WsRemoteOptions>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let anybus_status = handle
+            .get_anybus_status_receiver()
+            .await
+            .expect("Failed to get anybus status receiver");
         Self {
             handle,
-            bus_control,
             current_peers: Vec::new(),
             tx,
             rx,
@@ -93,6 +91,7 @@ impl WebsocketManager {
             ws_listener_options,
             pending_peers: ws_peers.iter().map(WsPendingPeer::from).collect(),
             disconnected_peers: Vec::new(),
+            anybus_status,
         }
     }
 
@@ -113,7 +112,11 @@ impl WebsocketManager {
                     self.queue_reconnect(ws_pending_peer).await
                 }
                 ManagerState::Error(error) => self.handle_error(error).await,
-                ManagerState::Shutdown => break,
+                ManagerState::Shutdown => {
+                    let current_peers = take(&mut self.current_peers);
+                    spawn(Self::notify_peers(current_peers));
+                    break;
+                }
             };
         }
     }
@@ -142,7 +145,7 @@ impl WebsocketManager {
     async fn init(&mut self) -> ManagerState {
         #[cfg(feature = "ws_server")]
         if let Some(ws_options) = self.ws_listener_options.take() {
-            match create_listener(ws_options, self.tx.clone(), self.bus_control.clone()).await {
+            match create_listener(ws_options, self.tx.clone()).await {
                 Ok(()) => ManagerState::Listen,
                 Err(e) => {
                     error!("Failed to create WebSocket listener: {}", e);
@@ -193,20 +196,14 @@ impl WebsocketManager {
                 ManagerState::HandleCommand(cmd)
                 // Handle incoming commands
             }
-            Ok(_msg) = self.bus_control.changed() => {
-                let msg = self.bus_control.borrow().clone();
-                match msg {
-                    BusControlMsg::Shutdown => {
-                        for peer in self.current_peers.drain(..) {
-                            debug!("Shutting down connection to peer {}", peer.peer_id);
-                            peer.ws_control.send(ws::WsControl::Shutdown).await.ok();
-                        }
-                        debug!("WebSocket Manager shutting down");
-                        ManagerState::Shutdown
-                    }
-                    _ => {
-                        ManagerState::Listen
-                    }
+
+            status = self.anybus_status.recv() => {
+                match status {
+                    Ok(AnyBusStatusMsg::ShuttingDown) | Err(_) => {
+
+                        ManagerState::Shutdown}
+                    // Err(_) => ManagerState::Shutdown,
+                    _ => ManagerState::Listen
                 }
             }
             else => {
@@ -247,6 +244,13 @@ impl WebsocketManager {
         }
     }
 
+    async fn notify_peers(mut current_peers: Vec<WsActivePeer>) {
+        for peer in current_peers.drain(..) {
+            debug!("Shutting down connection to peer {}", peer.peer_id);
+            peer.ws_control.send(ws::WsControl::Shutdown).await.ok();
+        }
+    }
+
     async fn new_ws_stream(
         &mut self,
         mut stream: WebSockStream,
@@ -279,7 +283,7 @@ impl WebsocketManager {
                 let (tx, rx) = tokio::sync::mpsc::channel(32);
                 spawn(ws::ws_peer::run_ws_peer(
                     stream,
-                    self.bus_control.clone(),
+                    // self.bus_control.clone(),
                     self.tx.clone(),
                     rx,
                     peer,
@@ -355,6 +359,7 @@ impl WebsocketManager {
         // }
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(ws_pending_peer.url.as_str()).await;
+        trace!("Connected: {:?}", attempt);
         match attempt {
             Ok(ws_stream) => {
                 #[cfg(not(target_family = "wasm"))]

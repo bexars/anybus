@@ -16,9 +16,6 @@ pub use errors::ReceiveError;
 // pub use helper::ShutdownWithCtrlC;
 pub use helper::spawn;
 
-// pub use messages::RegistrationStatus;
-use tokio::sync::watch::Sender;
-
 use tracing::error;
 use tracing::trace;
 
@@ -30,6 +27,7 @@ pub use handle::RequestHelper;
 /// Helper functions for working with the AnyBus system (Currently just spawn() )
 pub mod helper;
 mod messages;
+pub use messages::AnyBusStatusMsg;
 mod receivers;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
@@ -51,11 +49,6 @@ use peers::IpcManager;
 /// Network peer discovery and messaging
 pub mod peers;
 
-use tokio::{
-    // stream:: StreamExt,
-    sync::watch::{self},
-};
-
 // use std::sync::mpsc::{Receiver, Sender};
 
 use uuid::Uuid;
@@ -69,8 +62,6 @@ pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
 
 use crate::errors::AnyBusHandleError;
-use crate::messages::BusControlMsg;
-
 pub use crate::routing::EndpointId;
 use crate::routing::router::Router;
 use crate::services::BusStopService;
@@ -83,11 +74,9 @@ impl AnyBus {}
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct AnyBus {
-    bc_tx: Sender<BusControlMsg>,
     id: Uuid,
     handle: Handle,
     options: AnyBusBuilder,
-    bc_rx: watch::Receiver<BusControlMsg>,
     router: Option<Router>,
     #[cfg(feature = "ws")]
     ws_command: Option<tokio::sync::mpsc::Sender<peers::ws::WsCommand>>,
@@ -111,23 +100,16 @@ impl AnyBus {
 
     fn init(options: AnyBusBuilder) -> AnyBus {
         trace!("Starting AnyBus");
-        // dbg!(&options);
         let id = Uuid::now_v7();
 
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let router = Router::new(id);
 
-        let (bc_tx, bc_rx) = watch::channel(BusControlMsg::Run);
-        let router = Router::new(id, rx, bc_rx.clone());
-        let route_watch_rx = router.get_watcher();
-
-        let handle = Handle { tx, route_watch_rx };
+        let handle = router.get_handle();
 
         let msg_bus = AnyBus {
-            bc_tx,
             id,
             handle: handle.clone(),
             options,
-            bc_rx,
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_command: None,
@@ -141,10 +123,6 @@ impl AnyBus {
     ///
     pub fn shutdown(&mut self) {
         self.handle.shutdown();
-        self.bc_tx
-            .send(BusControlMsg::Shutdown)
-            .map_err(|e| trace!("Send shutdown error {:?}", e))
-            .ok();
     }
 
     /// Returns a Handle for clients to interact with the AnyBus system.
@@ -163,16 +141,22 @@ impl AnyBus {
 
     #[cfg(feature = "ws")]
     fn start_ws_manager(&mut self) {
-        let ws_listener = crate::peers::WebsocketManager::new(
-            self.id,
-            self.handle.clone(),
-            self.bc_rx.clone(),
-            #[cfg(feature = "ws_server")]
-            self.options.ws_listener_options.clone(),
-            self.options.ws_remote_options.clone(),
-        );
-        self.ws_command = Some(ws_listener.tx.clone());
-        spawn(ws_listener.start());
+        let id = self.id;
+        let handle = self.handle.clone();
+        let ws_listener_options = self.options.ws_listener_options.clone();
+        let ws_remote_options = self.options.ws_remote_options.clone();
+        spawn(async move {
+            let ws_listener = crate::peers::WebsocketManager::new(
+                id,
+                handle,
+                // self.bc_rx.clone(),
+                #[cfg(feature = "ws_server")]
+                ws_listener_options,
+                ws_remote_options,
+            )
+            .await;
+            ws_listener.start().await
+        });
     }
 
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
@@ -200,13 +184,18 @@ impl AnyBus {
         //TODO allow ipc rendezvous filename to be configured by user
         #[cfg(feature = "ipc")]
         if self.options.enable_ipc {
-            let manager = IpcManager::new(
-                "anybus.ipc".into(),
-                self.handle.clone(),
-                self.bc_rx.clone(),
-                self.id,
-            );
-            spawn(manager.start());
+            let id = self.id;
+            let handle = self.handle.clone();
+            spawn(async move {
+                let manager = IpcManager::new(
+                    "anybus.ipc".into(),
+                    handle,
+                    // self.bc_rx.clone(),
+                    id,
+                )
+                .await;
+                manager.start().await
+            });
         };
     }
 

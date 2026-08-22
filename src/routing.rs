@@ -261,14 +261,17 @@ impl ForwardingTable {
                 }
                 #[cfg(feature = "remote")]
                 for (nid, peer_entry) in self.peers.iter() {
-                    if !realm.allows_realm(&peer_entry.realm) {
+                    if !realm.allow_broadcast(&peer_entry.realm) {
                         trace!(
                             "Not broadcasting to peer {} due to realm mismatch {:?} vs {:?}",
                             nid, realm, peer_entry.realm
                         );
                         continue;
                     }
-                    trace!("Broadcasting to peer {}", nid);
+                    trace!(
+                        "Broadcasting endpoint {} to peer {} entry realm {:?} peer realm {:?}",
+                        endpoint_id, nid, realm, peer_entry.realm
+                    );
                     peer_entry
                         .peer_tx
                         .try_send(NodeMessage::WirePacket(packet.clone().into()))
@@ -569,12 +572,12 @@ pub enum Realm {
 
 #[cfg(feature = "remote")]
 impl Realm {
-    pub(crate) fn allows_realm(&self, other: &Realm) -> bool {
+    pub(crate) fn allow_broadcast(&self, other: &Realm) -> bool {
         match self {
             Realm::Global => true,
-            Realm::LocalNet => matches!(other, Realm::LocalNet | Realm::Process | Realm::Userspace),
+            Realm::LocalNet => matches!(other, Realm::LocalNet | Realm::Userspace | Realm::Process),
             Realm::Userspace => matches!(other, Realm::Userspace | Realm::Process),
-            Realm::Process => matches!(other, Realm::Process),
+            Realm::Process => false, // Process realm cannot broadcast to other processes
         }
     }
 }
