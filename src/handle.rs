@@ -9,8 +9,8 @@ use crate::BusDeserialize;
 use crate::BusTicket;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
-// use crate::messages::BrokerMsg;
-// #[cfg(any(feature = "net", feature = "ipc"))]
+use crate::messages::AnyBusStatusMsg;
+
 use crate::messages::{BrokerMsg, ClientMessage};
 use crate::receivers::Receiver;
 
@@ -35,7 +35,22 @@ pub struct Handle {
 
 impl Handle {
     pub(crate) fn shutdown(&self) {
+        info!("Router shutting down");
+        let _ = self.send(AnyBusStatusMsg::ShuttingDown);
         self.tx.try_send(BrokerMsg::Shutdown).ok();
+    }
+
+    /// Convenience function to register_broadcast::<AnyBusStatusMsg>
+    /// This will be updated with state changes known to the AnyBus system.  See [AnyBusStatusMsg] for details
+    pub async fn get_anybus_status_receiver(
+        &self,
+    ) -> Result<Receiver<AnyBusStatusMsg>, ReceiveError> {
+        self.listener()
+            .endpoint(AnyBusStatusMsg::ANYBUS_UUID.into())
+            .broadcast()
+            .realm(Realm::Process)
+            .register::<AnyBusStatusMsg>()
+            .await
     }
 
     /// Registers an anycast style of listener to the given Uuid and type T that will return a [Receiver] for receiving
@@ -206,7 +221,7 @@ impl Handle {
                 kind: crate::routing::RouteKind::Broadcast,
                 #[cfg(feature = "remote")]
                 realm,
-                via: crate::routing::ForwardTo::Broadcast(vec![tx], Realm::Global),
+                via: crate::routing::ForwardTo::Broadcast(vec![tx], realm),
 
                 cost: 0,
                 #[cfg(feature = "remote")]

@@ -13,15 +13,13 @@ use tokio::{
     sync::{
         RwLock,
         mpsc::{self, channel},
-        watch,
     },
 };
 use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::{
-    Handle,
-    messages::BusControlMsg,
+    AnyBusStatusMsg, Handle, Receiver,
     peers::{
         Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
@@ -37,33 +35,31 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
 pub(crate) struct IpcManager {
     rendezvous: String,
     handle: Handle,
-    bus_control: watch::Receiver<BusControlMsg>,
     peers: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
     tx: mpsc::Sender<IpcCommand>,
     rx: mpsc::Receiver<IpcCommand>,
     uuid: Uuid,
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
+    anybus_status: Receiver<AnyBusStatusMsg>,
 }
 impl IpcManager {
-    pub(crate) fn new(
-        rendezvous: String,
-        handle: Handle,
-        bus_control: watch::Receiver<BusControlMsg>,
-        uuid: Uuid,
-    ) -> Self {
+    pub(crate) async fn new(rendezvous: String, handle: Handle, uuid: Uuid) -> Self {
         let (tx, rx) = channel(32);
-
+        let anybus_status = handle
+            .get_anybus_status_receiver()
+            .await
+            .expect("Unable to create anybus status receiver");
         IpcManager {
             rendezvous,
             handle,
-            bus_control,
             peers: Default::default(),
             tx,
             rx,
             uuid,
             rendezvous_listener: None,
             peer_listener: None,
+            anybus_status,
         }
     }
 
@@ -243,17 +239,14 @@ impl State for Listen {
                     Some(msg) = state.rx.recv() => {
                         b(HandleIpcCommand { command: msg } )
                     }
-                    msg = state.bus_control.changed() => {
-                        if msg.is_ok() {
-                            let control_msg = state.bus_control.borrow();
-                            match *control_msg {
-                                BusControlMsg::Shutdown=> b(Shutdown {}),
-                                BusControlMsg::Run => b(Listen {}),
-                            }
-                        } else {
-                            None
+                    status = state.anybus_status.recv() => {
+                        match status {
+                            Ok(AnyBusStatusMsg::ShuttingDown) => b(Shutdown{}),
+                            Err(_) => b(Shutdown{}),
+                            _ => b(Listen {})
                         }
                     }
+
                 }
     }
 }

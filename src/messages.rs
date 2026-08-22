@@ -3,7 +3,10 @@ use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
-use crate::routing::{EndpointId, Packet, Route};
+use crate::{
+    BusRiderWithUuid,
+    routing::{EndpointId, Packet, Route},
+};
 
 #[derive(Debug)]
 pub(crate) enum BrokerMsg {
@@ -36,10 +39,21 @@ pub(crate) enum ClientMessage {
     Shutdown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum BusControlMsg {
-    Run,
-    Shutdown,
+/// Status returned by AnybusStatusWatcher
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AnyBusStatusMsg {
+    /// The bus is shutting down.  Error, ctrl-c or commanded by AnyBus::shutdown()
+    ShuttingDown,
+    /// Not implemented yet, will be sent when the bus senses a resume from suspension.  Example: Laptop opening and resuming
+    Resuming,
+    /// When a network change has been detected
+    #[cfg(feature = "remote")]
+    NetworkChanged,
+}
+
+impl BusRiderWithUuid for AnyBusStatusMsg {
+    const ANYBUS_UUID: uuid::Uuid = uuid::Uuid::from_u128(0xec785db99c4b46b385f82a107268d674);
 }
 
 #[cfg(feature = "remote")]
