@@ -1,7 +1,12 @@
+//: A simple chat example using AnyBus. This example demonstrates how to use AnyBus for a simple chat application,
+//: including broadcasting messages, direct messaging, and using the ctrl-c watcher.
+
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::sync::LazyLock;
 use std::time::Duration;
+
+use tokio::sync::mpsc;
 
 use anybus::{AnyBus, Handle, bus_uuid};
 use std::sync::Mutex;
@@ -117,9 +122,11 @@ async fn listener(handle: Handle) {
 
     loop {
         tokio::select! {
+            // Listen for direct messages and handle them
             dm_msg = dm_rx.recv() => {
                 match dm_msg {
                     Ok(dm_msg) => {
+                        // Add the sender to the chat members list if not already present
                         CHAT_MEMBERS.add_member(dm_msg.from.clone());
                         println!("(DM from {}): {}", dm_msg.from.nickname, dm_msg.message)
                     }
@@ -129,6 +136,7 @@ async fn listener(handle: Handle) {
                     }
                 }
             },
+            // Listen for broadcast messages and handle them
             msg = rx.recv() => {
                 match msg {
                     Ok(msg) => {
@@ -146,6 +154,7 @@ async fn listener(handle: Handle) {
     }
 }
 
+// Handle incoming messages and update the chat members list accordingly
 fn handle_msg(msg: &ChatMessage) {
     match msg {
         ChatMessage::Hello(nick_name) => {
@@ -167,16 +176,25 @@ fn handle_msg(msg: &ChatMessage) {
 
 #[tokio::main]
 async fn main() {
+    // Get the nickname from the command line arguments, default to "Anonymous" if not provided
     let mut name = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "Anonymous".into());
 
+    // Create a new AnyBus instance, enabling Ctrl-C shutdown and IPC
     let mut bus = AnyBus::build()
         .enable_ctrlc_shutdown(true)
         .enable_ipc(true)
         .run();
 
+    // Get a handle to the bus so we can send messages
     let handle = bus.handle().clone();
+
+    // Get a receiver for AnyBus status messages, which will notify us of bus shutdowns
+    let mut bus_status = handle
+        .get_anybus_status_receiver()
+        .await
+        .expect("Couldn't get status receiver");
 
     // Start the receiver in the background
     let _listener = tokio::spawn(listener(handle.clone()));
@@ -190,6 +208,20 @@ async fn main() {
         anybus_id: *ANYBUS_ID,
     }));
 
+    // Create a channel to receive lines from stdin
+    let (tx, mut rx) = mpsc::channel::<String>(32);
+
+    // Dedicated blocking thread for stdin so we can not block the main loop
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut lines = stdin.lock().lines();
+        while let Some(Ok(line)) = lines.next() {
+            if tx.blocking_send(line).is_err() {
+                break; // receiver dropped → stop
+            }
+        }
+    });
+
     println!("Simple AnyBus chat (type and press Enter, /quit to exit)\n");
 
     let mut line = String::new();
@@ -198,8 +230,19 @@ async fn main() {
         io::stdout().flush().unwrap();
 
         line.clear();
-        if io::stdin().read_line(&mut line).is_err() {
-            break;
+
+        tokio::select! {
+            Some(input) = rx.recv() => {
+                line = input;
+            }
+            Ok(status) = bus_status.recv() => {
+                println!("Bus status changed: {:?}", status);
+                if status == anybus::AnyBusStatusMsg::ShuttingDown {
+                    let _ = handle.send(ChatMessage::Goodbye(*ANYBUS_ID));
+                    break
+                }
+            }
+            else =>  break
         }
 
         let text = line.trim();
