@@ -20,10 +20,7 @@ use uuid::Uuid;
 #[cfg(feature = "ws_server")]
 use crate::spawn;
 
-use crate::{
-    define_local_rpc,
-    routing::{Advertisement, WirePacket},
-};
+use crate::routing::{Advertisement, WirePacket};
 
 pub(super) mod ws_manager;
 mod ws_peer;
@@ -58,6 +55,7 @@ pub(crate) enum WsCommand {
     #[cfg(feature = "ws_server")]
     NewWsStream(WebSockStream, SocketAddr),
     PeerClosed(Uuid),
+    AddPeer(Url),
 }
 
 impl Debug for WsCommand {
@@ -66,13 +64,8 @@ impl Debug for WsCommand {
             #[cfg(feature = "ws_server")]
             Self::NewWsStream(_arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),
+            Self::AddPeer(socket_addr) => f.debug_tuple("AddPeer").field(socket_addr).finish(),
         }
-    }
-}
-define_local_rpc! {
-    WsRpcMessage {
-        AddPeer{url: Url} -> Result<(), String>,
-        RemovePeer {url: Url} -> Result<(), String>,
     }
 }
 
