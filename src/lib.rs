@@ -39,6 +39,7 @@ mod routing;
 pub use routing::Realm;
 #[cfg(feature = "remote")]
 mod codec;
+pub(crate) mod localrpc;
 mod services;
 mod traits;
 
@@ -80,6 +81,8 @@ pub struct AnyBus {
     router: Option<Router>,
     #[cfg(feature = "ws")]
     ws_command: Option<tokio::sync::mpsc::Sender<peers::ws::WsCommand>>,
+    #[cfg(feature = "ws")]
+    ws_rpc_client: Option<localrpc::LocalRpcClient<peers::ws::WsRpcMessage>>,
 }
 
 impl AnyBus {
@@ -113,6 +116,8 @@ impl AnyBus {
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_command: None,
+            #[cfg(feature = "ws")]
+            ws_rpc_client: None,
         };
         msg_bus
     }
@@ -143,8 +148,11 @@ impl AnyBus {
     fn start_ws_manager(&mut self) {
         let id = self.id;
         let handle = self.handle.clone();
+        #[cfg(feature = "ws_server")]
         let ws_listener_options = self.options.ws_listener_options.clone();
         let ws_remote_options = self.options.ws_remote_options.clone();
+        let (ws_rpc_client, ws_rpc_rx) = localrpc::create_rpc::<peers::ws::WsRpcMessage>();
+        self.ws_rpc_client = Some(ws_rpc_client);
         spawn(async move {
             let ws_listener = crate::peers::WebsocketManager::new(
                 id,
@@ -153,6 +161,7 @@ impl AnyBus {
                 #[cfg(feature = "ws_server")]
                 ws_listener_options,
                 ws_remote_options,
+                ws_rpc_rx,
             )
             .await;
             ws_listener.start().await
@@ -265,13 +274,17 @@ impl AnyBus {
 
     /// Add a remote websocket peer after system startup
     #[cfg(feature = "ws")]
-    pub fn add_websocket_peer(&mut self, url: url::Url) {
-        if self.ws_command.is_none() {
+    pub async fn add_websocket_peer(&mut self, url: url::Url) {
+        if self.ws_rpc_client.is_none() {
             self.start_ws_manager();
         }
 
-        if let Some(ws_command) = &self.ws_command {
-            let res = ws_command.try_send(peers::ws::WsCommand::AddPeer(url));
+        if let Some(ws_rpc_client) = &self.ws_rpc_client {
+            use crate::peers::ws::AddPeer;
+
+            let res = ws_rpc_client.call(AddPeer { url }).await;
+
+            // let res = ws_command.try_send(peers::ws::WsCommand::AddPeer(url));
             if let Err(e) = res {
                 error!("Failed to send AddPeer command to WebSocketManager: {}", e);
             }
