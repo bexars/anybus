@@ -78,8 +78,9 @@ pub struct AnyBus {
     handle: Handle,
     options: AnyBusBuilder,
     router: Option<Router>,
+
     #[cfg(feature = "ws")]
-    ws_command: Option<tokio::sync::mpsc::Sender<peers::ws::WsCommand>>,
+    ws_rpc_client: Option<localrpc::LocalRpcClient<peers::ws::WsRpcMessage>>,
 }
 
 impl AnyBus {
@@ -112,7 +113,7 @@ impl AnyBus {
             options,
             router: Some(router),
             #[cfg(feature = "ws")]
-            ws_command: None,
+            ws_rpc_client: None,
         };
         msg_bus
     }
@@ -275,6 +276,23 @@ impl AnyBus {
             if let Err(e) = res {
                 error!("Failed to send AddPeer command to WebSocketManager: {}", e);
             }
+        }
+    }
+
+    /// Remove an existing WebSocket peer
+    #[cfg(feature = "ws")]
+    pub async fn remove_websocket_peer(&mut self, url: url::Url) -> Result<(), String> {
+        if let Some(ws_rpc_client) = &self.ws_rpc_client {
+            use crate::peers::ws::RemovePeer;
+
+            return ws_rpc_client.call(RemovePeer { url }).await.map_err(|e| {
+                format!(
+                    "Failed to send RemovePeer command to WebSocketManager: {}",
+                    e
+                )
+            })?;
+        } else {
+            Err("WebSocketManager is not running".to_string())
         }
     }
 }

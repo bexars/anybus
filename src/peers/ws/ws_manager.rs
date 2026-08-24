@@ -191,6 +191,40 @@ impl WebsocketManager {
                 }
                 ManagerState::Listen
             }
+            Some(rpc_request) = self.ws_rpc_rx.recv() => {
+                match rpc_request{
+                    WsRpcMessage::AddPeer { req, respond_to } => {
+                        if self.pending_peers.iter().any(|p| p.url == req.url) || self.disconnected_peers.iter().any(|p| p.url == req.url) || self.current_peers.iter().any(|p| p.url == Some(req.url.clone())) {
+                            respond_to.send(Err(format!("Peer already exists: {}", req.url))).ok();
+                            tracing::warn!("Peer already exists: {}", req.url);
+                        } else {
+                            tracing::info!("Added new peer: {}", &req.url);
+                            self.pending_peers.push(WsPendingPeer::from_url(req.url));
+                            respond_to.send(Ok(())).ok();
+                        }
+                    },
+                    WsRpcMessage::RemovePeer { req, respond_to } => {
+                        let len_orig = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
+                        self.pending_peers.retain(|p| p.url != req.url);
+                        self.disconnected_peers.retain(|p| p.url != req.url);
+                        if let Some(idx) = self.current_peers.iter().position(|p| p.url == Some(req.url.clone())){
+                            let peer = self.current_peers.remove(idx);
+                            spawn(async move {peer.ws_control.send(ws::WsControl::Shutdown).await.ok()});
+                        }
+                        let len_now = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
+                        if len_now < len_orig {
+                            respond_to.send(Ok(())).ok();
+                            tracing::info!("Removed peer: {}", req.url);
+                        }
+                        else {
+                            respond_to.send(Err(format!("Unable to find url: {}", req.url))).ok();
+                            tracing::warn!("Unable to find url: {}", req.url);
+                        }
+
+                    },
+                }
+                ManagerState::Listen
+            }
 
             Some(cmd) = self.rx.recv() => {
                 ManagerState::HandleCommand(cmd)
