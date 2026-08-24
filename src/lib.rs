@@ -39,7 +39,7 @@ mod routing;
 pub use routing::Realm;
 #[cfg(feature = "remote")]
 mod codec;
-pub(crate) mod localrpc;
+mod localrpc;
 mod services;
 mod traits;
 
