@@ -23,7 +23,7 @@ use crate::{
         Peer, WsRemoteOptions,
         ws::{
             self, WebSockStream, WsActivePeer, WsCommand, WsError, WsMessage, WsPendingPeer,
-            WsRpcMessage, ws_peer::InMessage,
+            ws_peer::InMessage,
         },
     },
     routing::{NodeId, PeerEntry, Realm},
@@ -67,7 +67,6 @@ pub(crate) struct WebsocketManager {
     pending_peers: Vec<WsPendingPeer>,
     disconnected_peers: Vec<WsPendingPeer>,
     anybus_status: Receiver<AnyBusStatusMsg>,
-    ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
 }
 
 impl WebsocketManager {
@@ -76,7 +75,6 @@ impl WebsocketManager {
         handle: Handle,
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WsListenerOptions>,
         ws_peers: Vec<WsRemoteOptions>,
-        ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let anybus_status = handle
@@ -94,7 +92,6 @@ impl WebsocketManager {
             pending_peers: ws_peers.iter().map(WsPendingPeer::from).collect(),
             disconnected_peers: Vec::new(),
             anybus_status,
-            ws_rpc_rx,
         }
     }
 
@@ -194,32 +191,6 @@ impl WebsocketManager {
                 }
                 ManagerState::Listen
             }
-            Some(rpc_request) = self.ws_rpc_rx.recv() => {
-                match rpc_request{
-                    WsRpcMessage::AddPeer { req, respond_to } => {
-                        self.pending_peers.push(WsPendingPeer::from_url(req.url));
-                        respond_to.send(Ok(())).ok();
-                    },
-                    WsRpcMessage::RemovePeer { req, respond_to } => {
-                        let len_orig = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
-                        self.pending_peers.retain(|p| p.url != req.url);
-                        self.disconnected_peers.retain(|p| p.url != req.url);
-                        if let Some(idx) = self.current_peers.iter().position(|p| p.url == Some(req.url.clone())){
-                            let peer = self.current_peers.remove(idx);
-                            spawn(async move {peer.ws_control.send(ws::WsControl::Shutdown).await.ok()});
-                        }
-                        let len_now = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
-                        if len_now < len_orig {
-                            respond_to.send(Ok(())).ok();
-                        }
-                        else {
-                            respond_to.send(Err(format!("Unable to find url: {}", req.url))).ok();
-                        }
-
-                    },
-                }
-                ManagerState::Listen
-            }
 
             Some(cmd) = self.rx.recv() => {
                 ManagerState::HandleCommand(cmd)
@@ -264,6 +235,10 @@ impl WebsocketManager {
                             .map(|pos| self.disconnected_peers.insert(pos, pending));
                     }
                 }
+                ManagerState::Listen
+            }
+            WsCommand::AddPeer(url) => {
+                self.pending_peers.push(WsPendingPeer::from_url(url));
                 ManagerState::Listen
             }
         }
