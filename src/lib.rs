@@ -8,58 +8,37 @@
 //! * Unicast - [Handle::register_unicast()]
 //! * AnyCast - [Handle::register_anycast()]
 //! * MultiCast - [Handle::register_multicast()]
-// use tokio_with_wasm::alias as tokio;
 
-// pub use bus_listener::BusListener;
-pub use errors::ReceiveError;
-// pub use handle::RpcResponse;
-// pub use helper::ShutdownWithCtrlC;
-pub use helper::spawn;
-
-pub use traits::*;
-// mod bus_listener;
-mod handle;
-pub use handle::Handle;
-pub use handle::RequestHelper;
-/// Helper functions for working with the AnyBus system (Currently just spawn() )
-pub mod helper;
-mod messages;
-pub use messages::AnyBusStatusMsg;
-mod receivers;
-pub use receivers::Receiver;
-pub use receivers::RpcReceiver;
-pub use receivers::rpc_receiver::RpcRequest;
-// pub use routing::Address;
-// pub use routing::EndpointId;
-// mod route_table;
-mod routing;
-pub use routing::Realm;
 mod anybus;
-pub use anybus::AnyBus;
-pub use anybus::builder::AnyBusBuilder;
 #[cfg(feature = "remote")]
 mod codec;
+mod common;
+pub mod errors;
+mod handle;
+pub mod helper;
 pub(crate) mod localrpc;
-mod services;
-mod traits;
-
+mod messages;
 #[cfg(feature = "remote")]
 /// Network peer discovery and messaging
 pub mod peers;
+mod receivers;
+mod routing;
+mod services;
+mod traits;
 
-// use std::sync::mpsc::{Receiver, Sender};
-
-// use crate::router::Router;
-
-mod common;
-pub mod errors;
-
+pub use crate::routing::EndpointId;
+pub use anybus::AnyBus;
+pub use anybus::builder::AnyBusBuilder;
 pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
+pub use errors::ReceiveError;
+pub use handle::Handle;
+pub use handle::RequestHelper;
+pub use helper::spawn;
+pub use messages::AnyBusStatusMsg;
+pub use receivers::Receiver;
+pub use receivers::RpcReceiver;
+pub use receivers::rpc_receiver::RpcRequest;
+pub use traits::*;
 
-// use crate::anybus::AnyBus;
-pub use crate::routing::EndpointId;
-
-// pub struct ShutdownAnyBusHandle {
-//     bc_tx: Sender<BusControlMsg>,
-// }
+pub use routing::Realm;
