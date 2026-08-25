@@ -39,6 +39,33 @@ pub use messages::AnyBusStatusMsg;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
 pub use receivers::rpc_receiver::RpcRequest;
+#[cfg(feature = "serde")]
+pub use serde::{Deserialize, Serialize};
 pub use traits::*;
+pub use uuid::Uuid;
 
 pub use routing::Realm;
+
+/// Common Anybus components
+pub mod prelude {
+    pub use crate::AnyBus;
+    pub use crate::AnyBusBuilder;
+    pub use crate::AnyBusStatusMsg;
+    pub use crate::BusDepot;
+    pub use crate::BusRider;
+    pub use crate::BusRiderRpc;
+    pub use crate::BusRiderWithUuid;
+    pub use crate::BusStop;
+    pub use crate::EndpointId;
+    pub use crate::Handle;
+    pub use crate::Realm;
+    pub use crate::Uuid;
+    pub use crate::anybus_rpc;
+    pub use crate::bus_uuid;
+    #[cfg(feature = "serde")]
+    pub use crate::{Deserialize, Serialize};
+    #[cfg(feature = "dioxus")]
+    pub use dioxus::prelude::*;
+    #[cfg(feature = "tokio")]
+    pub use tokio;
+}
