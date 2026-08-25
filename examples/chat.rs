@@ -8,10 +8,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use anybus::{AnyBus, Handle, bus_uuid};
+use anybus::prelude::*;
 use std::sync::Mutex;
-use tokio;
-use uuid::Uuid;
 
 static CHAT_MEMBERS: LazyLock<ChatMembers> = LazyLock::new(|| ChatMembers::new());
 static ANYBUS_ID: LazyLock<Uuid> = LazyLock::new(|| Uuid::new_v4());
