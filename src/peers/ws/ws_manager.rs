@@ -212,7 +212,7 @@ impl WebsocketManager {
                         self.disconnected_peers.retain(|p| p.url != req.url);
                         if let Some(idx) = self.current_peers.iter().position(|p| p.url == Some(req.url.clone())){
                             let peer = self.current_peers.remove(idx);
-                            spawn(async move {peer.ws_control.send(ws::WsControl::Shutdown).await.ok()});
+                            spawn(async move {peer.ws_control.send(ws::WsControl::Shutdown).await.ok();});
                         }
                         let len_now = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
                         if len_now < len_orig {
