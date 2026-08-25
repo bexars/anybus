@@ -1,3 +1,5 @@
+//! Helper functions:  Currently a platform agnost spawn() for creating tasks and the ctrl-c shutdown helper
+
 // use tokio_with_wasm::alias as tokio;
 #[cfg(feature = "dioxus")]
 use dioxus::dioxus_core::Task;
@@ -33,7 +35,7 @@ where
     tokio::spawn(future)
 }
 
-/// Wrapper struct for handling Ctrl-C input from the terminal.  Receiving Ctrl-C will trigger this to call [BusControlHandle::shutdown()]
+/// Wrapper struct for handling Ctrl-C input from the terminal.  Receiving Ctrl-C will trigger the internal shutdown procedure
 ///
 /// * Unix users should mind the caveat from the Tokio implementation of [tokio::signal::ctrl_c]
 #[cfg(not(target_arch = "wasm32"))]

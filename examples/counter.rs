@@ -98,7 +98,7 @@ impl Display for ChatMessage {
 struct ChatListener {}
 
 impl ChatListener {
-    async fn run(mut handle: Handle) {
+    async fn run(handle: Handle) {
         let mut listener = handle.register_anycast::<ChatMessage>().await.unwrap();
         println!("Entering chat listen loop");
         loop {
