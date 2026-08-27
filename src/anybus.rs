@@ -1,4 +1,5 @@
 pub(crate) mod builder;
+pub(crate) mod watcher;
 
 use uuid::Uuid;
 
@@ -12,8 +13,6 @@ use crate::{
 use crate::{Handle, routing::router::Router};
 #[cfg(feature = "ws")]
 use crate::{localrpc, peers};
-
-impl AnyBus {}
 
 // type RoutesWatchRx = watch::Receiver<Routes>;
 
@@ -134,6 +133,8 @@ impl AnyBus {
             tracing::info!("Starting WebSocket Manager");
             self.start_ws_manager();
         }
+
+        watcher::Watcher::new(self.handle.clone()).start();
 
         //TODO allow ipc rendezvous filename to be configured by user
         #[cfg(feature = "ipc")]

@@ -68,6 +68,11 @@ Native TLS stack for WebSocket (`tokio-rustls` / `rustls`). Pulled in by `ws`; y
 
 Uses Dioxus’s `spawn` instead of Tokio’s. Does **not** enable `serde` or `remote`.
 
+## `resume_watch`
+
+Uses power monitoring software to listen to the OS's message bus for suspend/resume/shutdown notifications.
+Only supported on Windows, Mac and Linux
+
 ## Message types
 
 | Build | What a bus message needs |
