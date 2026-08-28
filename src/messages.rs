@@ -47,6 +47,8 @@ pub enum AnyBusStatusMsg {
     ShuttingDown,
     /// Not implemented yet, will be sent when the bus senses a resume from suspension.  Example: Laptop opening and resuming
     Resuming,
+    /// Sent when a suspend is imminent
+    Suspending,
     /// When a network change has been detected
     #[cfg(feature = "remote")]
     NetworkChanged,

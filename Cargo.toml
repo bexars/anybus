@@ -46,6 +46,7 @@ ws_server = ["ws", "dep:tokio-tungstenite"]
 remote = ["tokio", "serde", "dep:bincode", "bincode/serde"]
 dioxus = ["dep:dioxus"]
 serde = ["dep:serde", "uuid/serde", "anybus-macro/serde"]
+resume_watch = ["dep:psp"]
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
@@ -114,7 +115,10 @@ tokio = { version = "1", optional = true ,features = [
 # wasm_socket_handle = { git="https://github.com/bexars/wasm_socket_handle.git", branch = "fix_3", optional = true}
 wasm_socket_handle = { git="https://github.com/bexars/wasm_socket_handle.git", optional = true}
 ###############################
- 
+
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+psp = { git = "https://github.com/bexars/psp.git", optional= true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = [
     "rt",
