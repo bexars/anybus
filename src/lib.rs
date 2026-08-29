@@ -28,6 +28,7 @@ mod traits;
 
 pub use crate::routing::EndpointId;
 pub use anybus::AnyBus;
+pub use anybus::AnyBusConfig;
 pub use anybus::builder::AnyBusBuilder;
 pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
@@ -50,6 +51,7 @@ pub use routing::Realm;
 pub mod prelude {
     pub use crate::AnyBus;
     pub use crate::AnyBusBuilder;
+    pub use crate::AnyBusConfig;
     pub use crate::AnyBusStatusMsg;
     pub use crate::BusDepot;
     pub use crate::BusRider;
