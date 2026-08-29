@@ -25,7 +25,9 @@ required-features = [  "ipc","ws","ws_server"]
 name = "chat_tui"
 required-features = [ "ipc","ws","ws_server"]
 
-
+[[example]]
+name = "relay"
+required-features = [ "toml"]
 
 [workspace]
 members = ["anybus-macro"]
@@ -47,6 +49,7 @@ remote = ["tokio", "serde", "dep:bincode", "bincode/serde"]
 dioxus = ["dep:dioxus"]
 serde = ["dep:serde", "uuid/serde", "anybus-macro/serde"]
 resume_watch = ["dep:psp"]
+config = []
 # wasm = ["uuid/js","serde"]
 # wasm_ws = ["wasm","remote", "dep:tokio-tungstenite-wasm", "dep:url", "dep:bytes"]
 
@@ -84,7 +87,7 @@ async-trait = "0.1.89"
 bincode = { version = "2.0.1", optional = true }
 #bincode2 = "2.0.1"
 dyn-clone = "1.0.20"
-url = {version = "2.5.7", optional = true}
+url = {version = "2.5.7", features = ["serde"], optional = true}
 bytes = {version = "1.10.1", optional = true}
 tokio_with_wasm = { version = "0.9.0", features = ["full"] }
 rustls-pemfile = "2.2.0"
@@ -133,6 +136,7 @@ tokio = { version = "1", features = [
 tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }
 tokio-rustls = {version = "0.26.4", optional = true}
 rustls = {version = "0.23.36", optional = true }
+toml = {version = "1.1", optional = true}
 uuid = { version = "1.18.0", default-features = false,features = [
     "v7",
     "std",
@@ -162,5 +166,6 @@ uuid = { version = "1.18.0", default-features = false,features = [
     "v7",
     "std",
 ] }
+
 # tokio = { version = "1.15", features = ["full", "tracing"] }
 # console-subscriber = "0.4.1"

@@ -37,7 +37,7 @@ impl AnyBusBuilder {
         self
     }
 
-    /// Enables or disables the IPC peer discovery and messaging feature.  Default is enabled.
+    /// Enables or disables the IPC peer discovery and messaging feature.
     ///
     /// If disabled, this AnyBus instance will not be able to discover or communicate with other local AnyBus instances using IPC
     ///

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Display};
 #[cfg(feature = "ws_server")]
 use std::{
     fs::File,
@@ -18,9 +18,10 @@ use url::Url;
 use uuid::Uuid;
 
 #[cfg(feature = "ws_server")]
-use crate::spawn;
+use crate::{anybus::config::WebSocketServerConfig, spawn};
 
 use crate::{
+    anybus::config::{WebSocketPeerConfig, WsUrl},
     define_local_rpc,
     routing::{Advertisement, WirePacket},
 };
@@ -71,8 +72,8 @@ impl Debug for WsCommand {
 }
 define_local_rpc! {
     WsRpcMessage {
-        AddPeer{url: Url} -> Result<(), String>,
-        RemovePeer {url: Url} -> Result<(), String>,
+        AddPeer{peer_config: WebSocketPeerConfig} -> Result<(), String>,
+        RemovePeer {url: WsUrl} -> Result<(), String>,
     }
 }
 
@@ -121,26 +122,82 @@ pub struct WsRemoteOptions {
 }
 
 #[derive(Debug)]
+enum StreamDirection {
+    Inbound,
+    Outbound(WebSocketPeerConfig),
+}
+
+impl From<&WebSocketPeerConfig> for StreamDirection {
+    fn from(peer: &WebSocketPeerConfig) -> Self {
+        StreamDirection::Outbound(peer.clone())
+    }
+}
+
+impl Display for StreamDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamDirection::Inbound => write!(f, "Inbound"),
+            StreamDirection::Outbound(peer) => write!(f, "Outbound({})", peer),
+        }
+    }
+}
+
+impl PartialEq<WebSocketPeerConfig> for StreamDirection {
+    fn eq(&self, other: &WebSocketPeerConfig) -> bool {
+        match self {
+            StreamDirection::Inbound => false,
+            StreamDirection::Outbound(config) => config == other,
+        }
+    }
+}
+
+impl PartialEq<StreamDirection> for WebSocketPeerConfig {
+    fn eq(&self, other: &StreamDirection) -> bool {
+        match other {
+            StreamDirection::Inbound => false,
+            StreamDirection::Outbound(config) => self == config,
+        }
+    }
+}
+
+impl PartialEq<StreamDirection> for WsUrl {
+    fn eq(&self, other: &StreamDirection) -> bool {
+        match other {
+            StreamDirection::Inbound => false,
+            StreamDirection::Outbound(config) => self == &config.url,
+        }
+    }
+}
+
+impl PartialEq<WsUrl> for StreamDirection {
+    fn eq(&self, other: &WsUrl) -> bool {
+        match self {
+            StreamDirection::Inbound => false,
+            StreamDirection::Outbound(config) => &config.url == other,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct WsPendingPeer {
-    url: Url,
+    config: WebSocketPeerConfig,
     last_attempt: web_time::Instant,
     backoff: std::time::Duration,
     num_attempts: u32,
 }
 
-impl WsPendingPeer {
-    // fn is_ready(&self) -> bool {
-    //     tokio::time::Instant::now().duration_since(self.last_attempt) >= self.backoff
-    // }
-    fn from_url(url: Url) -> Self {
+impl From<WebSocketPeerConfig> for WsPendingPeer {
+    fn from(config: WebSocketPeerConfig) -> Self {
         Self {
-            url,
+            config,
             last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
     }
+}
 
+impl WsPendingPeer {
     fn when_ready(&self) -> web_time::Instant {
         self.last_attempt + self.backoff
     }
@@ -154,15 +211,15 @@ impl WsPendingPeer {
 
 #[derive(Debug)]
 struct WsActivePeer {
-    url: Option<Url>,
+    direction: StreamDirection, //TODO why is this an option
     peer_id: Uuid,
     ws_control: Sender<WsControl>,
 }
 
-impl From<&WsRemoteOptions> for WsPendingPeer {
-    fn from(opts: &WsRemoteOptions) -> Self {
+impl From<&WebSocketPeerConfig> for WsPendingPeer {
+    fn from(config: &WebSocketPeerConfig) -> Self {
         Self {
-            url: opts.url.clone(),
+            config: config.clone(),
             last_attempt: web_time::Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
@@ -201,7 +258,7 @@ impl Default for WsListenerOptions {
 
 #[cfg(feature = "ws_server")]
 async fn create_listener(
-    ws_listener_options: WsListenerOptions,
+    ws_listener_options: WebSocketServerConfig,
     ws_command: tokio::sync::mpsc::Sender<WsCommand>,
 ) -> Result<(), WsError> {
     // Create the listener here
@@ -227,7 +284,7 @@ async fn create_listener(
     //     acceptor
     // };
 
-    let acceptor = if !ws_listener_options.use_tls {
+    let acceptor = if !ws_listener_options.enable_tls {
         None
     } else {
         use std::sync::Arc;
@@ -263,7 +320,8 @@ async fn create_listener(
         // );
         Some(acceptor)
     };
-    let sock_addr = std::net::SocketAddr::new(ws_listener_options.addr, ws_listener_options.port);
+    let sock_addr =
+        std::net::SocketAddr::new(ws_listener_options.address, ws_listener_options.port);
     let listener = tokio::net::TcpListener::bind(sock_addr)
         .await
         .map_err(|e| {

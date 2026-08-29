@@ -1,5 +1,8 @@
 pub(crate) mod builder;
+pub(crate) mod config;
 pub(crate) mod watcher;
+
+pub use config::AnyBusConfig;
 
 use uuid::Uuid;
 
@@ -22,7 +25,8 @@ use crate::{localrpc, peers};
 pub struct AnyBus {
     id: Uuid,
     handle: Handle,
-    options: AnyBusBuilder,
+    // options: AnyBusBuilder,
+    config: AnyBusConfig,
     router: Option<Router>,
 
     #[cfg(feature = "ws")]
@@ -45,23 +49,28 @@ impl AnyBus {
         AnyBusBuilder::new()
     }
 
-    pub(crate) fn init(options: AnyBusBuilder) -> AnyBus {
-        tracing::info!("Starting AnyBus");
+    pub(crate) fn init_from_config(config: AnyBusConfig) -> AnyBus {
+        tracing::info!("Initializing AnyBus");
         let id = Uuid::now_v7();
-
         let router = Router::new(id);
 
         let handle = router.get_handle();
 
-        let msg_bus = AnyBus {
+        let anybus = AnyBus {
             id,
             handle: handle.clone(),
-            options,
+            config,
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_rpc_client: None,
         };
-        msg_bus
+        anybus
+    }
+
+    pub(crate) fn init(options: AnyBusBuilder) -> AnyBus {
+        let config = options.into();
+        tracing::trace!("{config:?}");
+        AnyBus::init_from_config(config)
     }
 
     /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
@@ -93,8 +102,25 @@ impl AnyBus {
         let id = self.id;
         let handle = self.handle.clone();
         #[cfg(feature = "ws_server")]
-        let ws_listener_options = self.options.ws_listener_options.clone();
-        let ws_remote_options = self.options.ws_remote_options.clone();
+        let ws_listener_options = self.config.ws_server.clone();
+        let ws_peers = self
+            .config
+            .peers
+            .iter()
+            .filter_map(|(name, peer)| {
+                #[allow(irrefutable_let_patterns)] // remove when there's a 2nd peer type
+                if let config::PeerType::WebSocket { url } = peer {
+                    use crate::anybus::config::WebSocketPeerConfig;
+
+                    Some(WebSocketPeerConfig {
+                        url: url.clone(),
+                        name: name.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
         let (ws_rpc_client, ws_rpc_rx) = localrpc::create_rpc::<peers::ws::WsRpcMessage>();
         self.ws_rpc_client = Some(ws_rpc_client);
         spawn(async move {
@@ -104,7 +130,7 @@ impl AnyBus {
                 // self.bc_rx.clone(),
                 #[cfg(feature = "ws_server")]
                 ws_listener_options,
-                ws_remote_options,
+                ws_peers,
                 ws_rpc_rx,
             )
             .await;
@@ -115,7 +141,7 @@ impl AnyBus {
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
-        if self.options.enable_ctrlc_shutdown {
+        if self.config.enable_ctrlc_shutdown {
             self.shutdown_with_ctrlc();
         }
         let router = self
@@ -125,9 +151,9 @@ impl AnyBus {
         let _router_task = spawn(router.start());
 
         #[cfg(feature = "ws")]
-        let ws_enabled = !self.options.ws_remote_options.is_empty();
+        let ws_enabled = !self.config.peers.is_empty();
         #[cfg(feature = "ws_server")]
-        let ws_enabled = self.options.ws_listener_options.is_some() || ws_enabled;
+        let ws_enabled = self.config.ws_server.is_some() || ws_enabled;
         #[cfg(feature = "ws")]
         if ws_enabled {
             tracing::info!("Starting WebSocket Manager");
@@ -138,7 +164,9 @@ impl AnyBus {
 
         //TODO allow ipc rendezvous filename to be configured by user
         #[cfg(feature = "ipc")]
-        if self.options.enable_ipc {
+        if let Some(ipc) = &self.config.ipc
+            && ipc.enabled
+        {
             let id = self.id;
             let handle = self.handle.clone();
             spawn(async move {
@@ -222,21 +250,26 @@ impl AnyBus {
 
     /// Add a remote websocket peer after system startup
     #[cfg(feature = "ws")]
-    pub async fn add_websocket_peer(&mut self, url: url::Url) {
+    pub async fn add_websocket_peer(&mut self, url: url::Url, name: String) -> Result<(), String> {
         if self.ws_rpc_client.is_none() {
             self.start_ws_manager();
         }
 
+        let peer_config = crate::anybus::config::WebSocketPeerConfig {
+            url: url.try_into()?,
+            name,
+        };
         if let Some(ws_rpc_client) = &self.ws_rpc_client {
             use crate::peers::ws::AddPeer;
 
-            let res = ws_rpc_client.call(AddPeer { url }).await;
+            let res = ws_rpc_client.call(AddPeer { peer_config }).await;
 
             // let res = ws_command.try_send(peers::ws::WsCommand::AddPeer(url));
             if let Err(e) = res {
                 tracing::error!("Failed to send AddPeer command to WebSocketManager: {}", e);
             }
         }
+        Ok(())
     }
 
     /// Remove an existing WebSocket peer
@@ -245,12 +278,17 @@ impl AnyBus {
         if let Some(ws_rpc_client) = &self.ws_rpc_client {
             use crate::peers::ws::RemovePeer;
 
-            return ws_rpc_client.call(RemovePeer { url }).await.map_err(|e| {
-                format!(
-                    "Failed to send RemovePeer command to WebSocketManager: {}",
-                    e
-                )
-            })?;
+            return ws_rpc_client
+                .call(RemovePeer {
+                    url: url.try_into()?,
+                })
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to send RemovePeer command to WebSocketManager: {}",
+                        e
+                    )
+                })?;
         } else {
             Err("WebSocketManager is not running".to_string())
         }
