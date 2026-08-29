@@ -1,0 +1,14 @@
+# [ipc]
+# enabled = true
+[ws]
+server2 = {url = "wss://example.com:19798"}
+# url = "wss://example.com:19798"
+[ws.server1]
+url = "wss://example.com:9798"
+
+[ws_server]
+# address = "::"
+# port = 9798
+
+[peer.example1.ws]  
+url = "wss://example.com:9798"
