@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::io::stdin;
 
 use crate::cli::Args;
 
@@ -11,7 +10,7 @@ use anybus::AnyBusConfig;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::fmt()
-        .with_max_level(tracing_subscriber::filter::LevelFilter::DEBUG)
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .init();
 
     let args = Args::parse();
@@ -28,9 +27,30 @@ async fn main() {
     };
     let mut anybus = config.init();
     anybus.run();
-    stdin()
-        .read_line(&mut String::new())
-        .expect("Failed to read from stdin");
-    anybus.shutdown();
+    let handle = anybus.handle().clone();
+    let mut watch = handle
+        .get_anybus_status_receiver()
+        .await
+        .expect("Failed to get AnyBus status receiver");
+
+    loop {
+        let status = watch.recv().await;
+        println!("AnyBus status: {:?}", status);
+
+        match status {
+            Ok(_status) => {}
+            Err(err) => match err {
+                anybus::ReceiveError::ConnectionClosed => todo!(),
+                anybus::ReceiveError::RegistrationFailed(_) => todo!(),
+                anybus::ReceiveError::DeserializationError(_payload) => todo!(),
+                anybus::ReceiveError::Shutdown => {
+                    println!("Shutting down");
+                    break;
+                }
+                anybus::ReceiveError::RpcNoReplyTo => todo!(),
+            },
+        }
+    }
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    println!("Goodbye.");
 }

@@ -3,14 +3,14 @@ enable_ctrlc_shutdown = true
 # [ipc]
 # enabled = true
 
-[peer.example1.ws]  
-url = "wss://turtle.trivarity.com:10800"
+# [peer.example1.ws]  
+# url = "wss://turtle.trivarity.com:10800"
 
-[peer]
-server1 = { ws = {url = "wss://example.com:19798"}}
+# [peer]
+# server1 = { ws = {url = "wss://example.com:19798"}}
 
-[peer.server2]
-ws = {url = "wss://example.com:29798"}
+# [peer.server2]
+# ws = {url = "wss://example.com:29798"}
 
 
 # [ws_server]
