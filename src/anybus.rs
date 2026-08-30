@@ -105,7 +105,7 @@ impl AnyBus {
         let ws_listener_options = self.config.ws_server.clone();
         let ws_peers = self
             .config
-            .peers
+            .peer
             .iter()
             .filter_map(|(name, peer)| {
                 #[allow(irrefutable_let_patterns)] // remove when there's a 2nd peer type
@@ -151,7 +151,7 @@ impl AnyBus {
         let _router_task = spawn(router.start());
 
         #[cfg(feature = "ws")]
-        let ws_enabled = !self.config.peers.is_empty();
+        let ws_enabled = !self.config.peer.is_empty();
         #[cfg(feature = "ws_server")]
         let ws_enabled = self.config.ws_server.is_some() || ws_enabled;
         #[cfg(feature = "ws")]
