@@ -5,17 +5,17 @@ use crate::cli::Args;
 pub(crate) mod cli;
 // pub(crate) mod config;
 
-pub(crate) use anybus::config::load_config;
+use anybus::AnyBusConfig;
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
     if let Some(config) = &args.config {
-        let bus_config = load_config(config).expect("Failed to load config");
+        let bus_config = AnyBusConfig::load_config(config).expect("Failed to load config");
         println!("Config file: {}", config.display());
         println!("Config:");
-        println!("{:?}", bus_config);
+        println!("{:#?}", bus_config);
     }
 
     for ws in &args.ws {

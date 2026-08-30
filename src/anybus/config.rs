@@ -24,6 +24,20 @@ pub struct AnyBusConfig {
     pub(crate) enable_ctrlc_shutdown: bool,
 }
 
+impl AnyBusConfig {
+    #[cfg(feature = "toml")]
+    /// Loads an AnyBusConfig from a .toml file
+    /// See examples/relay/dummy for an example file
+    pub fn load_config(
+        path: &std::path::PathBuf,
+    ) -> Result<AnyBusConfig, Box<dyn std::error::Error>> {
+        let config_str = std::fs::read_to_string(path)?;
+        let config: AnyBusConfig = toml::from_str(&config_str)?;
+        Ok(config)
+    }
+}
+
+/// Temporary crutch while phasing out the old AnyBusBuilder
 impl From<AnyBusBuilder> for AnyBusConfig {
     fn from(builder: AnyBusBuilder) -> Self {
         let mut peers = HashMap::new();
@@ -123,13 +137,6 @@ pub(crate) struct WebSocketServerConfig {
     pub(crate) cert_path: Option<String>,
     pub(crate) key_path: Option<String>,
     pub(crate) enable_tls: bool,
-}
-
-#[cfg(feature = "toml")]
-pub fn load_config(path: &PathBuf) -> Result<AnyBusConfig, Box<dyn std::error::Error>> {
-    let config_str = std::fs::read_to_string(path)?;
-    let config: AnyBusConfig = toml::from_str(&config_str)?;
-    Ok(config)
 }
 
 fn default_ipv6_any() -> IpAddr {
