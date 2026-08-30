@@ -159,7 +159,7 @@ impl AnyBus {
             tracing::info!("Starting WebSocket Manager");
             self.start_ws_manager();
         }
-
+        #[cfg(feature = "resume_watch")]
         watcher::Watcher::new(self.handle.clone()).start();
 
         //TODO allow ipc rendezvous filename to be configured by user

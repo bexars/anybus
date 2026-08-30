@@ -1,15 +1,22 @@
+#[cfg(feature = "resume_watch")]
 use psp::monitor::PowerState;
 
 #[cfg(feature = "resume_watch")]
 use crate::AnyBusStatusMsg;
-use crate::{Handle, ReceiveError};
+#[cfg(feature = "resume_watch")]
+use crate::Handle;
+#[cfg(feature = "resume_watch")]
+use crate::ReceiveError;
 
 /// Watches for changes to network topology and detects resumes from suspension
+#[cfg(feature = "resume_watch")]
 pub(crate) struct Watcher {
+    #[cfg(feature = "resume_watch")]
     handle: Handle,
 }
-
+#[cfg(feature = "resume_watch")]
 impl Watcher {
+    #[cfg(feature = "resume_watch")]
     pub(crate) fn new(handle: Handle) -> Self {
         Self { handle }
     }
@@ -20,15 +27,19 @@ impl Watcher {
 
     async fn run(self) {
         // lock down this registration so nothing else can register this UUID
+        #[cfg(feature = "resume_watch")]
         let mut watcher = self
             .handle
             .get_anybus_status_receiver()
             .await
             .expect("Unable to register status receiver");
 
+        #[cfg(feature = "resume_watch")]
         let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
 
+        #[cfg(feature = "resume_watch")]
         let (tx, mut ps_rx) = tokio::sync::mpsc::unbounded_channel::<PowerState>();
+        #[cfg(feature = "resume_watch")]
         let handle2 = self.handle.clone();
         #[cfg(all(
             any(target_os = "windows", target_os = "linux", target_os = "macos"),
@@ -58,12 +69,17 @@ impl Watcher {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         });
+        #[cfg(feature = "resume_watch")]
         let mut kill_loop = false;
+        #[cfg(feature = "resume_watch")]
         loop {
             tokio::select! {
+
+                #[cfg(feature = "resume_watch")]
                 Some(event) = ps_rx.recv() => {
                     Self::handle_psp_event(event, &self.handle);
                 }
+                #[cfg(feature = "resume_watch")]
                 status = watcher.recv() => {
                     kill_loop = Self::handle_watcher_event(status);
                 }
@@ -72,9 +88,11 @@ impl Watcher {
                 break;
             }
         }
+        #[cfg(feature = "resume_watch")]
         kill_tx.send(()).ok();
     }
 
+    #[cfg(feature = "resume_watch")]
     fn handle_psp_event(event: PowerState, handle: &Handle) {
         match event {
             psp::monitor::PowerState::Unknown => {}
@@ -95,6 +113,7 @@ impl Watcher {
         };
     }
 
+    #[cfg(feature = "resume_watch")]
     fn handle_watcher_event(status: Result<AnyBusStatusMsg, ReceiveError>) -> bool {
         match status {
             Ok(status) => match status {
