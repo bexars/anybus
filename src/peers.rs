@@ -5,7 +5,6 @@ mod ipc;
 #[cfg(feature = "ws")]
 pub(crate) mod ws;
 use tokio::sync::mpsc::{self};
-use uuid::Uuid;
 #[cfg(feature = "ws_server")]
 pub use ws::WsListenerOptions;
 #[cfg(feature = "ws")]
@@ -16,13 +15,17 @@ pub(crate) use ws::ws_manager::WebsocketManager;
 #[cfg(feature = "ipc")]
 pub(crate) use ipc::ipc_manager::IpcManager;
 
-use crate::{Handle, messages::NodeMessage, routing::Realm};
+use crate::{
+    Handle,
+    messages::NodeMessage,
+    routing::{NodeId, Realm},
+};
 
 #[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct Peer {
-    pub(crate) peer_id: Uuid,
-    pub(crate) our_id: Uuid,
+    pub(crate) peer_id: NodeId,
+    pub(crate) our_id: NodeId,
     pub(crate) rx: mpsc::Receiver<NodeMessage>,
     pub(crate) handle: Handle,
     pub(crate) realm: Realm,
@@ -30,8 +33,8 @@ pub(crate) struct Peer {
 
 impl Peer {
     pub(crate) fn new(
-        peer_id: Uuid,
-        our_id: Uuid,
+        peer_id: NodeId,
+        our_id: NodeId,
         handle: Handle,
         rx: mpsc::Receiver<NodeMessage>,
         realm: Realm,

@@ -4,10 +4,11 @@ pub(crate) mod watcher;
 
 pub use config::AnyBusConfig;
 
-use uuid::Uuid;
+// use uuid::Uuid;
 
 use crate::anybus::builder::AnyBusBuilder;
 use crate::errors::AnyBusHandleError;
+use crate::routing::NodeId;
 use crate::services::BusStopService;
 use crate::{
     BusDepot, BusDeserialize, BusRider, BusRiderRpc, BusRiderWithUuid, BusStop, BusStopId,
@@ -23,7 +24,7 @@ use crate::{localrpc, peers};
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct AnyBus {
-    id: Uuid,
+    id: NodeId,
     handle: Handle,
     // options: AnyBusBuilder,
     config: AnyBusConfig,
@@ -51,7 +52,7 @@ impl AnyBus {
 
     pub(crate) fn init_from_config(config: AnyBusConfig) -> AnyBus {
         tracing::info!("Initializing AnyBus");
-        let id = Uuid::now_v7();
+        let id = NodeId::new();
         let router = Router::new(id);
 
         let handle = router.get_handle();
@@ -243,7 +244,7 @@ impl AnyBus {
     }
 
     /// Remove a bus depot
-    pub fn remove_bus_depot(&self, _id: Uuid) -> Result<(), AnyBusHandleError> {
+    pub fn remove_bus_depot(&self, _id: impl Into<EndpointId>) -> Result<(), AnyBusHandleError> {
         // TODO: implement stopping the task
         Ok(())
     }

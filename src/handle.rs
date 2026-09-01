@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 // use tokio_with_wasm::alias as tokio;
 
 use tracing::info;
-use uuid::Uuid;
+// use uuid::Uuid;
 
 use crate::BusDeserialize;
 use crate::BusTicket;
@@ -66,7 +66,7 @@ impl Handle {
     /// Same as register_anycast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_anycast_uuid<T: BusRider + BusDeserialize>(
         &self,
-        endpoint_id: Uuid,
+        endpoint_id: impl Into<EndpointId>,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_anycast_inner(endpoint_id.into(), Realm::Global)
             .await
@@ -88,7 +88,7 @@ impl Handle {
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
             #[cfg(feature = "remote")]
-            learned_from: Uuid::nil(),
+            learned_from: NodeId::nil(),
         };
 
         let register_msg = BrokerMsg::RegisterRoute(endpoint_id, route);
@@ -112,7 +112,7 @@ impl Handle {
     /// Same as register_unicast but allows specifying the Uuid to listen on instead of using the one in the [BusRiderWithUuid] trait
     pub async fn register_unicast_uuid<T: BusRider + BusDeserialize>(
         &self,
-        endpoint_id: Uuid,
+        endpoint_id: impl Into<EndpointId>,
     ) -> Result<Receiver<T>, ReceiveError> {
         self.register_unicast_inner(endpoint_id.into(), Realm::Global)
             .await
@@ -135,7 +135,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -156,7 +156,7 @@ impl Handle {
     /// Register a RPC service with the given Uuid as the endpoint
     pub async fn register_rpc_uuid<T: BusRiderRpc + BusDeserialize>(
         &self,
-        endpoint_id: Uuid,
+        endpoint_id: impl Into<EndpointId>,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = endpoint_id.into();
         self.register_rpc_inner(endpoint_id).await
@@ -179,7 +179,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -201,7 +201,7 @@ impl Handle {
     /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
     pub async fn register_broadcast_uuid<T: BusRider + BusDeserialize>(
         &self,
-        broadcast_id: Uuid,
+        broadcast_id: impl Into<EndpointId>,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
         self.register_broadcast_inner(broadcast_id, Realm::Global)
@@ -225,7 +225,7 @@ impl Handle {
 
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -249,7 +249,7 @@ impl Handle {
 
     pub(crate) async fn register_multicast_uuid<T: BusRider + BusDeserialize>(
         &self,
-        broadcast_id: Uuid,
+        broadcast_id: impl Into<EndpointId>,
     ) -> Result<Receiver<T>, ReceiveError> {
         let broadcast_id = broadcast_id.into();
         self.register_multicast_inner(broadcast_id).await
@@ -260,7 +260,7 @@ impl Handle {
     ) -> Result<Receiver<T>, ReceiveError> {
         // let broadcast_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let local_id = Uuid::now_v7().into();
+        let local_id = EndpointId::new();
         let register_msg = BrokerMsg::RegisterRoute(
             local_id,
             Route {
@@ -270,7 +270,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -289,7 +289,7 @@ impl Handle {
                 )])),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -341,11 +341,11 @@ impl Handle {
 
     pub fn send_to_uuid<T: BusRider>(
         &self,
-        address: Uuid,
+        address: impl Into<EndpointId>,
         payload: T,
     ) -> Result<(), AnyBusHandleError> {
-        let address = address.into();
-        self.send_to_address(address, payload)
+        let address: EndpointId = address.into();
+        self.send_to_address(address.into(), payload)
     }
 
     /// Sends a single [BusRider] message to the given [Address]
@@ -386,7 +386,7 @@ impl Handle {
         &self,
         // _pd: std::marker::PhantomData<T>,
     ) -> Result<RequestHelper, AnyBusHandleError> {
-        let response_uuid = Uuid::now_v7().into();
+        let response_uuid = EndpointId::new().into();
         // let to_address = T::ANYBUS_UUID.into();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
@@ -400,7 +400,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: Uuid::nil(),
+                learned_from: NodeId::nil(),
             },
         );
         self.tx
@@ -437,13 +437,13 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn add_peer_endpoints(&self, uuid: Uuid, ads: HashSet<Advertisement>) {
+    pub(crate) fn add_peer_endpoints(&self, node_id: NodeId, ads: HashSet<Advertisement>) {
         self.tx
-            .try_send(BrokerMsg::AddPeerEndpoints(uuid, ads))
+            .try_send(BrokerMsg::AddPeerEndpoints(node_id, ads))
             .ok();
     }
     #[cfg(feature = "remote")]
-    pub(crate) fn remove_peer_endpoints(&self, peer_id: Uuid, deletes: HashSet<Advertisement>) {
+    pub(crate) fn remove_peer_endpoints(&self, peer_id: NodeId, deletes: HashSet<Advertisement>) {
         self.tx
             .try_send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes))
             .ok();
@@ -560,13 +560,13 @@ impl RequestHelper {
     >(
         &mut self,
         payload: U,
-        endpoint_id: Uuid,
+        endpoint_id: impl Into<EndpointId>,
     ) -> Result<U::Response, AnyBusHandleError>
     where
         <U as BusRiderRpc>::Response: BusDeserialize,
     {
         // let map = self.handle.route_watch_rx.borrow();
-        let to_address: Address = endpoint_id.into();
+        let to_address: Address = endpoint_id.into().into();
         let node_id = self.handle.route_watch_rx.borrow().get_node_id();
         let payload = Box::new(payload);
         // let address: Address = T::ANYBUS_UUID.into();
