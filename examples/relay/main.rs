@@ -9,25 +9,48 @@ use anybus::AnyBusConfig;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .init();
+
     let args = Args::parse();
 
-    if let Some(config) = &args.config {
+    let config = if let Some(config) = &args.config {
         let bus_config = AnyBusConfig::load_config(config).expect("Failed to load config");
         println!("Config file: {}", config.display());
         println!("Config:");
         println!("{:#?}", bus_config);
-    }
+        bus_config
+    } else {
+        println!("No config file specified, using default config");
+        AnyBusConfig::default()
+    };
+    let mut anybus = config.init();
+    anybus.run();
+    let handle = anybus.handle().clone();
+    let mut watch = handle
+        .get_anybus_status_receiver()
+        .await
+        .expect("Failed to get AnyBus status receiver");
 
-    for ws in &args.ws {
-        println!("Websocket: {ws}");
+    loop {
+        let status = watch.recv().await;
+        println!("AnyBus status: {:?}", status);
+
+        match status {
+            Ok(_status) => {}
+            Err(err) => match err {
+                anybus::ReceiveError::ConnectionClosed => todo!(),
+                anybus::ReceiveError::RegistrationFailed(_) => todo!(),
+                anybus::ReceiveError::DeserializationError(_payload) => todo!(),
+                anybus::ReceiveError::Shutdown => {
+                    println!("Shutting down");
+                    break;
+                }
+                anybus::ReceiveError::RpcNoReplyTo => todo!(),
+            },
+        }
     }
-    if let Some(ws_server) = &args.ws_server {
-        println!("Websocket server: {ws_server}");
-    }
-    if let Some(ws_cert) = &args.ws_cert {
-        println!("Websocket server certificate: {}", ws_cert.display());
-    }
-    if let Some(ws_key) = &args.ws_key {
-        println!("Websocket server key: {}", ws_key.display());
-    }
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    println!("Goodbye.");
 }

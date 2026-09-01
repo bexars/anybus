@@ -296,8 +296,11 @@ async fn create_listener(
         // let cert = std::fs::read(cert_path)?; //.expect("Failed to read certificate");
         // let key = std::fs::read(key_path)?; //.expect("Failed to read private key");
         // // let certs = CertificateDer::from_pem_file(file_name)
-        let cert_file =
-            &mut BufReader::new(File::open(&cert_path).map_err(|e| e.to_string()).unwrap());
+        let cert_file = &mut BufReader::new(
+            File::open(&cert_path)
+                .map_err(|e| e.to_string())
+                .expect("Failed to open certificate file {cert_path}"),
+        );
         // let key_file =
         //     &mut BufReader::new(File::open(&key_path).map_err(|e| e.to_string()).unwrap());
         let certs = certs(cert_file).filter_map(|c| c.ok()).collect();

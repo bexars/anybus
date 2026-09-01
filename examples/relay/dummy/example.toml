@@ -1,14 +1,20 @@
+enable_ctrlc_shutdown = true
+
 # [ipc]
 # enabled = true
-[ws]
-server2 = {url = "wss://example.com:19798"}
-# url = "wss://example.com:19798"
-[ws.server1]
-url = "wss://example.com:9798"
 
-[ws_server]
+# [peer.example1.ws]  
+# url = "wss://turtle.trivarity.com:10800"
+
+# [peer]
+# server1 = { ws = {url = "wss://example.com:19798"}}
+
+# [peer.server2]
+# ws = {url = "wss://example.com:29798"}
+
+
+# [ws_server]
 # address = "::"
 # port = 9798
+# enable_tls = true
 
-[peer.example1.ws]  
-url = "wss://example.com:9798"
