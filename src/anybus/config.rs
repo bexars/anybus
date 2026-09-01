@@ -9,13 +9,13 @@ use serde::{Deserialize, Deserializer};
 use url::Url;
 
 /// Structure for configuring a new AnyBus instance
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct AnyBusConfig {
     #[serde(default)]
     #[cfg(feature = "ipc")]
     pub(crate) ipc: Option<IpcConfig>,
     #[serde(default)]
-    pub(crate) peers: HashMap<String, PeerType>,
+    pub(crate) peer: HashMap<String, PeerType>,
     #[serde(default)]
     #[cfg(feature = "ws_server")]
     pub(crate) ws_server: Option<WebSocketServerConfig>,
@@ -34,6 +34,11 @@ impl AnyBusConfig {
         let config_str = std::fs::read_to_string(path)?;
         let config: AnyBusConfig = toml::from_str(&config_str)?;
         Ok(config)
+    }
+
+    /// Initializes the AnyBus system returning a configured but stopped AnyBus instance
+    pub fn init(self) -> crate::AnyBus {
+        crate::AnyBus::init_from_config(self)
     }
 }
 
@@ -56,7 +61,7 @@ impl From<AnyBusBuilder> for AnyBusConfig {
             ipc: Some(IpcConfig {
                 enabled: builder.enable_ipc,
             }),
-            peers,
+            peer: peers,
 
             #[cfg(feature = "ws_server")]
             ws_server: builder
@@ -79,7 +84,7 @@ pub(crate) struct IpcConfig {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
+// #[serde(tag = "type")]
 pub(crate) enum PeerType {
     #[serde(rename = "ws")]
     #[cfg(feature = "ws")]
@@ -136,6 +141,7 @@ pub(crate) struct WebSocketServerConfig {
     pub(crate) port: u16,
     pub(crate) cert_path: Option<String>,
     pub(crate) key_path: Option<String>,
+    #[serde(default = "default_true")]
     pub(crate) enable_tls: bool,
 }
 
@@ -147,13 +153,17 @@ fn default_port() -> u16 {
     9798
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl AnyBusConfig {
     #[cfg(feature = "ws")]
     /// Add websocket with the given url and a name for internal use in logging and displays
     pub fn add_ws_peer(mut self, name: String, url: String) {
         {
             let url = parse_ws_url(&url).expect("Invalid websocket URL");
-            self.peers
+            self.peer
                 .insert(name, PeerType::WebSocket { url: WsUrl(url) });
         }
     }
