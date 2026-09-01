@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
 use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+// use uuid::Uuid;
 
 use crate::routing::{Advertisement, NodeId, WirePacket};
 
@@ -21,9 +21,19 @@ pub(super) type IpcPeerStream = AsyncBincodeStream<
 pub(super) trait NameHelper {
     fn to_name(&self) -> Name<'static>;
 }
-impl NameHelper for Uuid {
+// impl NameHelper for Uuid {
+//     fn to_name(&self) -> Name<'static> {
+//         format!("anybus.ipc.{}", self)
+//             .to_ns_name::<GenericNamespaced>()
+//             .unwrap()
+//     }
+// }
+
+impl NameHelper for NodeId {
     fn to_name(&self) -> Name<'static> {
-        format!("anybus.ipc.{}", self)
+        use uuid::Uuid;
+        let id: Uuid = self.into();
+        format!("anybus.ipc.{}", id)
             .to_ns_name::<GenericNamespaced>()
             .unwrap()
     }
@@ -32,8 +42,8 @@ impl NameHelper for Uuid {
 #[derive(Debug)]
 pub(super) enum IpcCommand {
     // AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
-    PeerClosed(Uuid, bool),
-    LearnedPeers(Vec<Uuid>),
+    PeerClosed(NodeId, bool),
+    LearnedPeers(Vec<NodeId>),
 }
 
 #[derive(Debug)]

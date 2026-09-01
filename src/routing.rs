@@ -25,7 +25,39 @@ use crate::{
 };
 
 // pub(crate) type EndpointId = Uuid;
-pub(crate) type NodeId = Uuid;
+// pub(crate) type NodeId = Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub(crate) struct NodeId(Uuid);
+
+impl Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for NodeId {
+    fn from(value: Uuid) -> Self {
+        NodeId(value)
+    }
+}
+
+impl From<&NodeId> for Uuid {
+    fn from(value: &NodeId) -> Self {
+        value.0
+    }
+}
+
+impl NodeId {
+    pub fn nil() -> Self {
+        NodeId(Uuid::nil())
+    }
+
+    pub fn new() -> Self {
+        NodeId(Uuid::now_v7())
+    }
+}
 
 /// A newtype around Uuid
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,6 +75,18 @@ impl Deref for EndpointId {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<&NodeId> for EndpointId {
+    fn from(value: &NodeId) -> Self {
+        EndpointId(value.0)
+    }
+}
+
+impl From<NodeId> for EndpointId {
+    fn from(value: NodeId) -> Self {
+        EndpointId(value.0)
     }
 }
 
@@ -66,6 +110,13 @@ impl From<Uuid> for EndpointId {
 impl From<&Uuid> for EndpointId {
     fn from(value: &Uuid) -> Self {
         EndpointId(*value)
+    }
+}
+
+impl EndpointId {
+    /// Creates an EndpointId with a current timestamp v7 UUID under the hood
+    pub fn new() -> Self {
+        EndpointId(Uuid::now_v7())
     }
 }
 

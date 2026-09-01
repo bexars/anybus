@@ -15,7 +15,6 @@ use tokio::sync::mpsc::Sender;
 #[cfg(feature = "ws_server")]
 use tracing::error;
 use url::Url;
-use uuid::Uuid;
 
 #[cfg(feature = "ws_server")]
 use crate::{anybus::config::WebSocketServerConfig, spawn};
@@ -23,7 +22,7 @@ use crate::{anybus::config::WebSocketServerConfig, spawn};
 use crate::{
     anybus::config::{WebSocketPeerConfig, WsUrl},
     define_local_rpc,
-    routing::{Advertisement, WirePacket},
+    routing::{Advertisement, NodeId, WirePacket},
 };
 
 pub(super) mod ws_manager;
@@ -58,7 +57,7 @@ pub(crate) enum WsCommand {
     // NewTcpStream(tokio::net::TcpStream, SocketAddr),
     #[cfg(feature = "ws_server")]
     NewWsStream(WebSockStream, SocketAddr),
-    PeerClosed(Uuid),
+    PeerClosed(NodeId),
 }
 
 impl Debug for WsCommand {
@@ -79,7 +78,7 @@ define_local_rpc! {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum WsMessage {
-    Hello(Uuid),
+    Hello(NodeId),
     Packet(WirePacket),
     CloseConnection,
     Advertise(HashSet<Advertisement>),
@@ -212,7 +211,7 @@ impl WsPendingPeer {
 #[derive(Debug)]
 struct WsActivePeer {
     direction: StreamDirection, //TODO why is this an option
-    peer_id: Uuid,
+    peer_id: NodeId,
     ws_control: Sender<WsControl>,
 }
 

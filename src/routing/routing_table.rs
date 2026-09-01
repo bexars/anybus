@@ -17,7 +17,7 @@ pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
     #[cfg(feature = "remote")]
-    pub(crate) peers: HashMap<Uuid, PeerInfo>,
+    pub(crate) peers: HashMap<NodeId, PeerInfo>,
 }
 
 impl RoutingTable {
@@ -37,7 +37,7 @@ impl RoutingTable {
     #[cfg(feature = "remote")]
     pub(crate) fn add_peer_endpoints(
         &mut self,
-        peer_id: Uuid,
+        peer_id: NodeId,
         advertisements: HashSet<Advertisement>,
     ) -> Option<usize> {
         let mut routes_to_add = Vec::new();

@@ -13,7 +13,6 @@ use tokio::{
     },
 };
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 use crate::{
     messages::NodeMessage,
@@ -21,6 +20,7 @@ use crate::{
         Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
     },
+    routing::NodeId,
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -33,7 +33,7 @@ pub(crate) struct IpcPeer {
     stream: IpcPeerStream,
     ipc_command: mpsc::Sender<IpcCommand>,
     ipc_control: mpsc::Receiver<IpcControl>,
-    ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
+    ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
     peer: Peer,
     is_master: bool,
 }
@@ -43,7 +43,7 @@ impl IpcPeer {
         stream: IpcPeerStream,
         ipc_command: mpsc::Sender<IpcCommand>,
         ipc_control: mpsc::Receiver<IpcControl>,
-        ipc_neighbors: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
+        ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
         peer: Peer,
         is_master: bool,
     ) -> IpcPeer {

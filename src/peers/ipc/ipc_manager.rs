@@ -16,7 +16,6 @@ use tokio::{
     },
 };
 use tracing::{debug, error};
-use uuid::Uuid;
 
 use crate::{
     AnyBusStatusMsg, Handle, Receiver,
@@ -24,7 +23,7 @@ use crate::{
         Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
-    routing::PeerEntry,
+    routing::{NodeId, PeerEntry},
     spawn,
 };
 
@@ -35,16 +34,16 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
 pub(crate) struct IpcManager {
     rendezvous: String,
     handle: Handle,
-    peers: Arc<RwLock<Vec<(Uuid, mpsc::Sender<IpcControl>)>>>,
+    peers: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
     tx: mpsc::Sender<IpcCommand>,
     rx: mpsc::Receiver<IpcCommand>,
-    uuid: Uuid,
+    our_nodeid: NodeId,
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
     anybus_status: Receiver<AnyBusStatusMsg>,
 }
 impl IpcManager {
-    pub(crate) async fn new(rendezvous: String, handle: Handle, uuid: Uuid) -> Self {
+    pub(crate) async fn new(rendezvous: String, handle: Handle, our_nodeid: NodeId) -> Self {
         let (tx, rx) = channel(32);
         let anybus_status = handle
             .get_anybus_status_receiver()
@@ -56,7 +55,7 @@ impl IpcManager {
             peers: Default::default(),
             tx,
             rx,
-            uuid,
+            our_nodeid,
             rendezvous_listener: None,
             peer_listener: None,
             anybus_status,
@@ -128,7 +127,7 @@ struct HandShake {
 impl State for HandShake {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         // let mut stream = AsyncBincodeStream::from(self.stream).for_async();
-        if let Err(error) = self.stream.send(IpcMessage::Hello(state.uuid)).await {
+        if let Err(error) = self.stream.send(IpcMessage::Hello(state.our_nodeid)).await {
             return b(HandleError::new(error));
         };
         let hello = self.stream.next().await;
@@ -271,7 +270,7 @@ struct StartListener {}
 #[async_trait]
 impl State for StartListener {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let name = state.uuid.to_name();
+        let name = state.our_nodeid.to_name();
 
         let listener_opts = local_socket::ListenerOptions::new()
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
@@ -373,7 +372,7 @@ impl State for HandleIpcCommand {
 #[derive(Debug)]
 struct CreateIpcPeer {
     stream: IpcPeerStream,
-    peer_id: Uuid,
+    peer_id: NodeId,
     peer_is_master: bool,
     extra_streams: Vec<IpcPeerStream>,
 }
@@ -385,7 +384,7 @@ impl State for CreateIpcPeer {
         let (node_tx, node_rx) = channel(32);
         let peer = Peer::new(
             self.peer_id,
-            state.uuid,
+            state.our_nodeid,
             state.handle.clone(),
             node_rx,
             crate::routing::Realm::Userspace, // Always userspace for IPC peers
