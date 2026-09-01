@@ -1,3 +1,4 @@
+pub(crate) mod peer_registry;
 pub(crate) mod router;
 pub(crate) mod routing_table;
 // use tokio_with_wasm::alias as tokio;
@@ -371,7 +372,7 @@ impl From<&RoutingTable> for ForwardingTable {
 pub(crate) enum ForwardTo {
     Local(Sender<ClientMessage>),
     #[cfg(feature = "remote")]
-    Remote(Sender<NodeMessage>, NodeId),
+    Remote(Sender<NodeMessage>, u16),
     Broadcast(Vec<Sender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
@@ -544,7 +545,7 @@ pub(crate) struct Route {
     #[cfg(feature = "remote")]
     pub(crate) realm: Realm,
     #[cfg(feature = "remote")]
-    pub(crate) learned_from: NodeId, // (0 for local)
+    pub(crate) learned_from: u16, // (0 for local)
     pub(crate) kind: RouteKind,
 }
 

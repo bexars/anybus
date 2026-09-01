@@ -13,9 +13,9 @@ pub(crate) enum BrokerMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
-    RegisterPeer(NodeId, PeerEntry),
+    RegisterPeer(u16, PeerEntry),
     #[cfg(feature = "remote")]
-    UnRegisterPeer(NodeId),
+    UnRegisterPeer(u16),
     #[cfg(feature = "remote")]
     AddPeerEndpoints(NodeId, HashSet<Advertisement>),
     #[cfg(feature = "remote")]

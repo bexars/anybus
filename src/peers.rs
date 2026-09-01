@@ -29,6 +29,7 @@ pub(crate) struct Peer {
     pub(crate) rx: mpsc::Receiver<NodeMessage>,
     pub(crate) handle: Handle,
     pub(crate) realm: Realm,
+    pub(crate) connection_id: u16,
 }
 
 impl Peer {
@@ -38,6 +39,7 @@ impl Peer {
         handle: Handle,
         rx: mpsc::Receiver<NodeMessage>,
         realm: Realm,
+        connection_id: u16,
     ) -> Self {
         Self {
             peer_id,
@@ -45,6 +47,7 @@ impl Peer {
             rx,
             handle,
             realm,
+            connection_id,
         }
     }
 }
