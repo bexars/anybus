@@ -51,9 +51,9 @@ impl From<&NodeId> for Uuid {
 }
 
 impl NodeId {
-    pub fn nil() -> Self {
-        NodeId(Uuid::nil())
-    }
+    // pub fn nil() -> Self {
+    //     NodeId(Uuid::nil())
+    // }
 
     pub fn new() -> Self {
         NodeId(Uuid::now_v7())
@@ -142,7 +142,7 @@ pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
     #[cfg(feature = "remote")]
-    peers: HashMap<NodeId, PeerEntry>,
+    peers: HashMap<u16, PeerEntry>,
 }
 
 impl Debug for ForwardingTable {
@@ -208,7 +208,7 @@ impl ForwardingTable {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn forward(&self, packet: WirePacket, from_peer: NodeId) {
+    pub(crate) fn forward(&self, packet: WirePacket, from_connection: u16) {
         let reverse_route = packet.from.map(|f| self.lookup(&f)).flatten();
         if reverse_route.is_none() {
             trace!("No reverse route for {:?}", packet);
@@ -217,7 +217,7 @@ impl ForwardingTable {
         trace!("Reverse Route {:?} for {:?}", reverse_route, packet);
 
         if let Some(ForwardTo::Remote(_, peer_id)) = reverse_route {
-            if *peer_id != from_peer {
+            if *peer_id != from_connection {
                 trace!("Dropping due to RPF check");
                 return;
             }
@@ -347,8 +347,8 @@ impl From<&RoutingTable> for ForwardingTable {
         #[cfg(feature = "remote")]
         let peer_senders = value
             .peers
-            .iter()
-            .map(|(k, v)| (*k, v.peer_entry.clone()))
+            .values()
+            .map(|peer| (peer.connection_id, peer.peer_entry.clone()))
             .collect();
 
         #[cfg(feature = "remote")]

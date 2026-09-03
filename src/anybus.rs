@@ -7,6 +7,7 @@ pub use config::AnyBusConfig;
 // use uuid::Uuid;
 
 use crate::anybus::builder::AnyBusBuilder;
+use crate::common::SharedCounter;
 use crate::errors::AnyBusHandleError;
 use crate::routing::NodeId;
 use crate::services::BusStopService;
@@ -29,7 +30,7 @@ pub struct AnyBus {
     // options: AnyBusBuilder,
     config: AnyBusConfig,
     router: Option<Router>,
-
+    connection_counter: SharedCounter,
     #[cfg(feature = "ws")]
     ws_rpc_client: Option<localrpc::LocalRpcClient<peers::ws::WsRpcMessage>>,
 }
@@ -56,6 +57,7 @@ impl AnyBus {
         let router = Router::new(id);
 
         let handle = router.get_handle();
+        let connection_counter = SharedCounter::new(1); // start at 1 since 0 is basically localhost/ourselves
 
         let anybus = AnyBus {
             id,
@@ -64,6 +66,7 @@ impl AnyBus {
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_rpc_client: None,
+            connection_counter,
         };
         anybus
     }
@@ -124,6 +127,7 @@ impl AnyBus {
             .collect::<Vec<_>>();
         let (ws_rpc_client, ws_rpc_rx) = localrpc::create_rpc::<peers::ws::WsRpcMessage>();
         self.ws_rpc_client = Some(ws_rpc_client);
+        let cc = self.connection_counter.clone();
         spawn(async move {
             let ws_listener = crate::peers::WebsocketManager::new(
                 id,
@@ -133,6 +137,7 @@ impl AnyBus {
                 ws_listener_options,
                 ws_peers,
                 ws_rpc_rx,
+                cc,
             )
             .await;
             ws_listener.start().await
@@ -170,6 +175,7 @@ impl AnyBus {
         {
             let id = self.id;
             let handle = self.handle.clone();
+            let cc = self.connection_counter.clone();
             spawn(async move {
                 use crate::peers::IpcManager;
 
@@ -178,6 +184,7 @@ impl AnyBus {
                     handle,
                     // self.bc_rx.clone(),
                     id,
+                    cc,
                 )
                 .await;
                 manager.start().await

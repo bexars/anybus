@@ -42,10 +42,12 @@ impl PeerRegistry {
         Some(removed_user)
     }
 
+    #[allow(unused)]
     pub fn get_by_connection_id(&self, id: u16) -> Option<&PeerInfo> {
         self.by_connection_id.get(&id).map(|&idx| &self.peers[idx])
     }
 
+    #[allow(unused)]
     pub fn get_by_node_id(&self, peer_id: &NodeId) -> Option<&PeerInfo> {
         self.by_node_id.get(peer_id).map(|&idx| &self.peers[idx])
     }
@@ -55,11 +57,11 @@ impl PeerRegistry {
             .get(&id)
             .map(|&idx| &mut self.peers[idx])
     }
-
+    #[allow(unused)]
     pub fn get_mut_by_node_id(&mut self, id: NodeId) -> Option<&mut PeerInfo> {
         self.by_node_id.get(&id).map(|&idx| &mut self.peers[idx])
     }
-
+    #[allow(unused)]
     pub fn contains_node_id_key(&self, node_id: &NodeId) -> bool {
         self.by_node_id.contains_key(node_id)
     }
@@ -67,12 +69,16 @@ impl PeerRegistry {
     pub fn contains_connection_id_key(&self, connection_id: u16) -> bool {
         self.by_connection_id.contains_key(&connection_id)
     }
-
+    #[allow(unused)]
     pub fn iter(&self) -> impl Iterator<Item = &PeerInfo> {
         self.peers.iter()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<PeerInfo> {
+    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, PeerInfo> {
         self.peers.iter_mut()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &PeerInfo> {
+        self.peers.iter()
     }
 }

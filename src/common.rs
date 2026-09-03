@@ -13,44 +13,33 @@
 
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicU16, Ordering},
 };
-
-#[derive(Debug, Clone)]
-pub(crate) struct Counter {
-    current: u16,
-}
-
-impl Counter {
-    pub(crate) fn new() -> Self {
-        Self { current: 0 }
-    }
-}
-
-impl Iterator for Counter {
-    type Item = u16;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let val = self.current;
-        self.current += 1;
-        Some(val)
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct SharedCounter {
     // Arc allows multiple tasks to own a reference to this same memory
-    current: Arc<AtomicUsize>,
+    current: Arc<AtomicU16>,
+}
+
+impl std::fmt::Debug for SharedCounter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SharedCounter {{ current: {} }}",
+            self.current.load(Ordering::SeqCst)
+        )
+    }
 }
 
 impl SharedCounter {
-    fn new(start: usize) -> Self {
+    pub(crate) fn new(start: u16) -> Self {
         SharedCounter {
-            current: Arc::new(AtomicUsize::new(start)),
+            current: Arc::new(AtomicU16::new(start)),
         }
     }
 
-    fn next_value(&self) -> usize {
+    pub(crate) fn next(&self) -> u16 {
         // Fetch the current value and increment it by 1 atomically
         self.current.fetch_add(1, Ordering::SeqCst)
     }

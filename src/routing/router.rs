@@ -7,7 +7,7 @@ use std::collections::HashSet;
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm, peer_registry::PeerRegistry};
 
-use crate::{Handle, common::Counter, routing::RouteKind};
+use crate::{Handle, routing::RouteKind};
 
 use tokio::{
     select,
@@ -36,7 +36,6 @@ pub(crate) struct Router {
     anybus_id: NodeId,
     broker_rx: mpsc::Receiver<BrokerMsg>,
     handle: Handle,
-    connection_counter: Counter,
 }
 
 impl Router {
@@ -62,7 +61,6 @@ impl Router {
                 peers: PeerRegistry::default(),
             },
             handle,
-            connection_counter: Counter::new(),
         }
     }
 
@@ -317,8 +315,7 @@ impl State {
                         }
                     }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::RegisterPeer(connection_id, peer_entry) => {
-                        let connection_id = router.connection_counter.next().unwrap();
+                    BrokerMsg::RegisterPeer(peer_id, connection_id, peer_entry) => {
                         if router
                             .route_table
                             .peers
@@ -333,13 +330,10 @@ impl State {
                             via: ForwardTo::Remote(peer_entry.peer_tx.clone(), connection_id),
                             learned_from: connection_id,
                             realm: Realm::Global,
-                            cost: 0,
+                            cost: 1,
                         };
-                        router
-                            .route_table
-                            .add_route(connection_id.into(), route)
-                            .unwrap();
-                        let peer_info = PeerInfo::new(connection_id, peer_entry, connection_id);
+                        router.route_table.add_route(peer_id.into(), route).unwrap();
+                        let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
                         router.route_table.peers.insert(peer_info);
                         trace!("Registered new peer {}", connection_id);
 
@@ -416,8 +410,12 @@ impl State {
                     //     return Some(Listen);
                     // }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::RemovePeerEndpoints(peer_id, advertisements) => {
-                        if let Some(peer_info) = router.route_table.peers.get_mut(&peer_id) {
+                    BrokerMsg::RemovePeerEndpoints(connection_id, advertisements) => {
+                        if let Some(peer_info) = router
+                            .route_table
+                            .peers
+                            .get_mut_by_connection_id(connection_id)
+                        {
                             for ad in &advertisements {
                                 peer_info.received_routes.remove(ad);
                             }
@@ -433,7 +431,7 @@ impl State {
                                 !advertisements.iter().any(|ad| {
                                     ad.endpoint_id == *endpoint_id
                                         && ad.kind == route.kind
-                                        && route.learned_from == peer_id
+                                        && route.learned_from == connection_id
                                 })
                             });
                             if route_entry.routes.len() != before {

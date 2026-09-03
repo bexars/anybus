@@ -19,6 +19,7 @@ use tracing::{debug, error};
 
 use crate::{
     AnyBusStatusMsg, Handle, Receiver,
+    common::SharedCounter,
     peers::{
         Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
@@ -41,9 +42,15 @@ pub(crate) struct IpcManager {
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
     anybus_status: Receiver<AnyBusStatusMsg>,
+    connection_counter: SharedCounter,
 }
 impl IpcManager {
-    pub(crate) async fn new(rendezvous: String, handle: Handle, our_nodeid: NodeId) -> Self {
+    pub(crate) async fn new(
+        rendezvous: String,
+        handle: Handle,
+        our_nodeid: NodeId,
+        connection_counter: SharedCounter,
+    ) -> Self {
         let (tx, rx) = channel(32);
         let anybus_status = handle
             .get_anybus_status_receiver()
@@ -59,6 +66,7 @@ impl IpcManager {
             rendezvous_listener: None,
             peer_listener: None,
             anybus_status,
+            connection_counter,
         }
     }
 
@@ -380,6 +388,7 @@ struct CreateIpcPeer {
 #[async_trait]
 impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        let connection_id = state.connection_counter.next();
         let (tx, rx) = channel(32);
         let (node_tx, node_rx) = channel(32);
         let peer = Peer::new(
@@ -388,6 +397,7 @@ impl State for CreateIpcPeer {
             state.handle.clone(),
             node_rx,
             crate::routing::Realm::Userspace, // Always userspace for IPC peers
+            connection_id,
         );
         let ipc_peer = IpcPeer::new(
             self.stream,
@@ -402,7 +412,10 @@ impl State for CreateIpcPeer {
             realm: crate::routing::Realm::Userspace,
         };
         state.peers.write().await.push((self.peer_id, tx));
-        state.handle.register_peer(self.peer_id, peer_entry).await;
+        state
+            .handle
+            .register_peer(connection_id, self.peer_id, peer_entry)
+            .await;
         _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once

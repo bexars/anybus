@@ -58,10 +58,10 @@ struct WsPeer {
 }
 
 impl WsPeer {
-    fn new(our_id: NodeId, peer_id: NodeId) -> Self {
+    fn new(connection_id: u16, our_id: NodeId, peer_id: NodeId) -> Self {
         trace!(
-            "Creating new WsPeer with our_id: {} and peer_id: {}",
-            our_id, peer_id
+            "Creating new WsPeer with our_id: {}, peer_id: {} and connection_id: {}",
+            our_id, peer_id, connection_id
         );
         Self {
             peer_id,
@@ -177,7 +177,7 @@ pub(crate) async fn run_ws_peer(
     mut peer: Peer,
 ) {
     trace!("Entered run_ws_peer");
-    let mut ws_peer = WsPeer::new(peer.our_id, peer.peer_id);
+    let mut ws_peer = WsPeer::new(peer.connection_id, peer.our_id, peer.peer_id);
 
     'outer: loop {
         // Send all queued outgoing messages first
@@ -200,19 +200,19 @@ pub(crate) async fn run_ws_peer(
                     }
                 }
                 OutMessage::AddPeerEndpoints(ads) => {
-                    peer.handle.add_peer_endpoints(peer.peer_id, ads);
+                    peer.handle.add_peer_endpoints(peer.connection_id, ads);
                 }
                 OutMessage::RemovePeerEndpoints(ads) => {
-                    peer.handle.remove_peer_endpoints(peer.peer_id, ads);
+                    peer.handle.remove_peer_endpoints(peer.connection_id, ads);
                 }
                 OutMessage::UnregisterPeer => {
-                    peer.handle.unregister_peer(peer.peer_id);
+                    peer.handle.unregister_peer(peer.connection_id);
                 }
                 OutMessage::ClosePeer => {
                     stream.close_conn().await.ok();
                 }
                 OutMessage::ForwardPacket(wire_packet) => {
-                    peer.handle.send_packet(wire_packet, peer.peer_id);
+                    peer.handle.send_packet(wire_packet, peer.connection_id);
                 }
             };
         }
