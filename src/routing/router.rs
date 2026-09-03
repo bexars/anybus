@@ -200,18 +200,7 @@ impl Router {
             // Update the tracking set
             peer_info.advertised_routes = new_advertisements;
 
-            // Send withdrawals first
-            if !withdrawn.is_empty() {
-                let length = withdrawn.len();
-                let msg = NodeMessage::Withdraw(withdrawn);
-                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
-                    trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
-                } else {
-                    trace!("Sent {} route withdrawals to peer {}", peer_id, length);
-                }
-            }
-
-            // Then send new advertisements
+            //  send new advertisements first
             if !to_advertise.is_empty() {
                 let length = to_advertise.len();
                 let msg = NodeMessage::Advertise(to_advertise);
@@ -222,6 +211,17 @@ impl Router {
                     );
                 } else {
                     trace!("Sent {} route advertisements to peer {}", length, peer_id);
+                }
+            }
+
+            // Send withdrawals second
+            if !withdrawn.is_empty() {
+                let length = withdrawn.len();
+                let msg = NodeMessage::Withdraw(withdrawn);
+                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
+                    trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
+                } else {
+                    trace!("Sent {} route withdrawals to peer {}", peer_id, length);
                 }
             }
         }
