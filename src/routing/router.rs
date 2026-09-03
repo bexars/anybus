@@ -335,7 +335,7 @@ impl State {
                         router.route_table.add_route(peer_id.into(), route).unwrap();
                         let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
                         router.route_table.peers.insert(peer_info);
-                        trace!("Registered new peer {}", connection_id);
+                        trace!("Registered new peer: #{} {}", connection_id, peer_id);
 
                         // router.send_route_updates();
                         return Some(RouteChange);
