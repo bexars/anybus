@@ -221,7 +221,7 @@ impl Router {
                         peer_id, e
                     );
                 } else {
-                    trace!("Sent {} route advertisements to peer {}", peer_id, length);
+                    trace!("Sent {} route advertisements to peer {}", length, peer_id);
                 }
             }
         }
