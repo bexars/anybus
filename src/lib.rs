@@ -33,12 +33,16 @@ pub use anybus::builder::AnyBusBuilder;
 pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
 #[cfg(feature = "dioxus")]
-pub use dioxus::prelude::*;
+pub use dioxus;
 pub use errors::ReceiveError;
 pub use handle::Handle;
 pub use handle::RequestHelper;
 pub use helper::spawn;
 pub use messages::AnyBusStatusMsg;
+#[cfg(feature = "ws_server")]
+pub use peers::ws::WsListenerOptions;
+#[cfg(feature = "ws")]
+pub use peers::ws::WsRemoteOptions;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
 pub use receivers::rpc_receiver::RpcRequest;
@@ -65,6 +69,10 @@ pub mod prelude {
     pub use crate::Handle;
     pub use crate::Realm;
     pub use crate::Uuid;
+    #[cfg(feature = "ws_server")]
+    pub use crate::WsListenerOptions;
+    #[cfg(feature = "ws")]
+    pub use crate::WsRemoteOptions;
     pub use crate::anybus_rpc;
     pub use crate::bus_uuid;
     #[cfg(feature = "serde")]

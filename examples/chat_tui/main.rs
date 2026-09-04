@@ -1,10 +1,11 @@
 mod chatview;
 use std::{collections::HashMap, net::IpAddr};
 
-use anybus::{
-    AnyBus, AnyBusBuilder, Realm, bus_uuid,
-    peers::{WsListenerOptions, WsRemoteOptions},
-};
+// use anybus::{
+//     AnyBus, AnyBusBuilder, Realm, bus_uuid,
+//     peers::{WsListenerOptions, WsRemoteOptions},
+// };
+use anybus::prelude::*;
 use chatview::ChatViewWidget;
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
