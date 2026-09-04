@@ -1,5 +1,6 @@
 pub(crate) mod builder;
 pub(crate) mod config;
+#[cfg(feature = "resume_watch")]
 pub(crate) mod watcher;
 
 pub use config::AnyBusConfig;
