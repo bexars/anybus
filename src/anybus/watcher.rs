@@ -1,135 +1,83 @@
-#[cfg(feature = "resume_watch")]
-use psp::monitor::PowerState;
+use crate::{AnyBusStatusMsg, Handle};
+use powerwatch::PowerWatch;
 
-#[cfg(feature = "resume_watch")]
-use crate::AnyBusStatusMsg;
-#[cfg(feature = "resume_watch")]
-use crate::Handle;
-#[cfg(feature = "resume_watch")]
-use crate::ReceiveError;
-
-/// Watches for changes to network topology and detects resumes from suspension
-#[cfg(feature = "resume_watch")]
 pub(crate) struct Watcher {
-    #[cfg(feature = "resume_watch")]
     handle: Handle,
 }
-#[cfg(feature = "resume_watch")]
+
 impl Watcher {
-    #[cfg(feature = "resume_watch")]
     pub(crate) fn new(handle: Handle) -> Self {
         Self { handle }
     }
-
     pub(crate) fn start(self) {
-        tokio::spawn(self.run());
+        tokio::spawn(async move {
+            self.run().await;
+        });
     }
 
     async fn run(self) {
-        // lock down this registration so nothing else can register this UUID
-        #[cfg(feature = "resume_watch")]
-        let mut watcher = self
-            .handle
-            .get_anybus_status_receiver()
-            .await
-            .expect("Unable to register status receiver");
+        let Ok(mut status_rx) = self.handle.get_anybus_status_receiver().await else {
+            tracing::error!("Failed to get AnyBus status receiver");
+            return;
+        };
 
-        #[cfg(feature = "resume_watch")]
-        let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
-
-        #[cfg(feature = "resume_watch")]
-        let (tx, mut ps_rx) = tokio::sync::mpsc::unbounded_channel::<PowerState>();
-        #[cfg(feature = "resume_watch")]
-        let handle2 = self.handle.clone();
-        #[cfg(all(
-            any(target_os = "windows", target_os = "linux", target_os = "macos"),
-            feature = "resume_watch"
-        ))]
-        tokio::task::spawn_blocking(move || {
-            let handle = handle2;
-
-            let power_monitor = psp::monitor::PowerMonitor::new();
-            let pm_recv = power_monitor.event_receiver();
-            if let Err(e) = power_monitor.start_listening() {
-                tracing::error!("Unable to start power monitor: {}", e);
-            };
-            loop {
-                let event = pm_recv.try_recv();
-                // let clock_time = std::time::SystemTime::now();
-                // dbg!(&event, clock_time);
-                if let Ok(event) = event {
-                    dbg!(&event);
-                    tx.send(event).ok();
-                    Self::handle_psp_event(event, &handle);
-                }
-                if kill_rx.try_recv().is_ok() {
-                    tracing::info!("Killing power monitor thread");
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+        let (_pw, events) = match PowerWatch::start() {
+            Ok(res) => res,
+            Err(e) => {
+                tracing::error!("Failed to start power watch: {:?}", e);
+                return;
             }
-        });
-        #[cfg(feature = "resume_watch")]
-        let mut kill_loop = false;
-        #[cfg(feature = "resume_watch")]
+        };
+        tracing::info!("Power watch started!!!!!");
         loop {
             tokio::select! {
+                Ok(event) = events.recv_async() => {
+                    tracing::info!("Power event: {:?}", event);
+                    let msg = match event {
+                        powerwatch::PowerEvent::Suspend => {
+                            tracing::info!("System is suspending");
+                            Some(AnyBusStatusMsg::Suspending)
+                        }
+                        powerwatch::PowerEvent::Resume => {
+                            tracing::info!("System has resumed");
 
-                #[cfg(feature = "resume_watch")]
-                Some(event) = ps_rx.recv() => {
-                    Self::handle_psp_event(event, &self.handle);
+                            Some(AnyBusStatusMsg::Resuming)
+                        }
+                        powerwatch::PowerEvent::Shutdown => {
+
+                            tracing::info!("System is shutting down");
+                            None
+                        }
+                        powerwatch::PowerEvent::ScreenLocked => {
+                            tracing::info!("Screen is locked");
+                            None
+                        }
+                        powerwatch::PowerEvent::ScreenUnlocked => {
+                            tracing::info!("Screen is unlocked");
+                           None
+                        }
+                    };
+                    if let Some(msg) = msg {
+                        self.handle.send(msg).ok();
+                    }
                 }
-                #[cfg(feature = "resume_watch")]
-                status = watcher.recv() => {
-                    kill_loop = Self::handle_watcher_event(status);
+                status = status_rx.recv() => {
+                    match status {
+                        Ok(status) => {
+                            tracing::info!("AnyBus status: {:?}", status);
+                            // Handle AnyBus status updates here
+                            if let AnyBusStatusMsg::ShuttingDown = status {
+                                tracing::info!("AnyBus is shutting down, stopping watcher");
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            tracing::error!("Error receiving AnyBus status: {:?}", err);
+                            break;
+                        }
+                    }
                 }
-            }
-            if kill_loop {
-                break;
             }
         }
-        #[cfg(feature = "resume_watch")]
-        kill_tx.send(()).ok();
-    }
-
-    #[cfg(feature = "resume_watch")]
-    fn handle_psp_event(event: PowerState, handle: &Handle) {
-        match event {
-            psp::monitor::PowerState::Unknown => {}
-            psp::monitor::PowerState::Suspend => {
-                tracing::info!("Suspend event received from power monitor");
-                handle.send(AnyBusStatusMsg::Suspending).ok();
-            }
-            psp::monitor::PowerState::Resume => {
-                tracing::info!("Resume event received from power monitor");
-                handle.send(AnyBusStatusMsg::Resuming).ok();
-            }
-            psp::monitor::PowerState::Shutdown => {
-                tracing::info!("Shutdown event received from power monitor");
-                handle.send(AnyBusStatusMsg::ShuttingDown).ok();
-            }
-            psp::monitor::PowerState::ScreenLocked => {}
-            psp::monitor::PowerState::ScreenUnlocked => {}
-        };
-    }
-
-    #[cfg(feature = "resume_watch")]
-    fn handle_watcher_event(status: Result<AnyBusStatusMsg, ReceiveError>) -> bool {
-        match status {
-            Ok(status) => match status {
-                AnyBusStatusMsg::ShuttingDown => return true,
-                AnyBusStatusMsg::Resuming => {}
-                AnyBusStatusMsg::Suspending => {}
-                AnyBusStatusMsg::NetworkChanged => {}
-            },
-            Err(err) => match err {
-                crate::ReceiveError::ConnectionClosed => return true,
-                crate::ReceiveError::RegistrationFailed(_) => {}
-                crate::ReceiveError::DeserializationError(_payload) => {}
-                crate::ReceiveError::Shutdown => return true,
-                crate::ReceiveError::RpcNoReplyTo => {}
-            },
-        }
-        false
     }
 }
