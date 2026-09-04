@@ -20,6 +20,7 @@ use crate::anybus::config::WebSocketServerConfig;
 use crate::{
     AnyBusStatusMsg, Handle, Receiver,
     anybus::config::WebSocketPeerConfig,
+    common::SharedCounter,
     peers::{
         Peer,
         ws::{
@@ -69,6 +70,7 @@ pub(crate) struct WebsocketManager {
     disconnected_peers: Vec<WsPendingPeer>,
     anybus_status: Receiver<AnyBusStatusMsg>,
     ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
+    connection_counter: SharedCounter,
 }
 
 impl WebsocketManager {
@@ -78,6 +80,7 @@ impl WebsocketManager {
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WebSocketServerConfig>,
         ws_peers: Vec<WebSocketPeerConfig>,
         ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
+        connection_counter: SharedCounter,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let anybus_status = handle
@@ -96,6 +99,7 @@ impl WebsocketManager {
             disconnected_peers: Vec::new(),
             anybus_status,
             ws_rpc_rx,
+            connection_counter,
         }
     }
 
@@ -313,6 +317,7 @@ impl WebsocketManager {
         match tokio::time::timeout(Duration::from_secs(5), stream.next_msg()).await {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
+                let connection_id = self.connection_counter.next();
                 let (tx_nodemessage, rx) = tokio::sync::mpsc::channel(32);
                 let peer = Peer::new(
                     peer_id,
@@ -320,12 +325,15 @@ impl WebsocketManager {
                     self.handle.clone(),
                     rx,
                     Realm::Global, // WebSocket peers are always in the global realm
+                    connection_id,
                 );
                 let peer_entry = PeerEntry {
                     peer_tx: tx_nodemessage,
                     realm: Realm::Global,
                 };
-                self.handle.register_peer(peer_id, peer_entry).await;
+                self.handle
+                    .register_peer(connection_id, peer_id, peer_entry)
+                    .await;
                 let (tx, rx) = tokio::sync::mpsc::channel(32);
                 spawn(ws::ws_peer::run_ws_peer(
                     stream,

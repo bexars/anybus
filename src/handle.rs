@@ -88,7 +88,7 @@ impl Handle {
             via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0,
             #[cfg(feature = "remote")]
-            learned_from: NodeId::nil(),
+            learned_from: 0,
         };
 
         let register_msg = BrokerMsg::RegisterRoute(endpoint_id, route);
@@ -135,7 +135,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -179,7 +179,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -225,7 +225,7 @@ impl Handle {
 
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -270,7 +270,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -289,7 +289,7 @@ impl Handle {
                 )])),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -325,10 +325,10 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn send_packet(&self, packet: WirePacket, from_peer: NodeId) {
+    pub(crate) fn send_packet(&self, packet: WirePacket, from_connection: u16) {
         let map = self.route_watch_rx.borrow();
 
-        map.forward(packet, from_peer);
+        map.forward(packet, from_connection);
     }
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
@@ -400,7 +400,7 @@ impl Handle {
                 via: crate::routing::ForwardTo::Local(tx.clone()),
                 cost: 0,
                 #[cfg(feature = "remote")]
-                learned_from: NodeId::nil(),
+                learned_from: 0,
             },
         );
         self.tx
@@ -437,22 +437,27 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn add_peer_endpoints(&self, node_id: NodeId, ads: HashSet<Advertisement>) {
+    pub(crate) fn add_peer_endpoints(&self, connection_id: u16, ads: HashSet<Advertisement>) {
         self.tx
-            .try_send(BrokerMsg::AddPeerEndpoints(node_id, ads))
+            .try_send(BrokerMsg::AddPeerEndpoints(connection_id, ads))
             .ok();
     }
     #[cfg(feature = "remote")]
-    pub(crate) fn remove_peer_endpoints(&self, peer_id: NodeId, deletes: HashSet<Advertisement>) {
+    pub(crate) fn remove_peer_endpoints(
+        &self,
+        connection_id: u16,
+        deletes: HashSet<Advertisement>,
+    ) {
         self.tx
-            .try_send(BrokerMsg::RemovePeerEndpoints(peer_id, deletes))
+            .try_send(BrokerMsg::RemovePeerEndpoints(connection_id, deletes))
             .ok();
     }
 
     #[cfg(feature = "remote")]
     pub(crate) async fn register_peer(
         &self,
-        uuid: NodeId,
+        connection_id: u16,
+        node_id: NodeId,
         peer_entry: PeerEntry,
         // tx: UnboundedSender<NodeMessage>,
         // realm: Realm,
@@ -461,7 +466,7 @@ impl Handle {
 
         match self
             .tx
-            .send(BrokerMsg::RegisterPeer(uuid, peer_entry))
+            .send(BrokerMsg::RegisterPeer(node_id, connection_id, peer_entry))
             .await
         {
             Ok(_) => {}
@@ -470,8 +475,10 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn unregister_peer(&self, uuid: NodeId) {
-        self.tx.try_send(BrokerMsg::UnRegisterPeer(uuid)).ok();
+    pub(crate) fn unregister_peer(&self, connection_id: u16) {
+        self.tx
+            .try_send(BrokerMsg::UnRegisterPeer(connection_id))
+            .ok();
     }
 
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {

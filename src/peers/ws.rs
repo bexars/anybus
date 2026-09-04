@@ -355,7 +355,11 @@ async fn run_ws_listener(
                                 Ok(s) => {
                                     // let s = rustls::client::TlsStream::fr
                                     // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
-                                    let stream = tokio_tungstenite::accept_async(s).await.unwrap();
+                                    let stream = match tokio_tungstenite::accept_async(s).await {
+                                        Ok(stream) => stream,
+                                        Err(e) => { tracing::error!("Failed to accept websocket connection from {}: {}", addr, e);
+                                            continue },
+                                    };
                                     WsCommand::NewWsStream(stream.into(),addr)
                                 }
                                 ,

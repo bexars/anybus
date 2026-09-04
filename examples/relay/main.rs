@@ -1,6 +1,8 @@
 use clap::Parser;
 
 use crate::cli::Args;
+#[path = "../shared/mod.rs"]
+mod shared;
 
 pub(crate) mod cli;
 // pub(crate) mod config;
@@ -9,9 +11,10 @@ use anybus::AnyBusConfig;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::fmt()
-        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
-        .init();
+    // tracing_subscriber::fmt::fmt()
+    //     .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+    //     .init();
+    let _log_guard = shared::logging::init_tracing("anybus-relay");
 
     let args = Args::parse();
 

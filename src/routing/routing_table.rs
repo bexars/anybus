@@ -2,22 +2,22 @@ use std::collections::HashMap;
 #[cfg(feature = "remote")]
 use std::collections::HashSet;
 
+#[cfg(feature = "remote")]
+// use uuid::Uuid;
+#[cfg(feature = "remote")]
+use crate::routing::{Address, Advertisement, ForwardTo, Realm, peer_registry::PeerRegistry};
+use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
 use tracing::debug;
 #[cfg(feature = "remote")]
 use tracing::trace;
-#[cfg(feature = "remote")]
-use uuid::Uuid;
 
-#[cfg(feature = "remote")]
-use crate::routing::{Address, Advertisement, ForwardTo, Realm, router::PeerInfo};
-use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
-
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
     #[cfg(feature = "remote")]
-    pub(crate) peers: HashMap<NodeId, PeerInfo>,
+    // pub(crate) peers: HashMap<NodeId, PeerInfo>,
+    pub(crate) peers: PeerRegistry,
 }
 
 impl RoutingTable {
@@ -37,28 +37,28 @@ impl RoutingTable {
     #[cfg(feature = "remote")]
     pub(crate) fn add_peer_endpoints(
         &mut self,
-        peer_id: NodeId,
+        connection_id: u16,
         advertisements: HashSet<Advertisement>,
     ) -> Option<usize> {
         let mut routes_to_add = Vec::new();
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
+        if let Some(peer) = self.peers.get_mut_by_connection_id(connection_id) {
             for ad in advertisements {
                 use RouteKind as RK;
                 let forward_to = match ad.kind {
                     RK::Unicast | RK::Anycast | RK::Node => {
-                        ForwardTo::Remote(peer.peer_entry.peer_tx.clone(), peer_id)
+                        ForwardTo::Remote(peer.peer_entry.peer_tx.clone(), connection_id)
                     }
                     RK::Broadcast => ForwardTo::Broadcast(vec![], Realm::Global), //TODO fix realm
 
                     RK::Multicast => {
                         let mut hs = HashSet::new();
-                        hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
+                        hs.insert(Address::Remote(ad.endpoint_id, peer.peer_id));
                         ForwardTo::Multicast(hs)
                     }
                 };
                 let learned_from = match ad.kind {
-                    RK::Unicast | RK::Node | RK::Anycast => peer_id,
-                    RK::Multicast | RK::Broadcast => Uuid::nil().into(),
+                    RK::Unicast | RK::Node | RK::Anycast => connection_id,
+                    RK::Multicast | RK::Broadcast => 0,
                 };
                 let route = Route {
                     kind: ad.kind,
@@ -70,7 +70,7 @@ impl RoutingTable {
 
                 trace!(
                     "Added route for endpoint {} via peer {}",
-                    &ad.endpoint_id, &peer_id
+                    &ad.endpoint_id, &connection_id
                 );
                 routes_to_add.push((ad.endpoint_id.clone(), route));
                 // _ = self.add_route(ad.endpoint_id.clone(), route);
@@ -78,7 +78,7 @@ impl RoutingTable {
                 peer.received_routes.insert(ad);
             }
         } else {
-            trace!("Peer {} not found for AddPeerEndpoints", peer_id);
+            trace!("Peer {} not found for AddPeerEndpoints", connection_id);
         }
         let num_routes = routes_to_add.len();
         if num_routes == 0 {
@@ -119,11 +119,15 @@ impl std::fmt::Debug for RoutingTable {
             })?;
         #[cfg(feature = "remote")]
         self.peers
-            .iter()
-            .try_for_each(|(k, v)| -> std::fmt::Result {
-                writeln!(f, "Peer: {} {:?}", k, v.peer_entry.realm)?;
+            .values()
+            .try_for_each(|peer| -> std::fmt::Result {
+                writeln!(
+                    f,
+                    "Peer: {} {:?}",
+                    peer.connection_id, peer.peer_entry.realm
+                )?;
                 writeln!(f, "Advertised")?;
-                v.advertised_routes.iter().try_for_each(|r| {
+                peer.advertised_routes.iter().try_for_each(|r| {
                     writeln!(
                         f,
                         "-  {} cost {:?} kind {:?}",
@@ -131,7 +135,7 @@ impl std::fmt::Debug for RoutingTable {
                     )
                 })?;
                 writeln!(f, "Received")?;
-                v.received_routes.iter().try_for_each(|r| {
+                peer.received_routes.iter().try_for_each(|r| {
                     writeln!(
                         f,
                         "-  {} cost {:?} kind {:?}",

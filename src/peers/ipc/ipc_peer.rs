@@ -249,7 +249,7 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .send_packet(wire_packet, state_machine.peer.peer_id);
+                    .send_packet(wire_packet, state_machine.peer.connection_id);
             }
             // IpcMessage::BusRider(endpoint_id, items) => {
             //     _ = state_machine
@@ -262,7 +262,7 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .add_peer_endpoints(state_machine.peer.peer_id, ads);
+                    .add_peer_endpoints(state_machine.peer.connection_id, ads);
             }
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
@@ -271,7 +271,7 @@ impl State for IpcMessageReceived {
                 state_machine
                     .peer
                     .handle
-                    .remove_peer_endpoints(state_machine.peer.peer_id, uuids);
+                    .remove_peer_endpoints(state_machine.peer.connection_id, uuids);
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -296,7 +296,7 @@ impl State for ClosePeer {
         state_machine
             .peer
             .handle
-            .unregister_peer(state_machine.peer.peer_id);
+            .unregister_peer(state_machine.peer.connection_id);
         state_machine.ipc_control.close();
         state_machine.peer.rx.close();
         state_machine.stream.close().await.ok();
