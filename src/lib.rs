@@ -32,6 +32,8 @@ pub use anybus::AnyBusConfig;
 pub use anybus::builder::AnyBusBuilder;
 pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
+#[cfg(feature = "dioxus")]
+pub use dioxus::prelude::*;
 pub use errors::ReceiveError;
 pub use handle::Handle;
 pub use handle::RequestHelper;
@@ -40,12 +42,13 @@ pub use messages::AnyBusStatusMsg;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
 pub use receivers::rpc_receiver::RpcRequest;
+pub use routing::Realm;
 #[cfg(feature = "serde")]
-pub use serde::{Deserialize, Serialize};
+pub use serde;
+#[cfg(feature = "tokio")]
+pub use tokio;
 pub use traits::*;
 pub use uuid::Uuid;
-
-pub use routing::Realm;
 
 /// Common Anybus components
 pub mod prelude {
@@ -65,9 +68,5 @@ pub mod prelude {
     pub use crate::anybus_rpc;
     pub use crate::bus_uuid;
     #[cfg(feature = "serde")]
-    pub use crate::{Deserialize, Serialize};
-    #[cfg(feature = "dioxus")]
-    pub use dioxus::prelude::*;
-    #[cfg(feature = "tokio")]
-    pub use tokio;
+    pub use crate::serde::{Deserialize, Serialize};
 }
