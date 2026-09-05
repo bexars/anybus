@@ -27,8 +27,8 @@ use crate::{
 pub(crate) struct Peer {
     pub(crate) peer_id: NodeId,
     pub(crate) our_id: NodeId,
-    pub(crate) rx: mpsc::Receiver<NodeMessage>,
-    pub(crate) handle: Handle,
+    rx_node: mpsc::Receiver<NodeMessage>,
+    handle: Handle,
     pub(crate) realm: Realm,
     pub(crate) connection_id: u16,
     pub(crate) stats: PeerStats,
@@ -39,14 +39,14 @@ impl Peer {
         peer_id: NodeId,
         our_id: NodeId,
         handle: Handle,
-        rx: mpsc::Receiver<NodeMessage>,
+        rx_node: mpsc::Receiver<NodeMessage>,
         realm: Realm,
         connection_id: u16,
     ) -> Self {
         Self {
             peer_id,
             our_id,
-            rx,
+            rx_node,
             handle,
             realm,
             connection_id,
@@ -55,11 +55,15 @@ impl Peer {
     }
 
     pub(crate) async fn recv(&mut self) -> Option<NodeMessage> {
-        let msg = self.rx.recv().await?;
+        let msg = self.rx_node.recv().await?;
         if let NodeMessage::WirePacket(ref packet) = msg {
             self.stats.tx.record(packet);
         }
         Some(msg)
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.rx_node.close();
     }
 
     pub(crate) fn send_packet(&mut self, packet: WirePacket) {
