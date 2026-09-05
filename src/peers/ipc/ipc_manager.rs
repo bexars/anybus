@@ -21,10 +21,10 @@ use crate::{
     AnyBusStatusMsg, Handle, Receiver,
     common::SharedCounter,
     peers::{
-        Peer,
+        common::Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
-    routing::{NodeId, PeerEntry},
+    routing::NodeId,
     spawn,
 };
 
@@ -390,12 +390,11 @@ impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         let connection_id = state.connection_counter.next();
         let (tx, rx) = channel(32);
-        let (node_tx, node_rx) = channel(32);
-        let peer = Peer::new(
+
+        let peer = Peer::register_peer(
             self.peer_id,
             state.our_nodeid,
             state.handle.clone(),
-            node_rx,
             crate::routing::Realm::Userspace, // Always userspace for IPC peers
             connection_id,
         );
@@ -407,15 +406,9 @@ impl State for CreateIpcPeer {
             peer,
             self.peer_is_master,
         );
-        let peer_entry = PeerEntry {
-            peer_tx: node_tx,
-            realm: crate::routing::Realm::Userspace,
-        };
+
         state.peers.write().await.push((self.peer_id, tx));
-        state
-            .handle
-            .register_peer(connection_id, self.peer_id, peer_entry)
-            .await;
+
         _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once
