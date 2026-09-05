@@ -56,7 +56,7 @@ impl<T: BusRider + BusDeserialize + Unpin> Stream for Receiver<T> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        match futures::ready!(std::pin::Pin::new(&mut this.packet_receiver.rx).poll_recv(cx)) {
+        match std::task::ready!(std::pin::Pin::new(&mut this.packet_receiver.rx).poll_recv(cx)) {
             Some(ClientMessage::Message(packet)) => match packet.payload.reveal() {
                 Ok(msg) => std::task::Poll::Ready(Some(msg)),
                 Err(_) => std::task::Poll::Pending,
