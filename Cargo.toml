@@ -122,7 +122,9 @@ wasm_socket_handle = { git="https://github.com/bexars/wasm_socket_handle.git", o
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 # psp = { git = "https://github.com/bexars/psp.git", branch="export_crossbeam", optional= true }
 # powerwatch = { path = "../powermonitor", optional = true }
-powerwatch = { git = "https://github.com/bexars/powerwatch.git", optional = true }
+# powerwatch = { git = "https://github.com/bexars/powerwatch.git", optional = true }
+powerwatch = { version = "0.1.0", optional = true }
+
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = [
