@@ -130,7 +130,7 @@ impl State for WaitForMessages {
                     None  => Some(Box::new(Shutdown {})), // something important crashed, bail out
                 }
             }
-            peer_msg = state_machine.peer.rx.recv() => {
+            peer_msg = state_machine.peer.recv() => {
                 match peer_msg {
                     Some(node_msg) => Some(Box::new(NodeMessageReceived {message: node_msg})),
                     None => Some(Box::new(Shutdown {})),  // something important crashed, bail out
@@ -246,10 +246,7 @@ impl State for IpcMessageReceived {
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
             IpcMessage::Packet(wire_packet) => {
-                state_machine
-                    .peer
-                    .handle
-                    .send_packet(wire_packet, state_machine.peer.connection_id);
+                state_machine.peer.send_packet(wire_packet);
             }
             // IpcMessage::BusRider(endpoint_id, items) => {
             //     _ = state_machine
@@ -298,7 +295,7 @@ impl State for ClosePeer {
             .handle
             .unregister_peer(state_machine.peer.connection_id);
         state_machine.ipc_control.close();
-        state_machine.peer.rx.close();
+        state_machine.peer.close();
         state_machine.stream.close().await.ok();
 
         None
