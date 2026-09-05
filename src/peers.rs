@@ -4,6 +4,7 @@
 mod ipc;
 #[cfg(feature = "ws")]
 pub(crate) mod ws;
+
 use tokio::sync::mpsc::{self};
 #[cfg(feature = "ws_server")]
 pub use ws::WsListenerOptions;
@@ -18,7 +19,7 @@ pub(crate) use ipc::ipc_manager::IpcManager;
 use crate::{
     Handle,
     messages::NodeMessage,
-    routing::{NodeId, Realm},
+    routing::{NodeId, Realm, WirePacket},
 };
 
 #[derive(Debug)]
@@ -30,6 +31,7 @@ pub(crate) struct Peer {
     pub(crate) handle: Handle,
     pub(crate) realm: Realm,
     pub(crate) connection_id: u16,
+    pub(crate) stats: PeerStats,
 }
 
 impl Peer {
@@ -48,6 +50,40 @@ impl Peer {
             handle,
             realm,
             connection_id,
+            stats: PeerStats::default(),
         }
     }
+
+    pub(crate) async fn recv(&mut self) -> Option<NodeMessage> {
+        let msg = self.rx.recv().await?;
+        if let NodeMessage::WirePacket(ref packet) = msg {
+            self.stats.tx.record(packet);
+        }
+        Some(msg)
+    }
+
+    pub(crate) fn send_packet(&mut self, packet: WirePacket) {
+        self.stats.rx.record(&packet);
+
+        self.handle.send_packet(packet, self.connection_id);
+    }
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct PacketByteCounts {
+    bytes: usize,
+    packets: usize,
+}
+
+impl PacketByteCounts {
+    pub(crate) fn record(&mut self, packet: &WirePacket) {
+        self.bytes += packet.payload.len();
+        self.packets += 1;
+    }
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct PeerStats {
+    pub(crate) tx: PacketByteCounts,
+    pub(crate) rx: PacketByteCounts,
 }

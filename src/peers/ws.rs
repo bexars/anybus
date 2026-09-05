@@ -27,6 +27,7 @@ use crate::{
 
 pub(super) mod ws_manager;
 mod ws_peer;
+// mod ws_peer;
 
 #[cfg(not(target_family = "wasm"))]
 mod tg_websock;
@@ -83,6 +84,8 @@ pub(crate) enum WsMessage {
     CloseConnection,
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
+    Ping(u64),
+    Pong(u64),
 }
 
 impl From<WsMessage> for Vec<u8> {
@@ -122,6 +125,7 @@ pub struct WsRemoteOptions {
 
 #[derive(Debug)]
 enum StreamDirection {
+    #[cfg(feature = "ws_server")]
     Inbound,
     Outbound(WebSocketPeerConfig),
 }
@@ -135,6 +139,7 @@ impl From<&WebSocketPeerConfig> for StreamDirection {
 impl Display for StreamDirection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "ws_server")]
             StreamDirection::Inbound => write!(f, "Inbound"),
             StreamDirection::Outbound(peer) => write!(f, "Outbound({})", peer),
         }
@@ -144,6 +149,7 @@ impl Display for StreamDirection {
 impl PartialEq<WebSocketPeerConfig> for StreamDirection {
     fn eq(&self, other: &WebSocketPeerConfig) -> bool {
         match self {
+            #[cfg(feature = "ws_server")]
             StreamDirection::Inbound => false,
             StreamDirection::Outbound(config) => config == other,
         }
@@ -153,6 +159,7 @@ impl PartialEq<WebSocketPeerConfig> for StreamDirection {
 impl PartialEq<StreamDirection> for WebSocketPeerConfig {
     fn eq(&self, other: &StreamDirection) -> bool {
         match other {
+            #[cfg(feature = "ws_server")]
             StreamDirection::Inbound => false,
             StreamDirection::Outbound(config) => self == config,
         }
@@ -162,6 +169,7 @@ impl PartialEq<StreamDirection> for WebSocketPeerConfig {
 impl PartialEq<StreamDirection> for WsUrl {
     fn eq(&self, other: &StreamDirection) -> bool {
         match other {
+            #[cfg(feature = "ws_server")]
             StreamDirection::Inbound => false,
             StreamDirection::Outbound(config) => self == &config.url,
         }
@@ -171,6 +179,7 @@ impl PartialEq<StreamDirection> for WsUrl {
 impl PartialEq<WsUrl> for StreamDirection {
     fn eq(&self, other: &WsUrl) -> bool {
         match self {
+            #[cfg(feature = "ws_server")]
             StreamDirection::Inbound => false,
             StreamDirection::Outbound(config) => &config.url == other,
         }
