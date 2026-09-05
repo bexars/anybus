@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) enum BrokerMsg {
+pub(crate) enum RouterMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]

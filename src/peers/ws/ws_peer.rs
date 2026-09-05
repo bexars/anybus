@@ -5,13 +5,11 @@ use tokio_with_wasm::alias as tokio;
 use tracing::{debug, error, trace};
 use web_time::Instant;
 
+use crate::peers::common::{Heartbeat, Peer};
 // use crate::peers::ws::ws_peer::InMessage;
 use crate::{
     messages::NodeMessage,
-    peers::{
-        Peer,
-        ws::{WebSockStream, WsCommand, WsControl, WsMessage},
-    },
+    peers::ws::{WebSockStream, WsCommand, WsControl, WsMessage},
     routing::{Advertisement, NodeId, WirePacket},
 };
 
@@ -65,67 +63,6 @@ enum CloseReason {
     Remote,
     /// Socket is already dead. Do not touch it.
     Transport,
-}
-
-struct Heartbeat {
-    interval: Duration,
-    timeout: Duration,
-    last_rx: Instant,
-    last_ping: Option<Instant>,
-    outstanding: Option<u64>,
-    next_token: u64,
-}
-
-impl Heartbeat {
-    fn new(now: Instant, interval: Duration, timeout: Duration) -> Self {
-        Self {
-            interval,
-            timeout,
-            last_rx: now,
-            last_ping: None,
-            outstanding: None,
-            next_token: 1,
-        }
-    }
-
-    fn on_rx(&mut self, now: Instant) {
-        self.last_rx = now;
-        self.last_ping = None;
-        self.outstanding = None;
-    }
-
-    /// When the driver should next call `Tick`.
-    ///
-    /// The clock is `interval` (next poke). `timeout` is only a silence
-    /// limit, but we still wake by then so we do not oversleep it.
-    fn next_deadline(&self) -> Instant {
-        let poke_at = match self.last_ping {
-            Some(sent) => sent + self.interval,
-            None => self.last_rx + self.interval,
-        };
-        let die_at = self.last_rx + self.timeout;
-        poke_at.min(die_at)
-    }
-
-    fn timed_out(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.last_rx) >= self.timeout
-    }
-
-    fn ping_due(&self, now: Instant) -> bool {
-        let due = match self.last_ping {
-            Some(sent) => sent + self.interval,
-            None => self.last_rx + self.interval,
-        };
-        now >= due
-    }
-
-    fn take_ping_token(&mut self, now: Instant) -> u64 {
-        let token = self.next_token;
-        self.next_token = self.next_token.wrapping_add(1);
-        self.last_ping = Some(now);
-        self.outstanding = Some(token);
-        token
-    }
 }
 
 struct WsPeer {
@@ -376,11 +313,11 @@ async fn apply_effect(
             Ok(())
         }
         Effect::AddEndpoints(ads) => {
-            peer.handle.add_peer_endpoints(peer.connection_id, ads);
+            peer.add_endpoints(ads);
             Ok(())
         }
         Effect::RemoveEndpoints(ads) => {
-            peer.handle.remove_peer_endpoints(peer.connection_id, ads);
+            peer.remove_endpoints(ads);
             Ok(())
         }
         Effect::Forward(pkt) => {
@@ -388,7 +325,7 @@ async fn apply_effect(
             Ok(())
         }
         Effect::Unregister => {
-            peer.handle.unregister_peer(peer.connection_id);
+            peer.unregister();
             Ok(())
         }
         Effect::NotifyPeerClosed => tx_command

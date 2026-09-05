@@ -11,17 +11,16 @@ use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 use crate::messages::AnyBusStatusMsg;
 
-use crate::messages::{BrokerMsg, ClientMessage};
+use crate::messages::{ClientMessage, RouterMsg};
 use crate::receivers::Receiver;
 
 use crate::receivers::RpcReceiver;
 use crate::routing::Address;
 #[cfg(feature = "remote")]
-use crate::routing::PeerEntry;
 use crate::routing::Realm;
-use crate::routing::router::RoutesWatchRx;
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeId, WirePacket};
+use crate::routing::WirePacket;
+use crate::routing::router::RoutesWatchRx;
 use crate::routing::{EndpointId, Packet, Payload, Route};
 
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
@@ -29,7 +28,7 @@ use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 /// The handle for talking to the [AnyBus] instance that created it.  It can be cloned freely
 #[derive(Debug, Clone)]
 pub struct Handle {
-    pub(crate) tx: mpsc::Sender<BrokerMsg>,
+    pub(crate) tx: mpsc::Sender<RouterMsg>,
     pub(crate) route_watch_rx: RoutesWatchRx,
 }
 
@@ -37,7 +36,7 @@ impl Handle {
     pub(crate) fn shutdown(&self) {
         info!("Router shutting down");
         let _ = self.send(AnyBusStatusMsg::ShuttingDown);
-        self.tx.try_send(BrokerMsg::Shutdown).ok();
+        self.tx.try_send(RouterMsg::Shutdown).ok();
     }
 
     /// Convenience function to register_broadcast::<AnyBusStatusMsg>
@@ -91,7 +90,7 @@ impl Handle {
             learned_from: 0,
         };
 
-        let register_msg = BrokerMsg::RegisterRoute(endpoint_id, route);
+        let register_msg = RouterMsg::RegisterRoute(endpoint_id, route);
         self.tx.send(register_msg).await?;
         info!("Sent register_msg");
         self.wait_for_registration(&mut rx, endpoint_id).await?;
@@ -126,7 +125,7 @@ impl Handle {
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        let register_msg = BrokerMsg::RegisterRoute(
+        let register_msg = RouterMsg::RegisterRoute(
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
@@ -170,7 +169,7 @@ impl Handle {
 
         // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
 
-        let register_msg = BrokerMsg::RegisterRoute(
+        let register_msg = RouterMsg::RegisterRoute(
             endpoint_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
@@ -215,7 +214,7 @@ impl Handle {
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        let broadcast_msg = BrokerMsg::RegisterRoute(
+        let broadcast_msg = RouterMsg::RegisterRoute(
             broadcast_id,
             Route {
                 kind: crate::routing::RouteKind::Broadcast,
@@ -261,7 +260,7 @@ impl Handle {
         // let broadcast_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let local_id = EndpointId::new();
-        let register_msg = BrokerMsg::RegisterRoute(
+        let register_msg = RouterMsg::RegisterRoute(
             local_id,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
@@ -278,7 +277,7 @@ impl Handle {
         self.tx.send(register_msg).await?;
         self.wait_for_registration(&mut rx, local_id).await?;
 
-        let broadcast_msg = BrokerMsg::RegisterRoute(
+        let broadcast_msg = RouterMsg::RegisterRoute(
             broadcast_id,
             Route {
                 kind: crate::routing::RouteKind::Multicast,
@@ -311,7 +310,7 @@ impl Handle {
 
         match registration_response {
             ClientMessage::Message(_packet) => {
-                _ = self.tx.send(BrokerMsg::DeadLink(endpoint_id));
+                _ = self.tx.send(RouterMsg::DeadLink(endpoint_id));
                 Err(ReceiveError::RegistrationFailed(
                     "Bad response from Bus".into(),
                 ))
@@ -391,7 +390,7 @@ impl Handle {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        let register_msg = BrokerMsg::RegisterRoute(
+        let register_msg = RouterMsg::RegisterRoute(
             response_uuid,
             Route {
                 kind: crate::routing::RouteKind::Unicast,
@@ -436,58 +435,13 @@ impl Handle {
         helper.request(payload).await
     }
 
-    #[cfg(feature = "remote")]
-    pub(crate) fn add_peer_endpoints(&self, connection_id: u16, ads: HashSet<Advertisement>) {
-        self.tx
-            .try_send(BrokerMsg::AddPeerEndpoints(connection_id, ads))
-            .ok();
-    }
-    #[cfg(feature = "remote")]
-    pub(crate) fn remove_peer_endpoints(
-        &self,
-        connection_id: u16,
-        deletes: HashSet<Advertisement>,
-    ) {
-        self.tx
-            .try_send(BrokerMsg::RemovePeerEndpoints(connection_id, deletes))
-            .ok();
-    }
-
-    #[cfg(feature = "remote")]
-    pub(crate) async fn register_peer(
-        &self,
-        connection_id: u16,
-        node_id: NodeId,
-        peer_entry: PeerEntry,
-        // tx: UnboundedSender<NodeMessage>,
-        // realm: Realm,
-    ) {
-        use tracing::debug;
-
-        match self
-            .tx
-            .send(BrokerMsg::RegisterPeer(node_id, connection_id, peer_entry))
-            .await
-        {
-            Ok(_) => {}
-            Err(e) => debug!("Error sending RegisterPeer packet: {:?}", e),
-        }
-    }
-
-    #[cfg(feature = "remote")]
-    pub(crate) fn unregister_peer(&self, connection_id: u16) {
-        self.tx
-            .try_send(BrokerMsg::UnRegisterPeer(connection_id))
-            .ok();
-    }
-
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
-        self.tx.try_send(BrokerMsg::DeadLink(endpoint_id)).ok();
+        self.tx.try_send(RouterMsg::DeadLink(endpoint_id)).ok();
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn send_broker_msg(&self, msg: BrokerMsg) -> Option<()> {
-        self.tx.send(msg).await.ok()
+    /// Allows internal communication to the Router
+    pub(crate) fn send_broker(&self, msg: RouterMsg) {
+        self.tx.try_send(msg).ok();
     }
 
     /// Start building a registration with the builder pattern

@@ -22,13 +22,13 @@ use crate::{
     anybus::config::WebSocketPeerConfig,
     common::SharedCounter,
     peers::{
-        Peer,
+        common::Peer,
         ws::{
             self, StreamDirection, WebSockStream, WsActivePeer, WsCommand, WsError, WsMessage,
             WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
-    routing::{NodeId, PeerEntry, Realm},
+    routing::{NodeId, Realm},
     spawn,
 };
 
@@ -320,22 +320,14 @@ impl WebsocketManager {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
                 let connection_id = self.connection_counter.next();
-                let (tx_nodemessage, rx) = tokio::sync::mpsc::channel(32);
-                let peer = Peer::new(
+                let peer = Peer::register_peer(
                     peer_id,
                     self.node_id,
                     self.handle.clone(),
-                    rx,
                     Realm::Global, // WebSocket peers are always in the global realm
                     connection_id,
                 );
-                let peer_entry = PeerEntry {
-                    peer_tx: tx_nodemessage,
-                    realm: Realm::Global,
-                };
-                self.handle
-                    .register_peer(connection_id, peer_id, peer_entry)
-                    .await;
+
                 let (tx, rx) = tokio::sync::mpsc::channel(32);
                 spawn(ws::ws_peer::run_ws_peer(
                     stream,

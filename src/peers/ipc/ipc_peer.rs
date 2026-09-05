@@ -17,7 +17,7 @@ use tracing::{debug, error, info};
 use crate::{
     messages::NodeMessage,
     peers::{
-        Peer,
+        common::Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
     },
     routing::NodeId,
@@ -256,19 +256,13 @@ impl State for IpcMessageReceived {
             // }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
             IpcMessage::Advertise(ads) => {
-                state_machine
-                    .peer
-                    .handle
-                    .add_peer_endpoints(state_machine.peer.connection_id, ads);
+                state_machine.peer.add_endpoints(ads);
             }
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
             }
             IpcMessage::Withdraw(uuids) => {
-                state_machine
-                    .peer
-                    .handle
-                    .remove_peer_endpoints(state_machine.peer.connection_id, uuids);
+                state_machine.peer.remove_endpoints(uuids);
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -290,10 +284,7 @@ impl State for ClosePeer {
             ))
             .await
             .ok();
-        state_machine
-            .peer
-            .handle
-            .unregister_peer(state_machine.peer.connection_id);
+        state_machine.peer.unregister();
         state_machine.ipc_control.close();
         state_machine.peer.close();
         state_machine.stream.close().await.ok();

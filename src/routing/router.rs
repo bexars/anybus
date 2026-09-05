@@ -19,7 +19,7 @@ use tokio::{
 use tracing::{info, trace};
 
 use crate::{
-    messages::{BrokerMsg, ClientMessage},
+    messages::{RouterMsg, ClientMessage},
     routing::{
         Address, EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable,
     },
@@ -34,7 +34,7 @@ pub(crate) struct Router {
     routes_watch_tx: Sender<ForwardingTable>,
     #[allow(dead_code)]
     anybus_id: NodeId,
-    broker_rx: mpsc::Receiver<BrokerMsg>,
+    broker_rx: mpsc::Receiver<RouterMsg>,
     handle: Handle,
 }
 
@@ -232,7 +232,7 @@ impl Router {
 enum State {
     Start,
     Listen,
-    HandleBrokerMsg(BrokerMsg),
+    HandleBrokerMsg(RouterMsg),
     RegisterRoute(EndpointId, Route),
     RouteChange, // Notify peers of route changes
     Shutdown,
@@ -275,10 +275,10 @@ impl State {
                 match broker_msg {
                     // BrokerMsg::RegisterAnycast(uuid, unbounded_sender) => todo!(),
                     // BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => todo!(),
-                    BrokerMsg::RegisterRoute(endpoint_id, route) => {
+                    RouterMsg::RegisterRoute(endpoint_id, route) => {
                         return Some(RegisterRoute(endpoint_id, route));
                     }
-                    BrokerMsg::DeadLink(endpoint_id) => {
+                    RouterMsg::DeadLink(endpoint_id) => {
                         let mut changed = false;
                         let mut delete_route = false;
                         let route_entry = router.route_table.table.get_mut(&endpoint_id);
@@ -315,7 +315,7 @@ impl State {
                         }
                     }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::RegisterPeer(peer_id, connection_id, peer_entry) => {
+                    RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry) => {
                         if router
                             .route_table
                             .peers
@@ -341,7 +341,7 @@ impl State {
                         return Some(RouteChange);
                     }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::UnRegisterPeer(connection_id) => {
+                    RouterMsg::UnRegisterPeer(connection_id) => {
                         router.route_table.table.retain(|_, route_entry| {
                             route_entry
                                 .routes
@@ -355,7 +355,7 @@ impl State {
                         return Some(RouteChange);
                     }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::AddPeerEndpoints(peer_id, hash_set) => {
+                    RouterMsg::AddPeerEndpoints(peer_id, hash_set) => {
                         match router.route_table.add_peer_endpoints(peer_id, hash_set) {
                             Some(count) => {
                                 trace!("Added {} routes from peer {}", count, peer_id);
@@ -410,7 +410,7 @@ impl State {
                     //     return Some(Listen);
                     // }
                     #[cfg(feature = "remote")]
-                    BrokerMsg::RemovePeerEndpoints(connection_id, advertisements) => {
+                    RouterMsg::RemovePeerEndpoints(connection_id, advertisements) => {
                         if let Some(peer_info) = router
                             .route_table
                             .peers
@@ -446,7 +446,7 @@ impl State {
                             Some(Listen)
                         }
                     }
-                    BrokerMsg::Shutdown => {
+                    RouterMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);
                     }
