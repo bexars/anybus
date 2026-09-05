@@ -275,6 +275,8 @@ impl WebsocketManager {
                 if let Some(pos) = self.current_peers.iter().position(|p| p.peer_id == uuid) {
                     let closed_peer = self.current_peers.remove(pos);
                     // if url == closed_peer.peer_config {
+
+                    #[cfg_attr(not(feature = "ws_server"), allow(irrefutable_let_patterns))]
                     if let StreamDirection::Outbound(ref config) = closed_peer.direction {
                         debug!(
                             "Scheduling reconnect to remote WebSocket peer at {}",
@@ -401,7 +403,7 @@ impl WebsocketManager {
         trace!("Connecting to: {}", ws_pending_peer.config);
 
         #[cfg(target_family = "wasm")]
-        let attempt = WsHandle::new(ws_pending_peer.url.as_str()).await;
+        let attempt = WsHandle::new(&ws_pending_peer.config.url.to_string()).await;
         // #[cfg(not(target_family = "wasm"))]
         // if let Some(domain) = ws_pending_peer.url.domain() {
         //     let ip = tokio::net::lookup_host(domain).await;
@@ -429,7 +431,7 @@ impl WebsocketManager {
                     let stream = ws_stream;
                     ManagerState::NewWsStream {
                         stream: stream.into(),
-                        pending: Some(ws_pending_peer),
+                        direction: StreamDirection::Outbound(ws_pending_peer.config),
                     }
                 }
             }

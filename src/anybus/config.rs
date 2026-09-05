@@ -1,7 +1,9 @@
 //! Module to interact with a standard anybus TOML config file
 //!
 
-use std::{collections::HashMap, fmt::Display, net::IpAddr};
+#[cfg(feature = "ws_server")]
+use std::net::IpAddr;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::AnyBusBuilder;
 use serde::{Deserialize, Deserializer};
@@ -56,6 +58,7 @@ impl From<AnyBusBuilder> for AnyBusConfig {
             );
         }
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             enable_ctrlc_shutdown: builder.enable_ctrlc_shutdown,
             #[cfg(feature = "ipc")]
             ipc: Some(IpcConfig {
@@ -77,6 +80,7 @@ impl From<AnyBusBuilder> for AnyBusConfig {
     }
 }
 
+#[cfg(feature = "ipc")]
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct IpcConfig {
     #[serde(default)]
@@ -145,14 +149,17 @@ pub(crate) struct WebSocketServerConfig {
     pub(crate) enable_tls: bool,
 }
 
+#[cfg(feature = "ws_server")]
 fn default_ipv6_any() -> IpAddr {
     "::".parse().unwrap()
 }
 
+#[cfg(feature = "ws_server")]
 fn default_port() -> u16 {
     9798
 }
 
+#[cfg(feature = "ws_server")]
 fn default_true() -> bool {
     true
 }
