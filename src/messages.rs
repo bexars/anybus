@@ -63,8 +63,7 @@ impl BusRiderWithUuid for AnyBusStatusMsg {
 #[derive(Debug)]
 pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
-    Close,
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
-    // BusRider(EndpointId, Vec<u8>),
+
 }

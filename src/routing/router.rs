@@ -526,9 +526,7 @@ impl State {
             Shutdown => {
                 info!("Shutting down");
                 #[cfg(feature = "remote")]
-                for peer in router.route_table.peers.values() {
-                    peer.peer_entry.peer_tx.send(NodeMessage::Close).await.ok();
-                }
+                router.route_table.peers.clear();
                 router
                     .route_table
                     .table
