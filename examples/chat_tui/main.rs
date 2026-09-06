@@ -255,7 +255,7 @@ impl App {
         match action {
             Action::Quit => {
                 self.should_quit = true;
-                self.bus.shutdown();
+                self.bus.shutdown(None);
                 None
             }
             Action::ProcessInput => {

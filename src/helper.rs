@@ -41,7 +41,9 @@ where
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn watch_ctrlc(handle: crate::Handle) {
     if let Ok(_) = tokio::signal::ctrl_c().await {
+        use std::time::Duration;
+
         println!("Ctrl-C received.  Shutting down");
-        handle.shutdown();
+        handle.shutdown(Some(Duration::from_secs(1)));
     }
 }

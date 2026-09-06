@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 use tokio::sync::mpsc;
 // use tokio_with_wasm::alias as tokio;
 
@@ -33,9 +34,12 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn shutdown(&self, delay: Option<Duration>) {
         info!("Router shutting down");
-        let _ = self.send(AnyBusStatusMsg::ShuttingDown);
+        self.send(AnyBusStatusMsg::ShuttingDown).ok();
+        if let Some(delay) = delay {
+            std::thread::sleep(delay)
+        };
         self.tx.try_send(RouterMsg::Shutdown).ok();
     }
 

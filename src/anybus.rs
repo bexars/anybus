@@ -3,6 +3,8 @@ pub(crate) mod config;
 #[cfg(feature = "resume_watch")]
 pub(crate) mod watcher;
 
+use std::time::Duration;
+
 pub use config::AnyBusConfig;
 
 // use uuid::Uuid;
@@ -78,12 +80,12 @@ impl AnyBus {
         AnyBus::init_from_config(config)
     }
 
-    /// Passes the shutdown command to the AnyBus system and all local listeners.  Immediately withdraws all advertisements from the network.
+    /// Passes the shutdown command to the AnyBus system and all local listeners.  
+    /// If optional delay is set, an AnyBusStatusMsg::Shutdown will be sent immediately, with peers and routing 
+    /// actually closed after the indicated delay.
     ///
-    /// If the program is killed by other means it can take up to 40 seconds for other systems to forget the advertisements from this AnyBus
-    ///
-    pub fn shutdown(&mut self) {
-        self.handle.shutdown();
+    pub fn shutdown(&mut self, delay: Option<Duration>) {
+        self.handle.shutdown(delay);
     }
 
     /// Returns a Handle for clients to interact with the AnyBus system.

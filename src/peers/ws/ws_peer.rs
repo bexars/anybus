@@ -167,8 +167,6 @@ impl WsPeer {
             Event::FromNode(NodeMessage::Withdraw(ads)) => {
                 self.emit(Effect::Send(WsMessage::Withdraw(ads)));
             }
-            Event::FromNode(NodeMessage::Close) => self.close(CloseReason::Local),
-
             Event::TransportDead => self.close(CloseReason::Transport),
             Event::UnknownWire => debug!("unknown websocket frame"),
             Event::Tick(now) => self.on_tick(now),
@@ -221,12 +219,14 @@ impl WsPeer {
             }
             CloseReason::Remote => {
                 self.emit(Effect::CloseSocket);
+                self.emit(Effect::NotifyPeerClosed);
             }
-            CloseReason::Transport => {}
+            CloseReason::Transport => {
+                self.emit(Effect::NotifyPeerClosed);
+            }
         }
 
         self.emit(Effect::Unregister);
-        self.emit(Effect::NotifyPeerClosed);
         self.phase = Phase::Closing;
     }
 }

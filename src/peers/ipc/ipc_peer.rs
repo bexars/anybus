@@ -185,13 +185,7 @@ impl State for NodeMessageReceived {
                     Ok(()) => Some(Box::new(WaitForMessages {})),
                     Err(e) => b(HandleError { error: e.into() }),
                 }
-            }
-            NodeMessage::Close => {
-                match state_machine.stream.send(IpcMessage::CloseConnection).await {
-                    Ok(()) => Some(Box::new(ClosePeer {})),
-                    Err(e) => b(HandleError { error: e.into() }),
-                }
-            }
+            } 
         }
     }
 }

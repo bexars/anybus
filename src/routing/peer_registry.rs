@@ -12,6 +12,12 @@ pub(crate) struct PeerRegistry {
 }
 
 impl PeerRegistry {
+    pub fn clear(&mut self) {
+        self.by_node_id.clear();
+        self.by_connection_id.clear();
+        self.peers.clear();
+    }
+
     pub fn insert(&mut self, peer: PeerInfo) {
         let index = self.peers.len();
         self.by_node_id.insert(peer.peer_id, index);
