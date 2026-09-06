@@ -1,6 +1,8 @@
 #[cfg(feature = "remote")]
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
 use crate::{
@@ -60,10 +62,9 @@ impl BusRiderWithUuid for AnyBusStatusMsg {
 
 #[cfg(feature = "remote")]
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
-
 }

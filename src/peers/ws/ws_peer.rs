@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, sync::mpsc};
 use tokio_with_wasm::alias as tokio;
@@ -10,7 +10,7 @@ use crate::peers::common::{Heartbeat, Peer};
 use crate::{
     messages::NodeMessage,
     peers::ws::{WebSockStream, WsCommand, WsControl, WsMessage},
-    routing::{Advertisement, NodeId, WirePacket},
+    routing::NodeId,
 };
 
 const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
@@ -41,9 +41,7 @@ enum Event {
 enum Effect {
     Send(WsMessage),
     CloseSocket,
-    AddEndpoints(HashSet<Advertisement>),
-    RemoveEndpoints(HashSet<Advertisement>),
-    Forward(WirePacket),
+    HandleNodeMessage(NodeMessage),
     Unregister,
     NotifyPeerClosed,
 }
@@ -158,18 +156,21 @@ impl WsPeer {
 
             Event::FromWire(msg) => self.on_wire(msg),
 
-            Event::FromNode(NodeMessage::WirePacket(pkt)) => {
-                self.emit(Effect::Send(WsMessage::Packet(pkt)));
-            }
-            Event::FromNode(NodeMessage::Advertise(ads)) => {
-                self.emit(Effect::Send(WsMessage::Advertise(ads)));
-            }
-            Event::FromNode(NodeMessage::Withdraw(ads)) => {
-                self.emit(Effect::Send(WsMessage::Withdraw(ads)));
-            }
+            // Event::FromNode(NodeMessage::WirePacket(pkt)) => {
+            //     self.emit(Effect::Send(WsMessage::Packet(pkt)));
+            // }
+            // Event::FromNode(NodeMessage::Advertise(ads)) => {
+            //     self.emit(Effect::Send(WsMessage::Advertise(ads)));
+            // }
+            // Event::FromNode(NodeMessage::Withdraw(ads)) => {
+            //     self.emit(Effect::Send(WsMessage::Withdraw(ads)));
+            // }
             Event::TransportDead => self.close(CloseReason::Transport),
             Event::UnknownWire => debug!("unknown websocket frame"),
             Event::Tick(now) => self.on_tick(now),
+            Event::FromNode(node_message) => {
+                self.emit(Effect::Send(WsMessage::NodeMsg(node_message)))
+            }
         }
     }
 
@@ -182,13 +183,12 @@ impl WsPeer {
                 self.close(CloseReason::Local);
             }
             WsMessage::CloseConnection => self.close(CloseReason::Remote),
-            WsMessage::Packet(pkt) => self.emit(Effect::Forward(pkt)),
-            WsMessage::Advertise(ads) => self.emit(Effect::AddEndpoints(ads)),
-            WsMessage::Withdraw(ads) => self.emit(Effect::RemoveEndpoints(ads)),
+
             WsMessage::Ping(token) => self.emit(Effect::Send(WsMessage::Pong(token))),
             WsMessage::Pong(_token) => {
                 // Any inbound already reset silence in on_rx.
             }
+            WsMessage::NodeMsg(node_message) => self.emit(Effect::HandleNodeMessage(node_message)),
         }
     }
 
@@ -312,18 +312,7 @@ async fn apply_effect(
             let _ = stream.close_conn().await;
             Ok(())
         }
-        Effect::AddEndpoints(ads) => {
-            peer.add_endpoints(ads);
-            Ok(())
-        }
-        Effect::RemoveEndpoints(ads) => {
-            peer.remove_endpoints(ads);
-            Ok(())
-        }
-        Effect::Forward(pkt) => {
-            peer.send_packet(pkt);
-            Ok(())
-        }
+
         Effect::Unregister => {
             peer.unregister();
             Ok(())
@@ -334,5 +323,9 @@ async fn apply_effect(
             .map_err(|e| {
                 error!("Failed to send WsCommand: {e}");
             }),
+        Effect::HandleNodeMessage(node_message) => {
+            peer.handle_node_message(node_message);
+            Ok(())
+        }
     }
 }

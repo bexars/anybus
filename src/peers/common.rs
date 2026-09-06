@@ -124,7 +124,7 @@ impl Peer {
         Some(msg)
     }
 
-    pub(crate) fn add_endpoints(&mut self, ads: HashSet<Advertisement>) {
+    fn add_endpoints(&mut self, ads: HashSet<Advertisement>) {
         self.handle
             .send_broker(crate::messages::RouterMsg::AddPeerEndpoints(
                 self.connection_id,
@@ -132,7 +132,7 @@ impl Peer {
             ));
     }
 
-    pub(crate) fn remove_endpoints(&mut self, ads: HashSet<Advertisement>) {
+    fn remove_endpoints(&mut self, ads: HashSet<Advertisement>) {
         self.handle
             .send_broker(crate::messages::RouterMsg::RemovePeerEndpoints(
                 self.connection_id,
@@ -155,6 +155,14 @@ impl Peer {
         self.stats.rx.record(&packet);
 
         self.handle.send_packet(packet, self.connection_id);
+    }
+
+    pub(crate) fn handle_node_message(&mut self, node_message: NodeMessage) {
+        match node_message {
+            NodeMessage::WirePacket(packet) => self.send_packet(packet),
+            NodeMessage::Advertise(hash_set) => self.add_endpoints(hash_set),
+            NodeMessage::Withdraw(hash_set) => self.remove_endpoints(hash_set),
+        }
     }
 }
 
