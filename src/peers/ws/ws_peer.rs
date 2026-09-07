@@ -6,6 +6,7 @@ use tracing::{debug, error, trace};
 use web_time::Instant;
 
 use crate::peers::common::{Heartbeat, Peer};
+use crate::routing::ConnectionId;
 // use crate::peers::ws::ws_peer::InMessage;
 use crate::{
     messages::NodeMessage,
@@ -73,7 +74,7 @@ struct WsPeer {
 }
 
 impl WsPeer {
-    fn new(connection_id: u16, our_id: NodeId, peer_id: NodeId) -> Self {
+    fn new(connection_id: ConnectionId, our_id: NodeId, peer_id: NodeId) -> Self {
         Self::new_with_heartbeat(
             connection_id,
             our_id,
@@ -85,7 +86,7 @@ impl WsPeer {
     }
 
     fn new_with_heartbeat(
-        connection_id: u16,
+        connection_id: ConnectionId,
         our_id: NodeId,
         peer_id: NodeId,
         now: Instant,
@@ -95,7 +96,7 @@ impl WsPeer {
         trace!(
             %our_id,
             %peer_id,
-            connection_id,
+            ?connection_id,
             ?interval,
             ?timeout,
             "Creating new WsPeer"

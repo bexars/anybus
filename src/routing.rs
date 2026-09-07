@@ -1,8 +1,12 @@
+#[cfg(feature = "remote")]
+mod linkstate;
 pub(crate) mod peer_registry;
 pub(crate) mod router;
 pub(crate) mod routing_table;
 // use tokio_with_wasm::alias as tokio;
 
+#[cfg(feature = "remote")]
+pub(crate) use linkstate::{Link, LsDb, Lsa, LsaKey};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "remote")]
@@ -12,6 +16,10 @@ use std::{
     collections::HashSet,
     fmt::{Debug, Display},
     ops::Deref,
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
 };
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, error::TrySendError};
@@ -46,6 +54,12 @@ impl From<Uuid> for NodeId {
 
 impl From<&NodeId> for Uuid {
     fn from(value: &NodeId) -> Self {
+        value.0
+    }
+}
+
+impl From<NodeId> for Uuid {
+    fn from(value: NodeId) -> Self {
         value.0
     }
 }
@@ -142,7 +156,7 @@ pub(crate) struct ForwardingTable {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
     #[cfg(feature = "remote")]
-    peers: HashMap<u16, PeerEntry>,
+    peers: HashMap<ConnectionId, PeerEntry>,
 }
 
 impl Debug for ForwardingTable {
@@ -208,7 +222,7 @@ impl ForwardingTable {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn forward(&self, packet: WirePacket, from_connection: u16) {
+    pub(crate) fn forward(&self, packet: WirePacket, from_connection: ConnectionId) {
         let reverse_route = packet.from.map(|f| self.lookup(&f)).flatten();
         if reverse_route.is_none() {
             trace!("No reverse route for {:?}", packet);
@@ -372,7 +386,7 @@ impl From<&RoutingTable> for ForwardingTable {
 pub(crate) enum ForwardTo {
     Local(Sender<ClientMessage>),
     #[cfg(feature = "remote")]
-    Remote(Sender<NodeMessage>, u16),
+    Remote(Sender<NodeMessage>, ConnectionId),
     Broadcast(Vec<Sender<ClientMessage>>, Realm),
     Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
 }
@@ -534,18 +548,18 @@ impl From<Box<dyn Any>> for Payload {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Advertisement {
     pub(crate) kind: RouteKind,
-    pub(crate) cost: u16,
+    pub(crate) cost: Cost,
     pub(crate) endpoint_id: EndpointId,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Route {
     pub(crate) via: ForwardTo,
-    pub(crate) cost: u16,
+    pub(crate) cost: Cost,
     #[cfg(feature = "remote")]
     pub(crate) realm: Realm,
     #[cfg(feature = "remote")]
-    pub(crate) learned_from: u16, // (0 for local)
+    pub(crate) learned_from: ConnectionId, // (0 for local)
     pub(crate) kind: RouteKind,
 }
 
@@ -640,4 +654,84 @@ pub(super) enum RouteTableError {
     DifferentRouteKind(RouteKind),
     #[error("Unicast route already exists")]
     UnicastRouteExists,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct Cost(u16);
+
+impl std::ops::Add for Cost {
+    type Output = Cost;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Cost(self.0.saturating_add(rhs.0))
+    }
+}
+
+// impl std::ops::AddAssign for Cost {
+//     fn add_assign(&mut self, rhs: Self) {
+//         self.0 += rhs.0;
+//     }
+// }
+
+impl std::ops::Add<u16> for Cost {
+    type Output = Cost;
+
+    fn add(self, rhs: u16) -> Self::Output {
+        Cost(self.0.saturating_add(rhs))
+    }
+}
+
+impl std::ops::AddAssign<u16> for Cost {
+    fn add_assign(&mut self, rhs: u16) {
+        self.0 += rhs;
+    }
+}
+
+impl From<u16> for Cost {
+    fn from(value: u16) -> Self {
+        Cost(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct ConnectionId(u16);
+impl From<u16> for ConnectionId {
+    fn from(value: u16) -> Self {
+        ConnectionId(value)
+    }
+}
+
+impl Display for ConnectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ConnectionIdCounter {
+    // Arc allows multiple tasks to own a reference to this same memory
+    current: Arc<AtomicU16>,
+}
+
+impl std::fmt::Debug for ConnectionIdCounter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SharedCounter {{ current: {} }}",
+            self.current.load(Ordering::SeqCst)
+        )
+    }
+}
+
+impl ConnectionIdCounter {
+    pub(crate) fn new() -> Self {
+        ConnectionIdCounter {
+            current: Arc::new(AtomicU16::new(1)),
+        }
+    }
+
+    pub(crate) fn next(&self) -> ConnectionId {
+        // Fetch the current value and increment it by 1 atomically
+        self.current.fetch_add(1, Ordering::SeqCst).into()
+    }
 }

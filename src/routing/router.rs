@@ -5,9 +5,14 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeMessage, PeerEntry, Realm, peer_registry::PeerRegistry};
+use crate::routing::{
+    Advertisement, ConnectionId, NodeMessage, PeerEntry, Realm, peer_registry::PeerRegistry,
+};
 
-use crate::{Handle, routing::RouteKind};
+use crate::{
+    Handle,
+    routing::{LsDb, RouteKind},
+};
 
 use tokio::{
     select,
@@ -36,10 +41,11 @@ pub(crate) struct Router {
     anybus_id: NodeId,
     broker_rx: mpsc::Receiver<RouterMsg>,
     handle: Handle,
+    lsadb: LsDb,
 }
 
 impl Router {
-    pub(crate) fn new(uuid: NodeId) -> Self {
+    pub(crate) fn new(node_id: NodeId) -> Self {
         let forward_table = ForwardingTable::default();
         let (tx, rx) = watch::channel(forward_table.clone());
 
@@ -52,14 +58,15 @@ impl Router {
         Self {
             forward_table,
             routes_watch_tx: tx,
-            anybus_id: uuid,
+            anybus_id: node_id,
             broker_rx,
             route_table: RoutingTable {
                 table: HashMap::new(),
-                node_id: uuid,
+                node_id,
                 #[cfg(feature = "remote")]
                 peers: PeerRegistry::default(),
             },
+            lsadb: LsDb::new(node_id),
             handle,
         }
     }
@@ -173,11 +180,13 @@ impl Router {
                     {
                         continue;
                     }
+                    // let a: u16 = 5;
+                    // let b = a.saturating_add(5);
 
                     let advertisement = Advertisement {
                         endpoint_id: *uuid,
                         kind: route_entry.kind,
-                        cost: best_route.cost.saturating_add(5),
+                        cost: best_route.cost + 5,
                     };
 
                     new_advertisements.insert(advertisement);
@@ -315,7 +324,20 @@ impl State {
                         }
                     }
                     #[cfg(feature = "remote")]
-                    RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry) => {
+                    RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry, cost) => {
+                        let link = crate::routing::Link::new(
+                            peer_entry.peer_tx.clone(),
+                            peer_id,
+                            connection_id,
+                            peer_entry.realm.clone(),
+                            cost,
+                            false,
+                            false,
+                        );
+                        router.lsadb.add_peer(link);
+                        dbg!(&router.lsadb);
+
+                        //######### old #######
                         if router
                             .route_table
                             .peers
@@ -330,9 +352,11 @@ impl State {
                             via: ForwardTo::Remote(peer_entry.peer_tx.clone(), connection_id),
                             learned_from: connection_id,
                             realm: Realm::Global,
-                            cost: 1,
+                            cost: 1.into(),
                         };
+
                         router.route_table.add_route(peer_id.into(), route).unwrap();
+
                         let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
                         router.route_table.peers.insert(peer_info);
                         trace!("Registered new peer: #{} {}", connection_id, peer_id);
@@ -342,6 +366,10 @@ impl State {
                     }
                     #[cfg(feature = "remote")]
                     RouterMsg::UnRegisterPeer(connection_id) => {
+                        router.lsadb.remove_peer(connection_id);
+                        dbg!(&router.lsadb);
+
+                        // ### old below
                         router.route_table.table.retain(|_, route_entry| {
                             route_entry
                                 .routes
@@ -367,48 +395,7 @@ impl State {
                             }
                         }
                     }
-                    //     if let Some(peer) = router.route_table.peers.get_mut(&peer_id) {
-                    //         for ad in hash_set {
-                    //             use RouteKind as RK;
 
-                    //             let forward_to = match ad.kind {
-                    //                 RK::Unicast | RK::Anycast | RK::Node => {
-                    //                     ForwardTo::Remote(peer.peer_tx.clone(), peer_id)
-                    //                 }
-                    //                 RK::Broadcast => ForwardTo::Broadcast(vec![]),
-
-                    //                 RK::Multicast => {
-                    //                     let mut hs = HashSet::new();
-                    //                     hs.insert(Address::Remote(ad.endpoint_id, peer_id.into()));
-                    //                     ForwardTo::Multicast(hs)
-                    //                 }
-                    //             };
-                    //             let learned_from = match ad.kind {
-                    //                 RK::Unicast | RK::Node | RK::Anycast => peer_id,
-                    //                 RK::Multicast | RK::Broadcast => Uuid::nil().into(),
-                    //             };
-                    //             let route = Route {
-                    //                 kind: ad.kind,
-                    //                 via: forward_to,
-                    //                 learned_from,
-                    //                 realm: Realm::Process,
-                    //                 cost: ad.cost + 16,
-                    //             };
-
-                    //             _ = router.route_table.add_route(ad.endpoint_id.clone(), route);
-
-                    //             trace!(
-                    //                 "Added route for endpoint {} via peer {}",
-                    //                 ad.endpoint_id, peer_id
-                    //             );
-                    //             peer.received_routes.insert(ad);
-                    //         }
-                    //         return Some(RouteChange);
-                    //     } else {
-                    //         trace!("Peer {} not found for AddPeerEndpoints", peer_id);
-                    //     }
-                    //     return Some(Listen);
-                    // }
                     #[cfg(feature = "remote")]
                     RouterMsg::RemovePeerEndpoints(connection_id, advertisements) => {
                         if let Some(peer_info) = router
@@ -446,6 +433,18 @@ impl State {
                             Some(Listen)
                         }
                     }
+                    RouterMsg::LsaInbound { from, lsa } => {
+                        let dirty = router.lsadb.handle_lsa(lsa, from);
+                        // dbg!(&router.lsadb);
+                        Some(Listen)
+                    }
+
+                    RouterMsg::LsaAckInbound { from, key, seq } => {
+                        router.lsadb.handle_ack(from, key, seq);
+                        // dbg!(&router.lsadb);
+                        Some(Listen)
+                    }
+
                     RouterMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);
@@ -581,12 +580,12 @@ pub(crate) struct PeerInfo {
     pub(crate) received_routes: HashSet<Advertisement>,
     pub(crate) advertised_routes: HashSet<Advertisement>,
     pub(crate) peer_entry: PeerEntry,
-    pub(crate) connection_id: u16,
+    pub(crate) connection_id: ConnectionId,
 }
 
 #[cfg(feature = "remote")]
 impl PeerInfo {
-    fn new(peer_id: NodeId, peer_entry: PeerEntry, connection_id: u16) -> Self {
+    fn new(peer_id: NodeId, peer_entry: PeerEntry, connection_id: ConnectionId) -> Self {
         Self {
             peer_id,
             received_routes: Default::default(),

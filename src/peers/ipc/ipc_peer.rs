@@ -267,7 +267,6 @@ impl State for ClosePeer {
             .ok();
         state_machine.peer.unregister();
         state_machine.ipc_control.close();
-        state_machine.peer.close();
         state_machine.stream.close().await.ok();
 
         None

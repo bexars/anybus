@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(feature = "remote")]
+use crate::routing::ConnectionId;
+#[cfg(feature = "remote")]
 // use uuid::Uuid;
 #[cfg(feature = "remote")]
 use crate::routing::{Address, Advertisement, ForwardTo, Realm, peer_registry::PeerRegistry};
@@ -37,7 +39,7 @@ impl RoutingTable {
     #[cfg(feature = "remote")]
     pub(crate) fn add_peer_endpoints(
         &mut self,
-        connection_id: u16,
+        connection_id: ConnectionId,
         advertisements: HashSet<Advertisement>,
     ) -> Option<usize> {
         let mut routes_to_add = Vec::new();
@@ -58,7 +60,7 @@ impl RoutingTable {
                 };
                 let learned_from = match ad.kind {
                     RK::Unicast | RK::Node | RK::Anycast => connection_id,
-                    RK::Multicast | RK::Broadcast => 0,
+                    RK::Multicast | RK::Broadcast => 0.into(),
                 };
                 let route = Route {
                     kind: ad.kind,

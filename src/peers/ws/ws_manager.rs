@@ -20,7 +20,6 @@ use crate::anybus::config::WebSocketServerConfig;
 use crate::{
     AnyBusStatusMsg, Handle, Receiver,
     anybus::config::WebSocketPeerConfig,
-    common::SharedCounter,
     peers::{
         common::Peer,
         ws::{
@@ -28,6 +27,7 @@ use crate::{
             WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
+    routing::ConnectionIdCounter,
     routing::{NodeId, Realm},
     spawn,
 };
@@ -70,7 +70,7 @@ pub(crate) struct WebsocketManager {
     disconnected_peers: Vec<WsPendingPeer>,
     anybus_status: Receiver<AnyBusStatusMsg>,
     ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
-    connection_counter: SharedCounter,
+    connection_counter: ConnectionIdCounter,
 }
 
 impl WebsocketManager {
@@ -80,7 +80,7 @@ impl WebsocketManager {
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WebSocketServerConfig>,
         ws_peers: Vec<WebSocketPeerConfig>,
         ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
-        connection_counter: SharedCounter,
+        connection_counter: ConnectionIdCounter,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let anybus_status = handle
@@ -326,6 +326,7 @@ impl WebsocketManager {
                     self.handle.clone(),
                     Realm::Global, // WebSocket peers are always in the global realm
                     connection_id,
+                    20.into(),
                 );
 
                 let (tx, rx) = tokio::sync::mpsc::channel(32);

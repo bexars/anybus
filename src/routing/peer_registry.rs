@@ -1,6 +1,6 @@
 use std::{collections::HashMap, slice::IterMut};
 
-use crate::routing::{NodeId, router::PeerInfo};
+use crate::routing::{ConnectionId, NodeId, router::PeerInfo};
 
 #[derive(Default)]
 pub(crate) struct PeerRegistry {
@@ -8,7 +8,7 @@ pub(crate) struct PeerRegistry {
     peers: Vec<PeerInfo>,
     // Indexes pointing back to the vector slots
     by_node_id: HashMap<NodeId, usize>,
-    by_connection_id: HashMap<u16, usize>,
+    by_connection_id: HashMap<ConnectionId, usize>,
 }
 
 impl PeerRegistry {
@@ -25,7 +25,7 @@ impl PeerRegistry {
         self.peers.push(peer);
     }
 
-    pub fn remove_by_connection_id(&mut self, id: u16) -> Option<PeerInfo> {
+    pub fn remove_by_connection_id(&mut self, id: ConnectionId) -> Option<PeerInfo> {
         // 1. Find the target index
         let target_idx = self.by_connection_id.remove(&id)?;
 
@@ -49,7 +49,7 @@ impl PeerRegistry {
     }
 
     #[allow(unused)]
-    pub fn get_by_connection_id(&self, id: u16) -> Option<&PeerInfo> {
+    pub fn get_by_connection_id(&self, id: ConnectionId) -> Option<&PeerInfo> {
         self.by_connection_id.get(&id).map(|&idx| &self.peers[idx])
     }
 
@@ -58,7 +58,7 @@ impl PeerRegistry {
         self.by_node_id.get(peer_id).map(|&idx| &self.peers[idx])
     }
 
-    pub fn get_mut_by_connection_id(&mut self, id: u16) -> Option<&mut PeerInfo> {
+    pub fn get_mut_by_connection_id(&mut self, id: ConnectionId) -> Option<&mut PeerInfo> {
         self.by_connection_id
             .get(&id)
             .map(|&idx| &mut self.peers[idx])
@@ -72,7 +72,7 @@ impl PeerRegistry {
         self.by_node_id.contains_key(node_id)
     }
 
-    pub fn contains_connection_id_key(&self, connection_id: u16) -> bool {
+    pub fn contains_connection_id_key(&self, connection_id: ConnectionId) -> bool {
         self.by_connection_id.contains_key(&connection_id)
     }
     #[allow(unused)]

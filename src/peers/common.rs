@@ -5,7 +5,7 @@ use web_time::Instant;
 use crate::{
     Handle, Realm,
     messages::{NodeMessage, RouterMsg},
-    routing::{Advertisement, NodeId, PeerEntry, WirePacket},
+    routing::{Advertisement, ConnectionId, Cost, NodeId, PeerEntry, WirePacket},
 };
 
 pub(crate) struct Heartbeat {
@@ -77,7 +77,8 @@ pub(crate) struct Peer {
     rx_node: mpsc::Receiver<NodeMessage>,
     handle: Handle,
     pub(crate) realm: Realm,
-    pub(crate) connection_id: u16,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) cost: Cost,
     pub(crate) stats: PeerStats,
 }
 
@@ -88,7 +89,8 @@ impl Peer {
         handle: Handle,
         // rx_node: mpsc::Receiver<NodeMessage>,
         realm: Realm,
-        connection_id: u16,
+        connection_id: ConnectionId,
+        cost: Cost,
     ) -> Self {
         let (peer_tx, rx_node) = tokio::sync::mpsc::channel(32);
 
@@ -99,6 +101,7 @@ impl Peer {
             handle,
             realm,
             connection_id,
+            cost,
             stats: PeerStats::default(),
         };
 
@@ -111,6 +114,7 @@ impl Peer {
             peer.peer_id,
             peer.connection_id,
             peer_entry,
+            peer.cost,
         ));
 
         peer
@@ -145,13 +149,14 @@ impl Peer {
             .send_broker(crate::messages::RouterMsg::UnRegisterPeer(
                 self.connection_id,
             ));
+        self.close();
     }
 
-    pub(crate) fn close(&mut self) {
+    fn close(&mut self) {
         self.rx_node.close();
     }
 
-    pub(crate) fn send_packet(&mut self, packet: WirePacket) {
+    fn send_packet(&mut self, packet: WirePacket) {
         self.stats.rx.record(&packet);
 
         self.handle.send_packet(packet, self.connection_id);
@@ -162,6 +167,15 @@ impl Peer {
             NodeMessage::WirePacket(packet) => self.send_packet(packet),
             NodeMessage::Advertise(hash_set) => self.add_endpoints(hash_set),
             NodeMessage::Withdraw(hash_set) => self.remove_endpoints(hash_set),
+            NodeMessage::Lsa(lsa) => self.handle.send_broker(RouterMsg::LsaInbound {
+                from: self.connection_id,
+                lsa,
+            }),
+            NodeMessage::LsaAck { key, seq } => self.handle.send_broker(RouterMsg::LsaAckInbound {
+                from: self.connection_id,
+                key,
+                seq,
+            }),
         }
     }
 }

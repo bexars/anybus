@@ -18,6 +18,8 @@ use crate::receivers::Receiver;
 use crate::receivers::RpcReceiver;
 use crate::routing::Address;
 #[cfg(feature = "remote")]
+use crate::routing::ConnectionId;
+#[cfg(feature = "remote")]
 use crate::routing::Realm;
 #[cfg(feature = "remote")]
 use crate::routing::WirePacket;
@@ -89,9 +91,9 @@ impl Handle {
             #[cfg(feature = "remote")]
             realm,
             via: crate::routing::ForwardTo::Local(tx.clone()),
-            cost: 0,
+            cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0,
+            learned_from: 0.into(),
         };
 
         let register_msg = RouterMsg::RegisterRoute(endpoint_id, route);
@@ -136,9 +138,9 @@ impl Handle {
                 #[cfg(feature = "remote")]
                 realm,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -180,9 +182,9 @@ impl Handle {
                 #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Userspace,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -226,9 +228,9 @@ impl Handle {
                 realm,
                 via: crate::routing::ForwardTo::Broadcast(vec![tx], realm),
 
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -271,9 +273,9 @@ impl Handle {
                 #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Process,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         info!("Send register_msg {:?}", register_msg);
@@ -290,9 +292,9 @@ impl Handle {
                 via: crate::routing::ForwardTo::Multicast(HashSet::from([Address::Endpoint(
                     local_id,
                 )])),
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         self.tx.send(broadcast_msg).await?;
@@ -328,7 +330,7 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn send_packet(&self, packet: WirePacket, from_connection: u16) {
+    pub(crate) fn send_packet(&self, packet: WirePacket, from_connection: ConnectionId) {
         let map = self.route_watch_rx.borrow();
 
         map.forward(packet, from_connection);
@@ -401,9 +403,9 @@ impl Handle {
                 #[cfg(feature = "remote")]
                 realm: crate::routing::Realm::Process,
                 via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0,
+                cost: 0.into(),
                 #[cfg(feature = "remote")]
-                learned_from: 0,
+                learned_from: 0.into(),
             },
         );
         self.tx

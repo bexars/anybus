@@ -19,11 +19,11 @@ use tracing::{debug, error};
 
 use crate::{
     AnyBusStatusMsg, Handle, Receiver,
-    common::SharedCounter,
     peers::{
         common::Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
+    routing::ConnectionIdCounter,
     routing::NodeId,
     spawn,
 };
@@ -42,14 +42,14 @@ pub(crate) struct IpcManager {
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
     anybus_status: Receiver<AnyBusStatusMsg>,
-    connection_counter: SharedCounter,
+    connection_counter: ConnectionIdCounter,
 }
 impl IpcManager {
     pub(crate) async fn new(
         rendezvous: String,
         handle: Handle,
         our_nodeid: NodeId,
-        connection_counter: SharedCounter,
+        connection_counter: ConnectionIdCounter,
     ) -> Self {
         let (tx, rx) = channel(32);
         let anybus_status = handle
@@ -397,6 +397,7 @@ impl State for CreateIpcPeer {
             state.handle.clone(),
             crate::routing::Realm::Userspace, // Always userspace for IPC peers
             connection_id,
+            10.into(),
         );
         let ipc_peer = IpcPeer::new(
             self.stream,

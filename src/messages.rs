@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
+use crate::routing::{
+    Advertisement, ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, WirePacket,
+};
 use crate::{
     BusRiderWithUuid,
     routing::{EndpointId, Packet, Route},
@@ -15,13 +17,22 @@ pub(crate) enum RouterMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
-    RegisterPeer(NodeId, u16, PeerEntry),
+    RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost),
     #[cfg(feature = "remote")]
-    UnRegisterPeer(u16),
+    UnRegisterPeer(ConnectionId),
     #[cfg(feature = "remote")]
-    AddPeerEndpoints(u16, HashSet<Advertisement>),
+    AddPeerEndpoints(ConnectionId, HashSet<Advertisement>),
     #[cfg(feature = "remote")]
-    RemovePeerEndpoints(u16, HashSet<Advertisement>),
+    RemovePeerEndpoints(ConnectionId, HashSet<Advertisement>),
+    LsaInbound {
+        from: ConnectionId,
+        lsa: Lsa,
+    },
+    LsaAckInbound {
+        from: ConnectionId,
+        key: LsaKey,
+        seq: u64,
+    },
     Shutdown,
 }
 
@@ -67,4 +78,6 @@ pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
     Advertise(HashSet<Advertisement>),
     Withdraw(HashSet<Advertisement>),
+    Lsa(Lsa),
+    LsaAck { key: LsaKey, seq: u64 },
 }
