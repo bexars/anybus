@@ -5,7 +5,7 @@ use web_time::Instant;
 use crate::{
     Handle, Realm,
     messages::{NodeMessage, RouterMsg},
-    routing::{Advertisement, ConnectionId, Cost, NodeId, PeerEntry, WirePacket},
+    routing::{Advertisement, ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
 };
 
 pub(crate) struct Heartbeat {
@@ -80,6 +80,7 @@ pub(crate) struct Peer {
     pub(crate) connection_id: ConnectionId,
     pub(crate) cost: Cost,
     pub(crate) stats: PeerStats,
+    pub(crate) realms: RealmList,
 }
 
 impl Peer {
@@ -91,6 +92,7 @@ impl Peer {
         realm: Realm,
         connection_id: ConnectionId,
         cost: Cost,
+        realms: RealmList,
     ) -> Self {
         let (peer_tx, rx_node) = tokio::sync::mpsc::channel(32);
 
@@ -103,6 +105,7 @@ impl Peer {
             connection_id,
             cost,
             stats: PeerStats::default(),
+            realms,
         };
 
         let peer_entry = PeerEntry {
@@ -115,6 +118,7 @@ impl Peer {
             peer.connection_id,
             peer_entry,
             peer.cost,
+            peer.realms.clone(),
         ));
 
         peer

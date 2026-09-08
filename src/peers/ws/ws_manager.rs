@@ -27,8 +27,7 @@ use crate::{
             WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
-    routing::ConnectionIdCounter,
-    routing::{NodeId, Realm},
+    routing::{ConnectionIdCounter, NodeId, Realm},
     spawn,
 };
 
@@ -320,6 +319,8 @@ impl WebsocketManager {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
                 let connection_id = self.connection_counter.next();
+                let realms = Realm::Global.into();
+
                 let peer = Peer::register_peer(
                     peer_id,
                     self.node_id,
@@ -327,6 +328,7 @@ impl WebsocketManager {
                     Realm::Global, // WebSocket peers are always in the global realm
                     connection_id,
                     20.into(),
+                    realms,
                 );
 
                 let (tx, rx) = tokio::sync::mpsc::channel(32);

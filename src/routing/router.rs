@@ -288,6 +288,7 @@ impl State {
                         return Some(RegisterRoute(endpoint_id, route));
                     }
                     RouterMsg::DeadLink(endpoint_id) => {
+                        router.lsadb.remove_endpoint(endpoint_id);
                         let mut changed = false;
                         let mut delete_route = false;
                         let route_entry = router.route_table.table.get_mut(&endpoint_id);
@@ -324,18 +325,18 @@ impl State {
                         }
                     }
                     #[cfg(feature = "remote")]
-                    RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry, cost) => {
+                    RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry, cost, realms) => {
                         let link = crate::routing::Link::new(
                             peer_entry.peer_tx.clone(),
                             peer_id,
                             connection_id,
-                            peer_entry.realm.clone(),
+                            realms,
                             cost,
                             false,
                             false,
                         );
                         router.lsadb.add_peer(link);
-                        dbg!(&router.lsadb);
+                        // dbg!(&router.lsadb);
 
                         //######### old #######
                         if router
@@ -367,7 +368,7 @@ impl State {
                     #[cfg(feature = "remote")]
                     RouterMsg::UnRegisterPeer(connection_id) => {
                         router.lsadb.remove_peer(connection_id);
-                        dbg!(&router.lsadb);
+                        // dbg!(&router.lsadb);
 
                         // ### old below
                         router.route_table.table.retain(|_, route_entry| {
@@ -434,7 +435,8 @@ impl State {
                         }
                     }
                     RouterMsg::LsaInbound { from, lsa } => {
-                        let dirty = router.lsadb.handle_lsa(lsa, from);
+                        // dbg!(&from, &lsa);
+                        router.lsadb.handle_lsa(lsa, from);
                         // dbg!(&router.lsadb);
                         Some(Listen)
                     }
@@ -454,6 +456,9 @@ impl State {
 
             // ####### RegisterRoute ##################################################
             RegisterRoute(endpoint_id, route) => {
+                router.lsadb.add_endpoint(endpoint_id, &route);
+                // dbg!(&router.lsadb);
+
                 let forward_to = route.via.clone();
                 return match router.route_table.add_route(endpoint_id, route) {
                     Ok(_) => {

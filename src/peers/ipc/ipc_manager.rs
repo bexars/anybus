@@ -23,8 +23,7 @@ use crate::{
         common::Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
-    routing::ConnectionIdCounter,
-    routing::NodeId,
+    routing::{ConnectionIdCounter, NodeId, Realm, RealmList},
     spawn,
 };
 
@@ -390,14 +389,17 @@ impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         let connection_id = state.connection_counter.next();
         let (tx, rx) = channel(32);
+        let mut realms: RealmList = Realm::Userspace.into();
+        realms.add(Realm::Global);
 
         let peer = Peer::register_peer(
             self.peer_id,
             state.our_nodeid,
             state.handle.clone(),
-            crate::routing::Realm::Userspace, // Always userspace for IPC peers
+            Realm::Userspace, // Always userspace for IPC peers
             connection_id,
             10.into(),
+            realms,
         );
         let ipc_peer = IpcPeer::new(
             self.stream,

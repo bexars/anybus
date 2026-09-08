@@ -648,6 +648,45 @@ impl Realm {
     }
 }
 
+#[cfg(feature = "remote")]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub(crate) struct RealmList(HashSet<Realm>);
+
+#[cfg(feature = "remote")]
+impl RealmList {
+    // pub(crate) fn new(realm: Realm) -> Self {
+    //     let mut rl = RealmList::default();
+    //     rl.add(realm);
+    //     rl
+    // }
+
+    pub(crate) fn add(&mut self, realm: Realm) {
+        self.0.insert(realm);
+    }
+
+    pub(crate) fn contains(&self, realm: &Realm) -> bool {
+        self.0.contains(realm)
+    }
+
+    pub(crate) fn intersection(&self, other: &RealmList) -> RealmList {
+        let intersection = self.0.intersection(&other.0).cloned().collect();
+        RealmList(intersection)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Realm> for RealmList {
+    fn from(realm: Realm) -> Self {
+        let mut list = HashSet::new();
+        list.insert(realm);
+        RealmList(list)
+    }
+}
+
 #[derive(Debug, Error)]
 pub(super) enum RouteTableError {
     #[error("Route kind didn't match")]

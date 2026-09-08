@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "remote")]
 use crate::routing::{
-    Advertisement, ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, WirePacket,
+    Advertisement, ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket,
 };
 use crate::{
     BusRiderWithUuid,
@@ -17,7 +17,7 @@ pub(crate) enum RouterMsg {
     RegisterRoute(EndpointId, Route),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
-    RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost),
+    RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost, RealmList),
     #[cfg(feature = "remote")]
     UnRegisterPeer(ConnectionId),
     #[cfg(feature = "remote")]
