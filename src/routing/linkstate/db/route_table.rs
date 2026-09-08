@@ -173,15 +173,6 @@ impl RouteTable {
             effect = Effects::RebuildFib;
         }
 
-        let min_cost = route_entry.min_cost();
-        if info.cost < min_cost
-            || matches!(
-                route_entry.kind,
-                RouteKind::Broadcast | RouteKind::Multicast
-            )
-        {
-            effect = Effects::RebuildFib;
-        }
         route_entry.routes.push(LsRoute {
             via: LsForwardTo::Remote(origin),
             cost: info.cost,

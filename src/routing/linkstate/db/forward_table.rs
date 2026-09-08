@@ -88,6 +88,8 @@ impl ForwardingTable {
     /// From remote peers
     #[cfg(feature = "remote")]
     pub(crate) fn forward(&self, packet: WirePacket) {
+        // tracing::trace!("Forwarding: {:#?}", &packet);
+
         let endpoint_id = packet.to.into();
         let Some(fib_entry) = self.table.get(&endpoint_id) else {
             return;
