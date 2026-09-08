@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use tokio::sync::mpsc::Sender;
-
+use crate::routing::linkstate::LsRouteEntry;
 #[cfg(feature = "remote")]
-use crate::Realm;
 use crate::{
     EndpointId,
-    messages::ClientMessage,
     routing::{
         Cost, ForwardTo, NodeId, Route, RouteKind,
-        linkstate::{EndpointInfo, route_table::RouteTableError::MismatchedRouteKind},
+        linkstate::{
+            EndpointInfo, LsForwardTo, LsRoute,
+            db::route_table::RouteTableError::MismatchedRouteKind,
+        },
     },
 };
 
@@ -21,53 +21,9 @@ pub(crate) struct RouteTable {
     table: HashMap<EndpointId, LsRouteEntry>,
 }
 
-#[derive(Debug)]
-struct LsRouteEntry {
-    routes: Vec<LsRoute>,
-    kind: RouteKind,
-}
-
-impl LsRouteEntry {
-    fn min_cost(&self) -> Cost {
-        self.routes
-            .iter()
-            .map(|r| r.cost)
-            .min()
-            .unwrap_or(Cost(u16::MAX)) // Should always be a route, but just in case
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct LsRoute {
-    pub(crate) via: LsForwardTo,
-    pub(crate) cost: Cost,
-    #[cfg(feature = "remote")]
-    pub(crate) realm: Realm,
-    #[cfg(feature = "remote")]
-    pub(crate) kind: RouteKind,
-}
-
-#[derive(Clone)]
-pub(crate) enum LsForwardTo {
-    Local(Sender<ClientMessage>),
-    Remote(NodeId), // Consult the LsDb for nexthops
-}
-
-impl std::fmt::Debug for LsForwardTo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LsForwardTo::Local(_sender) => write!(f, "Local(Sender<ClientMessage>)"),
-            LsForwardTo::Remote(node_id) => write!(f, "Remote({}", node_id.0),
-        }
-    }
-}
-
-impl LsForwardTo {
-    pub(crate) fn is_local(&self) -> bool {
-        match self {
-            LsForwardTo::Local(_sender) => true,
-            LsForwardTo::Remote(_) => false,
-        }
+impl RouteTable {
+    pub(crate) fn routes(&self) -> &HashMap<EndpointId, LsRouteEntry> {
+        &self.table
     }
 }
 

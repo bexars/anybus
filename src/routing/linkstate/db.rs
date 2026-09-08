@@ -1,3 +1,6 @@
+mod forward_table;
+mod route_table;
+
 use itertools::Itertools;
 
 use std::{
@@ -12,11 +15,14 @@ use crate::{
     messages::ClientMessage,
     routing::{
         ConnectionId, Cost, ForwardTo, Link, Lsa, LsaKey, NodeId, RealmList, Route, RouteKind,
-        linkstate::{Adjacency, EndpointInfo, Entry, LsaBody, LsaRecord, route_table::RouteTable},
+        linkstate::{
+            Adjacency, EndpointInfo, Entry, LsaBody, LsaRecord, db::forward_table::ForwardingTable,
+            db::route_table::RouteTable,
+        },
     },
 };
 
-use super::route_table::Effects;
+use route_table::Effects;
 
 #[derive(Debug)]
 pub(crate) struct LsDb {
@@ -24,7 +30,7 @@ pub(crate) struct LsDb {
     self_id: NodeId,
     links: HashMap<ConnectionId, Link>,
     pending_tx: HashMap<(ConnectionId, LsaKey), u64>,
-    next_hop: HashMap<NodeId, NodeId>, // dest → neighbor
+    next_hop: HashMap<NodeId, Link>, // dest → neighbor
     cost: HashMap<NodeId, Cost>,
     parent: HashMap<NodeId, NodeId>, // need spf to populate this
     routes: RouteTable,
@@ -375,10 +381,9 @@ impl LsDb {
             .collect::<HashMap<_, _>>();
 
         let root = self.self_id;
-        // dbg!(&nodes);
+
         for node_id in nodes.keys() {
             self.cost.insert(*node_id, u16::MAX.into());
-            // self.parent.insert(*node_id, Uuid::nil().into());
         }
         self.cost.insert(root, Cost(0));
 
@@ -395,6 +400,20 @@ impl LsDb {
                     if new_cost < *self.cost.get(&next_node).unwrap_or(&Cost(u16::MAX)) {
                         self.cost.insert(next_node, new_cost);
                         self.parent.insert(next_node, current_node);
+                        if current_node == root {
+                            self.links
+                                .values()
+                                .find(|link| link.peer_id == next_node)
+                                .map(|link| {
+                                    self.next_hop.insert(next_node, link.clone());
+                                });
+                        } else {
+                            self.next_hop.insert(
+                                next_node,
+                                self.next_hop.get(&current_node).unwrap().clone(),
+                            );
+                        }
+
                         // self.next_hop.insert(current_node, adjacency.node_id);
                         let entry = Entry(new_cost, next_node);
                         if let Some((pos, _)) =
@@ -408,6 +427,7 @@ impl LsDb {
                 }
             }
         }
+        // dbg!(&self.next_hop, &self.cost, &self.parent);
     }
 
     fn flood_all_neighbors(
@@ -531,5 +551,9 @@ impl LsDb {
             }
             _ => {}
         }
+    }
+
+    pub(crate) fn build_fib(&self) -> ForwardingTable {
+        ForwardingTable::build_from_db(self)
     }
 }

@@ -454,6 +454,15 @@ pub enum Address {
     Remote(EndpointId, NodeId), // EndpointId, NodeId
 }
 
+impl From<Address> for EndpointId {
+    fn from(value: Address) -> Self {
+        match value {
+            Address::Endpoint(eid) => eid,
+            Address::Remote(eid, _nid) => eid,
+        }
+    }
+}
+
 impl From<EndpointId> for Address {
     fn from(value: EndpointId) -> Self {
         Address::Endpoint(value)

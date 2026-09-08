@@ -9,7 +9,6 @@
 //! to knowing both
 
 mod db;
-mod route_table;
 
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
@@ -21,10 +20,8 @@ use uuid::Uuid;
 
 use crate::{
     Realm,
-    messages::NodeMessage,
-    routing::{
-        ConnectionId, Cost, NodeId, RealmList, Route, RouteKind, linkstate::route_table::LsRoute,
-    },
+    messages::{ClientMessage, NodeMessage},
+    routing::{ConnectionId, Cost, NodeId, RealmList, Route, RouteKind},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -45,6 +42,40 @@ pub(crate) struct LsaKey {
 enum LsaBody {
     Router(Vec<Adjacency>),
     Endpoint(EndpointInfo),
+}
+
+#[derive(Debug)]
+pub(crate) struct LsRoute {
+    pub(crate) via: LsForwardTo,
+    pub(crate) cost: Cost,
+    #[cfg(feature = "remote")]
+    pub(crate) realm: Realm,
+    #[cfg(feature = "remote")]
+    pub(crate) kind: RouteKind,
+}
+
+#[derive(Clone)]
+pub(crate) enum LsForwardTo {
+    Local(Sender<ClientMessage>),
+    Remote(NodeId), // Consult the LsDb for nexthops
+}
+
+impl std::fmt::Debug for LsForwardTo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LsForwardTo::Local(_sender) => write!(f, "Local(Sender<ClientMessage>)"),
+            LsForwardTo::Remote(node_id) => write!(f, "Remote({}", node_id.0),
+        }
+    }
+}
+
+impl LsForwardTo {
+    pub(crate) fn is_local(&self) -> bool {
+        match self {
+            LsForwardTo::Local(_sender) => true,
+            LsForwardTo::Remote(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +105,28 @@ impl From<&LsRoute> for EndpointInfo {
     }
 }
 
+#[derive(Debug)]
+struct LsRouteEntry {
+    routes: Vec<LsRoute>,
+    kind: RouteKind,
+}
+
+impl LsRouteEntry {
+    fn min_cost(&self) -> Cost {
+        self.routes
+            .iter()
+            .map(|r| r.cost)
+            .min()
+            .unwrap_or(Cost(u16::MAX)) // Should always be a route, but just in case
+    }
+}
+
+#[derive(Debug, Clone)]
+enum FibForwardTo {
+    Local(Sender<ClientMessage>),
+    Remote(Link),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Adjacency {
     connection_id: ConnectionId,
@@ -88,7 +141,7 @@ struct LsaRecord {
     updated_at: Instant,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Link {
     tx: Sender<NodeMessage>,
     peer_id: NodeId,
