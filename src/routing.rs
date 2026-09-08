@@ -661,6 +661,7 @@ impl RealmList {
     //     rl
     // }
 
+    #[allow(unused)]
     pub(crate) fn add(&mut self, realm: Realm) {
         self.0.insert(realm);
     }

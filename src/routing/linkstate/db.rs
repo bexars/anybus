@@ -3,8 +3,9 @@ use itertools::Itertools;
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
-    time::Instant,
 };
+
+use web_time::Instant;
 
 use crate::{
     EndpointId, Realm,
@@ -290,7 +291,7 @@ impl LsDb {
                             link.peer_id
                         );
                         record.lsa.seq += 1;
-                        record.updated_at = std::time::Instant::now();
+                        record.updated_at = Instant::now();
                         let lsa = record.lsa.clone();
                         self.flood_all_neighbors(lsa, 0.into());
                     } else {

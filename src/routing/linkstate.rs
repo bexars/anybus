@@ -11,9 +11,9 @@
 mod db;
 mod route_table;
 
-use std::{fmt::Debug, time::Instant};
-
 pub(crate) use db::LsDb;
+use std::fmt::Debug;
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
