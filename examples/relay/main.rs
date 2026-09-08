@@ -11,6 +11,7 @@ use anybus::AnyBusConfig;
 
 #[tokio::main]
 async fn main() {
+    // console_subscriber::init();
     // tracing_subscriber::fmt::fmt()
     //     .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
     //     .init();

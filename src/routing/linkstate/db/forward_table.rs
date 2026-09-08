@@ -1,27 +1,32 @@
 use std::collections::{HashMap, HashSet};
 
-use tokio::sync::mpsc::Sender;
-
 use crate::{
     EndpointId,
     errors::SendError,
     messages::{ClientMessage, NodeMessage},
     routing::{
-        Address, ConnectionId, ForwardTo, LsDb, NodeId, Packet, Payload, RouteKind, WirePacket,
-        linkstate::{FibForwardTo, LsForwardTo, LsRouteEntry},
+        ConnectionId, Link, LsDb, NodeId, Packet, Payload, RouteKind, WirePacket,
+        linkstate::{FibForwardTo, LsForwardTo},
     },
 };
 
+#[derive(Debug, Clone)]
 pub(crate) struct ForwardingTable {
     pub(crate) our_id: NodeId,
     table: HashMap<EndpointId, FibEntry>,
+    links: HashMap<ConnectionId, Link>,
+    next_hop: HashMap<NodeId, Link>, // dest → neighbor
+    parent: HashMap<NodeId, NodeId>,
 }
 
 impl ForwardingTable {
-    fn new(our_id: NodeId) -> ForwardingTable {
+    pub(crate) fn new(our_id: NodeId) -> ForwardingTable {
         ForwardingTable {
             our_id,
             table: HashMap::new(),
+            links: HashMap::new(),
+            next_hop: HashMap::new(),
+            parent: HashMap::new(),
         }
     }
 
@@ -124,6 +129,21 @@ impl ForwardingTable {
                                 });
                         }
                         FibForwardTo::Remote(next_hop) => {
+                            // rpf check
+                            let Some(from) = packet.from else { continue };
+                            let from: EndpointId = from.into();
+                            let from: NodeId = from.0.into();
+                            if let Some(parent) = self.parent.get(&from) {
+                                if *parent == next_hop.peer_id {
+                                    tracing::debug!(
+                                        "Dropping packet from {} to {} on connection #{} due to RPF check",
+                                        from,
+                                        packet.to,
+                                        next_hop.connection_id
+                                    );
+                                    return;
+                                }
+                            }
                             next_hop
                                 .tx
                                 .try_send(crate::messages::NodeMessage::WirePacket(packet.clone()))
@@ -150,6 +170,9 @@ impl ForwardingTable {
 
     pub(crate) fn build_from_db(lsdb: &LsDb) -> ForwardingTable {
         let mut fib = ForwardingTable::new(lsdb.self_id);
+        fib.links = lsdb.links.clone();
+        fib.next_hop = lsdb.next_hop.clone();
+        fib.parent = lsdb.parent.clone();
         for (endpoint_id, route_entry) in lsdb.routes.routes().iter() {
             let fib_entry = match route_entry.kind {
                 RouteKind::Unicast | RouteKind::Anycast | RouteKind::Node => {
@@ -183,7 +206,7 @@ impl ForwardingTable {
                                 forwards.push(FibForwardTo::Local(sender.clone()));
                             }
                             LsForwardTo::Remote(node_id) => {
-                                remotes.insert(node_id.clone());
+                                remotes.insert(node_id);
                             }
                         };
                     }
@@ -211,6 +234,7 @@ impl ForwardingTable {
     }
 }
 
+#[derive(Debug, Clone)]
 enum FibEntry {
     Single(FibForwardTo),
     Multi(Vec<FibForwardTo>),

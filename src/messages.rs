@@ -2,6 +2,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "remote")]
 use crate::routing::{
@@ -9,12 +10,12 @@ use crate::routing::{
 };
 use crate::{
     BusRiderWithUuid,
-    routing::{EndpointId, Packet, Route},
+    routing::{EndpointId, EndpointInfo, Packet},
 };
 
 #[derive(Debug)]
 pub(crate) enum RouterMsg {
-    RegisterRoute(EndpointId, Route),
+    RegisterEndpoint(EndpointId, EndpointInfo, Sender<ClientMessage>),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
     RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost, RealmList),

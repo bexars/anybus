@@ -11,7 +11,10 @@ use crate::routing::{
 
 use crate::{
     Handle,
-    routing::{LsDb, RouteKind},
+    routing::{
+        LsDb, RouteKind,
+        linkstate::{EndpointInfo, ForwardingTable},
+    },
 };
 
 use tokio::{
@@ -25,9 +28,7 @@ use tracing::{info, trace};
 
 use crate::{
     messages::{ClientMessage, RouterMsg},
-    routing::{
-        Address, EndpointId, ForwardTo, ForwardingTable, NodeId, Route, routing_table::RoutingTable,
-    },
+    routing::{Address, EndpointId, ForwardTo, NodeId, Route, routing_table::RoutingTable},
 };
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
@@ -46,7 +47,9 @@ pub(crate) struct Router {
 
 impl Router {
     pub(crate) fn new(node_id: NodeId) -> Self {
-        let forward_table = ForwardingTable::default();
+        // let forward_table = ForwardingTable::default();
+        let forward_table = ForwardingTable::new(node_id);
+
         let (tx, rx) = watch::channel(forward_table.clone());
 
         let (broker_tx, broker_rx) = tokio::sync::mpsc::channel(32);
@@ -242,7 +245,11 @@ enum State {
     Start,
     Listen,
     HandleBrokerMsg(RouterMsg),
-    RegisterRoute(EndpointId, Route),
+    RegisterEndpoint(
+        EndpointId,
+        EndpointInfo,
+        tokio::sync::mpsc::Sender<ClientMessage>,
+    ),
     RouteChange, // Notify peers of route changes
     Shutdown,
     // HandleError(RouteTableError),
@@ -251,6 +258,7 @@ enum State {
 impl State {
     async fn next(self, router: &mut Router) -> Option<State> {
         use State::*;
+        // dbg!(&self);
         match self {
             // ####### Start ##################################################
             Start => {
@@ -284,45 +292,46 @@ impl State {
                 match broker_msg {
                     // BrokerMsg::RegisterAnycast(uuid, unbounded_sender) => todo!(),
                     // BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => todo!(),
-                    RouterMsg::RegisterRoute(endpoint_id, route) => {
-                        return Some(RegisterRoute(endpoint_id, route));
+                    RouterMsg::RegisterEndpoint(endpoint_id, endpoint_info, tx) => {
+                        return Some(RegisterEndpoint(endpoint_id, endpoint_info, tx));
                     }
                     RouterMsg::DeadLink(endpoint_id) => {
                         router.lsadb.remove_endpoint(endpoint_id);
-                        let mut changed = false;
-                        let mut delete_route = false;
-                        let route_entry = router.route_table.table.get_mut(&endpoint_id);
-                        if let Some(route_entry) = route_entry {
-                            let before_len = route_entry.routes.len();
-                            route_entry.routes.retain_mut(|route| match route.via {
-                                ForwardTo::Local(ref tx) => !tx.is_closed(),
-                                #[cfg(feature = "remote")]
-                                ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
-                                ForwardTo::Multicast(ref set) => !set.is_empty(),
-                                ForwardTo::Broadcast(ref mut senders, _) => {
-                                    senders.retain(|sender| !sender.is_closed());
-                                    true
-                                }
-                            });
-                            if route_entry.routes.len() != before_len {
-                                changed = true;
-                            };
-                            if (route_entry.kind == RouteKind::Unicast
-                                || route_entry.kind == RouteKind::Anycast)
-                                && route_entry.routes.is_empty()
-                            {
-                                delete_route = true;
-                            }
-                        }
-                        if delete_route {
-                            router.route_table.table.remove(&endpoint_id);
-                            changed = true;
-                        }
-                        if changed {
-                            return Some(RouteChange);
-                        } else {
-                            return Some(Listen);
-                        }
+                        // let mut changed = false;
+                        // let mut delete_route = false;
+                        // let route_entry = router.route_table.table.get_mut(&endpoint_id);
+                        // if let Some(route_entry) = route_entry {
+                        //     let before_len = route_entry.routes.len();
+                        //     route_entry.routes.retain_mut(|route| match route.via {
+                        //         ForwardTo::Local(ref tx) => !tx.is_closed(),
+                        //         #[cfg(feature = "remote")]
+                        //         ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
+                        //         ForwardTo::Multicast(ref set) => !set.is_empty(),
+                        //         ForwardTo::Broadcast(ref mut senders, _) => {
+                        //             senders.retain(|sender| !sender.is_closed());
+                        //             true
+                        //         }
+                        //     });
+                        //     if route_entry.routes.len() != before_len {
+                        //         changed = true;
+                        //     };
+                        //     if (route_entry.kind == RouteKind::Unicast
+                        //         || route_entry.kind == RouteKind::Anycast)
+                        //         && route_entry.routes.is_empty()
+                        //     {
+                        //         delete_route = true;
+                        //     }
+                        // }
+                        // if delete_route {
+                        //     router.route_table.table.remove(&endpoint_id);
+                        //     changed = true;
+                        // }
+                        // if changed {
+                        //     return Some(RouteChange);
+                        // } else {
+                        //     return Some(Listen);
+                        // }
+                        Some(RouteChange)
                     }
                     #[cfg(feature = "remote")]
                     RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry, cost, realms) => {
@@ -339,30 +348,30 @@ impl State {
                         // dbg!(&router.lsadb);
 
                         //######### old #######
-                        if router
-                            .route_table
-                            .peers
-                            .contains_connection_id_key(connection_id)
-                        {
-                            // Peer already registered, ignore
-                            trace!("Peer {} already registered", connection_id);
-                            return Some(Listen);
-                        }
-                        let route = Route {
-                            kind: RouteKind::Node,
-                            via: ForwardTo::Remote(peer_entry.peer_tx.clone(), connection_id),
-                            learned_from: connection_id,
-                            realm: Realm::Global,
-                            cost: 1.into(),
-                        };
+                        // if router
+                        //     .route_table
+                        //     .peers
+                        //     .contains_connection_id_key(connection_id)
+                        // {
+                        //     // Peer already registered, ignore
+                        //     trace!("Peer {} already registered", connection_id);
+                        //     return Some(Listen);
+                        // }
+                        // let route = Route {
+                        //     kind: RouteKind::Node,
+                        //     via: ForwardTo::Remote(peer_entry.peer_tx.clone(), connection_id),
+                        //     learned_from: connection_id,
+                        //     realm: Realm::Global,
+                        //     cost: 1.into(),
+                        // };
 
-                        router.route_table.add_route(peer_id.into(), route).unwrap();
+                        // router.route_table.add_route(peer_id.into(), route).unwrap();
 
-                        let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
-                        router.route_table.peers.insert(peer_info);
-                        trace!("Registered new peer: #{} {}", connection_id, peer_id);
+                        // let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
+                        // router.route_table.peers.insert(peer_info);
+                        // trace!("Registered new peer: #{} {}", connection_id, peer_id);
 
-                        // router.send_route_updates();
+                        // // router.send_route_updates();
                         return Some(RouteChange);
                     }
                     #[cfg(feature = "remote")]
@@ -370,17 +379,17 @@ impl State {
                         router.lsadb.remove_peer(connection_id);
                         // dbg!(&router.lsadb);
 
-                        // ### old below
-                        router.route_table.table.retain(|_, route_entry| {
-                            route_entry
-                                .routes
-                                .retain(|route| route.learned_from != connection_id);
-                            !route_entry.routes.is_empty()
-                        });
-                        router
-                            .route_table
-                            .peers
-                            .remove_by_connection_id(connection_id);
+                        // // ### old below
+                        // router.route_table.table.retain(|_, route_entry| {
+                        //     route_entry
+                        //         .routes
+                        //         .retain(|route| route.learned_from != connection_id);
+                        //     !route_entry.routes.is_empty()
+                        // });
+                        // router
+                        //     .route_table
+                        //     .peers
+                        //     .remove_by_connection_id(connection_id);
                         return Some(RouteChange);
                     }
                     #[cfg(feature = "remote")]
@@ -438,7 +447,7 @@ impl State {
                         // dbg!(&from, &lsa);
                         router.lsadb.handle_lsa(lsa, from);
                         // dbg!(&router.lsadb);
-                        Some(Listen)
+                        Some(RouteChange)
                     }
 
                     RouterMsg::LsaAckInbound { from, key, seq } => {
@@ -455,80 +464,84 @@ impl State {
             }
 
             // ####### RegisterRoute ##################################################
-            RegisterRoute(endpoint_id, route) => {
-                router.lsadb.add_endpoint(endpoint_id, &route);
+            RegisterEndpoint(endpoint_id, endpoint_info, sender) => {
+                router
+                    .lsadb
+                    .add_endpoint(endpoint_id, endpoint_info, sender);
                 // dbg!(&router.lsadb);
 
-                let forward_to = route.via.clone();
-                return match router.route_table.add_route(endpoint_id, route) {
-                    Ok(_) => {
-                        match forward_to {
-                            ForwardTo::Local(tx) => {
-                                tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                                    .await
-                                    .ok();
-                            }
-                            #[cfg(feature = "remote")]
-                            ForwardTo::Remote(_unbounded_sender, _node_id) => {
-                                panic!("Can't create remote endpoint locally")
-                            }
-                            ForwardTo::Broadcast(listener, _) => {
-                                for tx in listener {
-                                    // There should only be one in here on creation
-                                    tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                                        .await
-                                        .ok();
-                                }
-                            }
-                            ForwardTo::Multicast(items) => {
-                                match items
-                                    .into_iter()
-                                    .next()
-                                    .expect("This should be set when this was created")
-                                {
-                                    Address::Endpoint(local_endpoint_id) => {
-                                        // this is all to lookup the right address to return Success to
-                                        if let ForwardTo::Local(tx) = router
-                                            .forward_table
-                                            .lookup(&local_endpoint_id.into())
-                                            .unwrap()
-                                        {
-                                            tx.send(ClientMessage::SuccessfulRegistration(
-                                                endpoint_id,
-                                            ))
-                                            .await
-                                            .ok();
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
+                // let forward_to = route.via.clone();
+                // return match router.route_table.add_route(endpoint_id, route) {
+                //     Ok(_) => {
+                //         match forward_to {
+                //             ForwardTo::Local(tx) => {
+                //                 tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                //                     .await
+                //                     .ok();
+                //             }
+                //             #[cfg(feature = "remote")]
+                //             ForwardTo::Remote(_unbounded_sender, _node_id) => {
+                //                 panic!("Can't create remote endpoint locally")
+                //             }
+                //             ForwardTo::Broadcast(listener, _) => {
+                //                 for tx in listener {
+                //                     // There should only be one in here on creation
+                //                     tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                //                         .await
+                //                         .ok();
+                //                 }
+                //             }
+                //             ForwardTo::Multicast(items) => {
+                //                 match items
+                //                     .into_iter()
+                //                     .next()
+                //                     .expect("This should be set when this was created")
+                //                 {
+                //                     Address::Endpoint(local_endpoint_id) => {
+                //                         // this is all to lookup the right address to return Success to
+                //                         if let ForwardTo::Local(tx) = router
+                //                             .forward_table
+                //                             .lookup(&local_endpoint_id.into())
+                //                             .unwrap()
+                //                         {
+                //                             tx.send(ClientMessage::SuccessfulRegistration(
+                //                                 endpoint_id,
+                //                             ))
+                //                             .await
+                //                             .ok();
+                //                         }
+                //                     }
+                //                     _ => {}
+                //                 }
+                //             }
+                //         }
 
-                        Some(RouteChange)
-                    }
+                //         Some(RouteChange)
+                //     }
 
-                    Err((route, e)) => {
-                        if let Route {
-                            via: ForwardTo::Local(tx),
-                            ..
-                        } = route
-                        {
-                            tx.send(ClientMessage::FailedRegistration(
-                                endpoint_id,
-                                e.to_string(),
-                            ))
-                            .await
-                            .ok();
-                        }
-                        Some(Listen)
-                    }
-                };
+                //     Err((route, e)) => {
+                //         if let Route {
+                //             via: ForwardTo::Local(tx),
+                //             ..
+                //         } = route
+                //         {
+                //             tx.send(ClientMessage::FailedRegistration(
+                //                 endpoint_id,
+                //                 e.to_string(),
+                //             ))
+                //             .await
+                //             .ok();
+                //         }
+                //         Some(Listen)
+                //     }
+                // };
+                Some(RouteChange)
             }
 
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
+                router.lsadb.shutdown();
                 #[cfg(feature = "remote")]
                 router.route_table.peers.clear();
                 router
@@ -558,19 +571,23 @@ impl State {
 
             // ####### RouteChange ##################################################
             RouteChange => {
-                let new_forward_table = ForwardingTable::from(&router.route_table);
+                let fib_table = router.lsadb.build_fib();
+                // dbg!(&fib_table);
+                router.routes_watch_tx.send(fib_table).unwrap();
 
-                router.forward_table = new_forward_table;
-                // trace!("Updated forwarding table: Router: {:#?}", router);
-                let forward_table = router.forward_table.clone();
-                trace!("New forwarding table: {:#?}", forward_table);
+                // let new_forward_table = ForwardingTable::from(&router.route_table);
+                // dbg!(&new_forward_table, &fib_table);
 
-                router.routes_watch_tx.send(forward_table).unwrap();
+                // router.forward_table = new_forward_table;
+                // // trace!("Updated forwarding table: Router: {:#?}", router);
+                // let forward_table = router.forward_table.clone();
+                // trace!("New forwarding table: {:#?}", forward_table);
+
+                // router.routes_watch_tx.send(forward_table).unwrap();
                 // trace!("Updated forwarding table: Router: {:#?}", router);
                 // Notify peers of route changes
-                #[cfg(feature = "remote")]
-                router.send_route_updates();
-
+                // #[cfg(feature = "remote")]
+                // router.send_route_updates();
                 return Some(Listen);
             }
         }

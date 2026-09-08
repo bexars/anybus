@@ -12,6 +12,7 @@ use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 use crate::messages::AnyBusStatusMsg;
 
+use crate::messages::RouterMsg::RegisterEndpoint;
 use crate::messages::{ClientMessage, RouterMsg};
 use crate::receivers::Receiver;
 
@@ -96,7 +97,10 @@ impl Handle {
             learned_from: 0.into(),
         };
 
-        let register_msg = RouterMsg::RegisterRoute(endpoint_id, route);
+        let ei = (&route).into();
+
+        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+        info!("About to send register_msg");
         self.tx.send(register_msg).await?;
         info!("Sent register_msg");
         self.wait_for_registration(&mut rx, endpoint_id).await?;
@@ -130,19 +134,19 @@ impl Handle {
         realm: Realm,
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let route = Route {
+            kind: crate::routing::RouteKind::Unicast,
+            #[cfg(feature = "remote")]
+            realm,
+            via: crate::routing::ForwardTo::Local(tx.clone()),
+            cost: 0.into(),
+            #[cfg(feature = "remote")]
+            learned_from: 0.into(),
+        };
+        let ei = (&route).into();
 
-        let register_msg = RouterMsg::RegisterRoute(
-            endpoint_id,
-            Route {
-                kind: crate::routing::RouteKind::Unicast,
-                #[cfg(feature = "remote")]
-                realm,
-                via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
+        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+
         info!("Send register_msg {:?}", register_msg);
 
         self.tx.send(register_msg).await?;
@@ -175,18 +179,19 @@ impl Handle {
 
         // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
 
-        let register_msg = RouterMsg::RegisterRoute(
-            endpoint_id,
-            Route {
-                kind: crate::routing::RouteKind::Unicast,
-                #[cfg(feature = "remote")]
-                realm: crate::routing::Realm::Userspace,
-                via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
+        let route = Route {
+            kind: crate::routing::RouteKind::Unicast,
+            #[cfg(feature = "remote")]
+            realm: crate::routing::Realm::Userspace,
+            via: crate::routing::ForwardTo::Local(tx.clone()),
+            cost: 0.into(),
+            #[cfg(feature = "remote")]
+            learned_from: 0.into(),
+        };
+
+        let ei = (&route).into();
+        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+
         info!("Send register_msg {:?}", register_msg);
 
         self.tx.send(register_msg).await?;
@@ -220,88 +225,89 @@ impl Handle {
     ) -> Result<Receiver<T>, ReceiveError> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        let broadcast_msg = RouterMsg::RegisterRoute(
-            broadcast_id,
-            Route {
-                kind: crate::routing::RouteKind::Broadcast,
-                #[cfg(feature = "remote")]
-                realm,
-                via: crate::routing::ForwardTo::Broadcast(vec![tx], realm),
+        let route = Route {
+            kind: crate::routing::RouteKind::Broadcast,
+            #[cfg(feature = "remote")]
+            realm,
+            via: crate::routing::ForwardTo::Broadcast(vec![tx.clone()], realm),
 
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
+            cost: 0.into(),
+            #[cfg(feature = "remote")]
+            learned_from: 0.into(),
+        };
+        let ei = (&route).into();
+
+        let broadcast_msg = RegisterEndpoint(broadcast_id, ei, tx);
         self.tx.send(broadcast_msg).await?;
         self.wait_for_registration(&mut rx, broadcast_id).await?;
 
         Ok(Receiver::new(broadcast_id, rx, self.clone()))
     }
 
-    // Multicast is broken right now, removing it until fixed.
-    /// Multicast registration, all receivers will get a copy of the message
-    #[allow(dead_code)]
-    pub(crate) async fn register_multicast<T: BusRiderWithUuid + BusDeserialize>(
-        &self,
-    ) -> Result<Receiver<T>, ReceiveError> {
-        let broadcast_id = T::ANYBUS_UUID.into();
-        self.register_multicast_inner(broadcast_id).await
-    }
+    // // Multicast is broken right now, removing it until fixed.
+    // /// Multicast registration, all receivers will get a copy of the message
+    // #[allow(dead_code)]
+    // pub(crate) async fn register_multicast<T: BusRiderWithUuid + BusDeserialize>(
+    //     &self,
+    // ) -> Result<Receiver<T>, ReceiveError> {
+    //     let broadcast_id = T::ANYBUS_UUID.into();
+    //     self.register_multicast_inner(broadcast_id).await
+    // }
 
-    /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
-    #[allow(dead_code)]
+    // /// Multicast registration, all receivers will get a copy of the message sent to the given Uuid and type T that will return a [Receiver] for receiving
+    // #[allow(dead_code)]
 
-    pub(crate) async fn register_multicast_uuid<T: BusRider + BusDeserialize>(
-        &self,
-        broadcast_id: impl Into<EndpointId>,
-    ) -> Result<Receiver<T>, ReceiveError> {
-        let broadcast_id = broadcast_id.into();
-        self.register_multicast_inner(broadcast_id).await
-    }
-    async fn register_multicast_inner<T: BusRider + BusDeserialize>(
-        &self,
-        broadcast_id: EndpointId,
-    ) -> Result<Receiver<T>, ReceiveError> {
-        // let broadcast_id = T::ANYBUS_UUID.into();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let local_id = EndpointId::new();
-        let register_msg = RouterMsg::RegisterRoute(
-            local_id,
-            Route {
-                kind: crate::routing::RouteKind::Unicast,
-                #[cfg(feature = "remote")]
-                realm: crate::routing::Realm::Process,
-                via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
-        info!("Send register_msg {:?}", register_msg);
+    // pub(crate) async fn register_multicast_uuid<T: BusRider + BusDeserialize>(
+    //     &self,
+    //     broadcast_id: impl Into<EndpointId>,
+    // ) -> Result<Receiver<T>, ReceiveError> {
+    //     let broadcast_id = broadcast_id.into();
+    //     self.register_multicast_inner(broadcast_id).await
+    // }
+    // async fn register_multicast_inner<T: BusRider + BusDeserialize>(
+    //     &self,
+    //     broadcast_id: EndpointId,
+    // ) -> Result<Receiver<T>, ReceiveError> {
+    //     // let broadcast_id = T::ANYBUS_UUID.into();
+    //     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    //     let local_id = EndpointId::new();
+    //     let route = Route {
+    //         kind: crate::routing::RouteKind::Unicast,
+    //         #[cfg(feature = "remote")]
+    //         realm: crate::routing::Realm::Process,
+    //         via: crate::routing::ForwardTo::Local(tx.clone()),
+    //         cost: 0.into(),
+    //         #[cfg(feature = "remote")]
+    //         learned_from: 0.into(),
+    //     };
+    //     let ei = route.into();
+    //     let register_msg = RouterMsg::RegisterEndpoint(local_id, ei, tx);
+    //     info!("Send register_msg {:?}", register_msg);
 
-        self.tx.send(register_msg).await?;
-        self.wait_for_registration(&mut rx, local_id).await?;
+    //     self.tx.send(register_msg).await?;
+    //     self.wait_for_registration(&mut rx, local_id).await?;
 
-        let broadcast_msg = RouterMsg::RegisterRoute(
-            broadcast_id,
-            Route {
-                kind: crate::routing::RouteKind::Multicast,
-                #[cfg(feature = "remote")]
-                realm: crate::routing::Realm::Global,
-                via: crate::routing::ForwardTo::Multicast(HashSet::from([Address::Endpoint(
-                    local_id,
-                )])),
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
-        self.tx.send(broadcast_msg).await?;
-        self.wait_for_registration(&mut rx, local_id).await?;
+    //     let route = Route {
+    //         kind: crate::routing::RouteKind::Multicast,
+    //         #[cfg(feature = "remote")]
+    //         realm: crate::routing::Realm::Global,
+    //         via: crate::routing::ForwardTo::Multicast(HashSet::from([Address::Endpoint(
+    //             local_id,
+    //         )])),
+    //         cost: 0.into(),
+    //         #[cfg(feature = "remote")]
+    //         learned_from: 0.into(),
+    //     };
+    //     let ei = route.into();
+    //     let broadcast_msg = RouterMsg::RegisterEndpoint(
+    //         broadcast_id, ei,
 
-        Ok(Receiver::new(local_id, rx, self.clone()))
-    }
+    //     );
+    //     self.tx.send(broadcast_msg).await?;
+    //     self.wait_for_registration(&mut rx, local_id).await?;
+
+    //     Ok(Receiver::new(local_id, rx, self.clone()))
+    // }
 
     async fn wait_for_registration(
         &self,
@@ -330,10 +336,11 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn send_packet(&self, packet: WirePacket, from_connection: ConnectionId) {
+    pub(crate) fn send_packet(&self, packet: WirePacket) {
         let map = self.route_watch_rx.borrow();
 
-        map.forward(packet, from_connection);
+        // map.forward(packet, from_connection);
+        map.forward(packet);
     }
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
@@ -396,18 +403,19 @@ impl Handle {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        let register_msg = RouterMsg::RegisterRoute(
-            response_uuid,
-            Route {
-                kind: crate::routing::RouteKind::Unicast,
-                #[cfg(feature = "remote")]
-                realm: crate::routing::Realm::Process,
-                via: crate::routing::ForwardTo::Local(tx.clone()),
-                cost: 0.into(),
-                #[cfg(feature = "remote")]
-                learned_from: 0.into(),
-            },
-        );
+        let route = Route {
+            kind: crate::routing::RouteKind::Unicast,
+            #[cfg(feature = "remote")]
+            realm: crate::routing::Realm::Process,
+            via: crate::routing::ForwardTo::Local(tx.clone()),
+            cost: 0.into(),
+            #[cfg(feature = "remote")]
+            learned_from: 0.into(),
+        };
+
+        let ei = (&route).into();
+
+        let register_msg = RouterMsg::RegisterEndpoint(response_uuid, ei, tx);
         self.tx
             .send(register_msg)
             .await

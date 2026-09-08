@@ -1,7 +1,10 @@
 mod forward_table;
 mod route_table;
 
+pub(crate) use forward_table::ForwardingTable;
+
 use itertools::Itertools;
+use tokio::sync::mpsc::Sender;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -16,8 +19,7 @@ use crate::{
     routing::{
         ConnectionId, Cost, ForwardTo, Link, Lsa, LsaKey, NodeId, RealmList, Route, RouteKind,
         linkstate::{
-            Adjacency, EndpointInfo, Entry, LsaBody, LsaRecord, db::forward_table::ForwardingTable,
-            db::route_table::RouteTable,
+            Adjacency, EndpointInfo, Entry, LsaBody, LsaRecord, db::route_table::RouteTable,
         },
     },
 };
@@ -50,6 +52,12 @@ impl LsDb {
             routes: RouteTable::new(),
             rebuild_requested: None,
         }
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.db.clear();
+        self.links.clear();
+        self.routes.shutdown();
     }
 
     fn remove_dead_lsa(&mut self, lsa: Lsa) {
@@ -213,7 +221,7 @@ impl LsDb {
         } else {
             tracing::warn!("Couldn't find pending ack to remove {} {:?}", from, key);
         };
-        dbg!(&self.pending_tx);
+        // dbg!(&self.pending_tx);
     }
 
     pub(crate) fn add_peer(&mut self, link: Link) {
@@ -471,62 +479,69 @@ impl LsDb {
         }
     }
 
-    pub(crate) fn add_endpoint(&mut self, endpoint_id: EndpointId, route: &Route) {
-        match self.routes.add_endpoint(endpoint_id, route) {
-            Ok(effect) => match effect {
-                Effects::AddLsa(endpoint_id, endpoint_info) => {
-                    let body = LsaBody::Endpoint(endpoint_info);
-                    let key = LsaKey {
-                        origin: self.self_id,
-                        endpoint_id: endpoint_id.0,
-                    };
-                    let lsa = Lsa {
-                        key,
-                        seq: 0,
-                        dead: false,
-                        body,
-                    };
-                    let record = LsaRecord {
-                        lsa,
-                        updated_at: Instant::now(),
-                    };
-                    self.flood_all_neighbors(record.lsa.clone(), 0.into());
+    pub(crate) fn add_endpoint(
+        &mut self,
+        endpoint_id: EndpointId,
+        endpoint_info: EndpointInfo,
+        sender: Sender<ClientMessage>,
+    ) {
+        match self
+            .routes
+            .add_endpoint(endpoint_id, endpoint_info, sender.clone())
+        {
+            Ok(effect) => {
+                sender
+                    .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                    .ok();
+                match effect {
+                    Effects::AddLsa(endpoint_id, endpoint_info) => {
+                        let body = LsaBody::Endpoint(endpoint_info);
+                        let key = LsaKey {
+                            origin: self.self_id,
+                            endpoint_id: endpoint_id.0,
+                        };
+                        let lsa = Lsa {
+                            key,
+                            seq: 0,
+                            dead: false,
+                            body,
+                        };
+                        let record = LsaRecord {
+                            lsa,
+                            updated_at: Instant::now(),
+                        };
+                        self.flood_all_neighbors(record.lsa.clone(), 0.into());
 
-                    self.db.insert(key, record);
-                    self.request_rebuild();
-                }
-                Effects::UpdateLsa(endpoint_id, endpoint_info) => {
-                    let record = self.db.get_mut(&LsaKey {
-                        origin: self.self_id,
-                        endpoint_id: endpoint_id.0,
-                    });
-
-                    if let Some(record) = record {
-                        record.lsa.seq += 1;
-                        record.lsa.body = LsaBody::Endpoint(endpoint_info);
-                        record.updated_at = Instant::now();
-                        let lsa = record.lsa.clone();
-                        self.flood_all_neighbors(lsa, 0.into());
+                        self.db.insert(key, record);
                         self.request_rebuild();
-                    } else {
-                        tracing::error!(
-                            "Failed to update LSA for endpoint {:?}: LSA not found",
-                            endpoint_id
-                        );
                     }
+                    Effects::UpdateLsa(endpoint_id, endpoint_info) => {
+                        let record = self.db.get_mut(&LsaKey {
+                            origin: self.self_id,
+                            endpoint_id: endpoint_id.0,
+                        });
+
+                        if let Some(record) = record {
+                            record.lsa.seq += 1;
+                            record.lsa.body = LsaBody::Endpoint(endpoint_info);
+                            record.updated_at = Instant::now();
+                            let lsa = record.lsa.clone();
+                            self.flood_all_neighbors(lsa, 0.into());
+                            self.request_rebuild();
+                        } else {
+                            tracing::error!(
+                                "Failed to update LSA for endpoint {:?}: LSA not found",
+                                endpoint_id
+                            );
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Err(_e) => {
-                if let Route {
-                    via: ForwardTo::Local(tx),
-                    ..
-                } = route
-                {
-                    // TODO cleanup this error message
-                    tx.try_send(ClientMessage::FailedRegistration(endpoint_id, "".into()))
-                        .ok();
-                }
+                sender
+                    .try_send(ClientMessage::FailedRegistration(endpoint_id, "".into()))
+                    .ok();
             }
         }
     }

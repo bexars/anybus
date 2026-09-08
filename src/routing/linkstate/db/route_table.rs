@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::routing::linkstate::LsRouteEntry;
+use tokio::sync::mpsc::Sender;
+
 #[cfg(feature = "remote")]
 use crate::{
     EndpointId,
@@ -12,6 +13,7 @@ use crate::{
         },
     },
 };
+use crate::{messages::ClientMessage, routing::linkstate::LsRouteEntry};
 
 /// This will eventually replace the existing routing_table.rs
 ///
@@ -25,6 +27,22 @@ impl RouteTable {
     pub(crate) fn routes(&self) -> &HashMap<EndpointId, LsRouteEntry> {
         &self.table
     }
+
+    pub(crate) fn shutdown(&mut self) {
+        // send a close to every Sender
+        for re in self.table.values() {
+            for fwd in re.routes.iter() {
+                match fwd.via {
+                    LsForwardTo::Local(ref sender) => {
+                        sender.try_send(ClientMessage::Shutdown).ok();
+                    }
+                    LsForwardTo::Remote(ref _node_id) => {}
+                }
+            }
+        }
+
+        self.table.clear()
+    }
 }
 
 pub(crate) enum Effects {
@@ -33,6 +51,7 @@ pub(crate) enum Effects {
     RemoveLsa(EndpointId),
     RebuildFib,
     Noop,
+    UnicastAlreadyExists,
 }
 
 #[derive(Debug)]
@@ -50,49 +69,53 @@ impl RouteTable {
     pub(crate) fn add_endpoint(
         &mut self,
         endpoint_id: EndpointId,
-        route: &Route,
+        endpoint_info: EndpointInfo,
+        sender: Sender<ClientMessage>,
     ) -> Result<Effects, RouteTableError> {
         let mut effect = Effects::Noop;
 
         let route_entry = self.table.entry(endpoint_id).or_insert(LsRouteEntry {
             routes: vec![],
-            kind: route.kind,
+            kind: endpoint_info.kind,
         });
-        if route_entry.kind != route.kind {
+        if route_entry.kind != endpoint_info.kind {
             return Err(MismatchedRouteKind);
         }
 
-        let sender = match route.via {
-            ForwardTo::Local(ref sender) => sender.clone(),
-            ForwardTo::Remote(ref _sender, _connection_id) => unreachable!(),
-            ForwardTo::Broadcast(ref senders, _realm) => senders[0].clone(),
-            ForwardTo::Multicast(ref _hash_set) => todo!(),
-        };
+        // let sender = match route.via {
+        //     ForwardTo::Local(ref sender) => sender.clone(),
+        //     ForwardTo::Remote(ref _sender, _connection_id) => unreachable!(),
+        //     ForwardTo::Broadcast(ref senders, _realm) => senders[0].clone(),
+        //     ForwardTo::Multicast(ref _hash_set) => todo!(),
+        // };
 
         let ls_route = LsRoute {
             via: LsForwardTo::Local(sender),
-            cost: route.cost,
+            cost: endpoint_info.cost,
             #[cfg(feature = "remote")]
-            realm: route.realm,
+            realm: endpoint_info.realm,
             #[cfg(feature = "remote")]
-            kind: route.kind,
+            kind: endpoint_info.kind,
         };
 
-        if route_entry.routes.is_empty() {
-            route_entry.routes.push(ls_route);
-            #[cfg(feature = "remote")]
-            {
-                effect = Effects::AddLsa(endpoint_id, route.into());
+        match endpoint_info.kind {
+            RouteKind::Unicast => {
+                if route_entry.routes.is_empty() {
+                    effect = Effects::AddLsa(endpoint_id, endpoint_info);
+                    route_entry.routes.push(ls_route);
+                } else {
+                    effect = Effects::UnicastAlreadyExists;
+                }
             }
-        } else {
-            let old_cheap = route_entry.routes.iter().min_by_key(|r| r.cost).unwrap();
-            if old_cheap.cost > ls_route.cost {
-                #[cfg(feature = "remote")]
-                {
-                    effect = Effects::UpdateLsa(endpoint_id, (&ls_route).into())
-                };
+            RouteKind::Anycast | RouteKind::Broadcast | RouteKind::Multicast => {
+                if route_entry.routes.is_empty() {
+                    effect = Effects::AddLsa(endpoint_id, endpoint_info);
+                } else {
+                    effect = Effects::UpdateLsa(endpoint_id, endpoint_info);
+                }
                 route_entry.routes.push(ls_route);
             }
+            RouteKind::Node => {}
         }
 
         Ok(effect)

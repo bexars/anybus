@@ -185,7 +185,7 @@ async fn main() {
     // let c2 = tokio::spawn(countdown(handle.clone(), "Bob".into(), 15));
     let c3 = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(12)).await;
-        bus.shutdown();
+        bus.shutdown(None);
     });
     let _blah = tokio::join! { cl, c1, c3 };
     println!("After join()");

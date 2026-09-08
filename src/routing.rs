@@ -5,6 +5,7 @@ pub(crate) mod router;
 pub(crate) mod routing_table;
 // use tokio_with_wasm::alias as tokio;
 
+pub(crate) use linkstate::EndpointInfo;
 #[cfg(feature = "remote")]
 pub(crate) use linkstate::{Link, LsDb, Lsa, LsaKey};
 #[cfg(feature = "serde")]
@@ -38,7 +39,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct NodeId(Uuid);
+pub struct NodeId(Uuid);
 
 impl Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -152,14 +153,14 @@ pub(crate) struct PeerEntry {
 // }
 
 #[derive(Clone, Default)]
-pub(crate) struct ForwardingTable {
+pub(crate) struct ForwardingTableOld {
     table: std::collections::HashMap<EndpointId, ForwardTo>,
     node_id: NodeId,
     #[cfg(feature = "remote")]
     peers: HashMap<ConnectionId, PeerEntry>,
 }
 
-impl Debug for ForwardingTable {
+impl Debug for ForwardingTableOld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Node: {}", self.node_id)?;
         self.table
@@ -193,7 +194,7 @@ impl Debug for ForwardingTable {
     }
 }
 
-impl ForwardingTable {
+impl ForwardingTableOld {
     pub(crate) fn lookup(&self, address: &Address) -> Option<&ForwardTo> {
         match address {
             Address::Remote(eid, nid) => {
@@ -350,7 +351,7 @@ impl ForwardingTable {
     }
 }
 
-impl From<&RoutingTable> for ForwardingTable {
+impl From<&RoutingTable> for ForwardingTableOld {
     fn from(value: &RoutingTable) -> Self {
         let mut table = std::collections::HashMap::new();
         for (endpoint_id, route_entry) in value.table.iter() {

@@ -163,7 +163,7 @@ impl Peer {
     fn send_packet(&mut self, packet: WirePacket) {
         self.stats.rx.record(&packet);
 
-        self.handle.send_packet(packet, self.connection_id);
+        self.handle.send_packet(packet);
     }
 
     pub(crate) fn handle_node_message(&mut self, node_message: NodeMessage) {

@@ -10,6 +10,7 @@
 
 mod db;
 
+pub(crate) use db::ForwardingTable;
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
 use web_time::Instant;
