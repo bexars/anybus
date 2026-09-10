@@ -5,3 +5,5 @@
 .zed/settings.json
 src/peers/.DS_Store
 src/peers/ws/.DS_Store
+deploy.sh
+examples/relay/dummy/example2.toml

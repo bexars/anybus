@@ -6,7 +6,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     EndpointId,
     routing::{
-        Cost, ForwardTo, NodeId, Route, RouteKind,
+        NodeId, RouteKind,
         linkstate::{
             EndpointInfo, LsForwardTo, LsRoute,
             db::route_table::RouteTableError::MismatchedRouteKind,
@@ -57,6 +57,7 @@ pub(crate) enum Effects {
 #[derive(Debug)]
 pub(crate) enum RouteTableError {
     MismatchedRouteKind,
+    DuplicateUnicast,
 }
 
 impl RouteTable {
@@ -82,13 +83,6 @@ impl RouteTable {
             return Err(MismatchedRouteKind);
         }
 
-        // let sender = match route.via {
-        //     ForwardTo::Local(ref sender) => sender.clone(),
-        //     ForwardTo::Remote(ref _sender, _connection_id) => unreachable!(),
-        //     ForwardTo::Broadcast(ref senders, _realm) => senders[0].clone(),
-        //     ForwardTo::Multicast(ref _hash_set) => todo!(),
-        // };
-
         let ls_route = LsRoute {
             via: LsForwardTo::Local(sender),
             cost: endpoint_info.cost,
@@ -108,10 +102,15 @@ impl RouteTable {
                 }
             }
             RouteKind::Anycast | RouteKind::Broadcast | RouteKind::Multicast => {
-                if route_entry.routes.is_empty() {
-                    effect = Effects::AddLsa(endpoint_id, endpoint_info);
+                // TODO update with anycast cost changes
+                if route_entry
+                    .routes
+                    .iter()
+                    .any(|r| matches!(&r.via, LsForwardTo::Local(_sender)))
+                {
+                    effect = Effects::Noop;
                 } else {
-                    effect = Effects::UpdateLsa(endpoint_id, endpoint_info);
+                    effect = Effects::AddLsa(endpoint_id, endpoint_info);
                 }
                 route_entry.routes.push(ls_route);
             }
@@ -168,7 +167,9 @@ impl RouteTable {
         if route_entry.kind != info.kind {
             return Err(RouteTableError::MismatchedRouteKind);
         }
-
+        if route_entry.kind == RouteKind::Unicast && !route_entry.routes.is_empty() {
+            return Err(RouteTableError::DuplicateUnicast);
+        }
         if route_entry.routes.iter().all(|r| r.via.is_local()) {
             effect = Effects::RebuildFib;
         }
@@ -179,7 +180,6 @@ impl RouteTable {
             realm: info.realm,
             kind: info.kind,
         });
-
         Ok(effect)
     }
 
@@ -214,7 +214,7 @@ impl RouteTable {
         }
     }
 
-    pub(crate) fn purge_dead_origin(&mut self, origin: NodeId) {
+    pub(crate) fn _purge_dead_origin(&mut self, origin: NodeId) {
         let mut to_remove = vec![];
         for (endpoint_id, entry) in self.table.iter_mut() {
             let len = entry.routes.len();

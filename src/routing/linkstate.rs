@@ -13,7 +13,8 @@ mod db;
 pub(crate) use db::ForwardingTable;
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
-use web_time::Instant;
+use tokio::time::Instant;
+use tokio_with_wasm::alias as tokio;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
@@ -113,13 +114,13 @@ struct LsRouteEntry {
 }
 
 impl LsRouteEntry {
-    fn min_cost(&self) -> Cost {
-        self.routes
-            .iter()
-            .map(|r| r.cost)
-            .min()
-            .unwrap_or(Cost(u16::MAX)) // Should always be a route, but just in case
-    }
+    // fn min_cost(&self) -> Cost {
+    //     self.routes
+    //         .iter()
+    //         .map(|r| r.cost)
+    //         .min()
+    //         .unwrap_or(Cost(u16::MAX)) // Should always be a route, but just in case
+    // }
 }
 
 #[derive(Debug, Clone)]

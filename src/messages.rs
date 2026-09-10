@@ -1,13 +1,9 @@
 #[cfg(feature = "remote")]
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "remote")]
-use crate::routing::{
-    Advertisement, ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket,
-};
+use crate::routing::{ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket};
 use crate::{
     BusRiderWithUuid,
     routing::{EndpointId, EndpointInfo, Packet},
@@ -21,10 +17,10 @@ pub(crate) enum RouterMsg {
     RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost, RealmList),
     #[cfg(feature = "remote")]
     UnRegisterPeer(ConnectionId),
-    #[cfg(feature = "remote")]
-    AddPeerEndpoints(ConnectionId, HashSet<Advertisement>),
-    #[cfg(feature = "remote")]
-    RemovePeerEndpoints(ConnectionId, HashSet<Advertisement>),
+    // #[cfg(feature = "remote")]
+    // AddPeerEndpoints(ConnectionId, HashSet<Advertisement>),
+    // #[cfg(feature = "remote")]
+    // RemovePeerEndpoints(ConnectionId, HashSet<Advertisement>),
     LsaInbound {
         from: ConnectionId,
         lsa: Lsa,
@@ -77,8 +73,8 @@ impl BusRiderWithUuid for AnyBusStatusMsg {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
-    Advertise(HashSet<Advertisement>),
-    Withdraw(HashSet<Advertisement>),
+    // Advertise(HashSet<Advertisement>),
+    // Withdraw(HashSet<Advertisement>),
     Lsa(Lsa),
     LsaAck { key: LsaKey, seq: u64 },
 }

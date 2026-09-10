@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::mpsc;
 // use tokio_with_wasm::alias as tokio;
@@ -18,6 +17,7 @@ use crate::receivers::Receiver;
 
 use crate::receivers::RpcReceiver;
 use crate::routing::Address;
+
 #[cfg(feature = "remote")]
 use crate::routing::ConnectionId;
 #[cfg(feature = "remote")]
@@ -91,10 +91,10 @@ impl Handle {
             kind: crate::routing::RouteKind::Anycast,
             #[cfg(feature = "remote")]
             realm,
-            via: crate::routing::ForwardTo::Local(tx.clone()),
+            _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0.into(),
+            _learned_from: 0.into(),
         };
 
         let ei = (&route).into();
@@ -138,10 +138,10 @@ impl Handle {
             kind: crate::routing::RouteKind::Unicast,
             #[cfg(feature = "remote")]
             realm,
-            via: crate::routing::ForwardTo::Local(tx.clone()),
+            _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0.into(),
+            _learned_from: 0.into(),
         };
         let ei = (&route).into();
 
@@ -183,10 +183,10 @@ impl Handle {
             kind: crate::routing::RouteKind::Unicast,
             #[cfg(feature = "remote")]
             realm: crate::routing::Realm::Userspace,
-            via: crate::routing::ForwardTo::Local(tx.clone()),
+            _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0.into(),
+            _learned_from: 0.into(),
         };
 
         let ei = (&route).into();
@@ -229,11 +229,11 @@ impl Handle {
             kind: crate::routing::RouteKind::Broadcast,
             #[cfg(feature = "remote")]
             realm,
-            via: crate::routing::ForwardTo::Broadcast(vec![tx.clone()], realm),
+            _via: crate::routing::ForwardTo::Broadcast(vec![tx.clone()], realm),
 
             cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0.into(),
+            _learned_from: 0.into(),
         };
         let ei = (&route).into();
 
@@ -336,11 +336,9 @@ impl Handle {
     }
 
     #[cfg(feature = "remote")]
-    pub(crate) fn send_packet(&self, packet: WirePacket) {
+    pub(crate) fn forward_packet(&self, packet: WirePacket, connection_id: ConnectionId) {
         let map = self.route_watch_rx.borrow();
-
-        // map.forward(packet, from_connection);
-        map.forward(packet);
+        map.forward(packet, connection_id);
     }
 
     /// Sends a single [BusRider] message to the associated UUID in the trait.
@@ -375,7 +373,7 @@ impl Handle {
         map.send(Packet {
             to: address,
             reply_to: None,
-            from: None,
+            from: map.our_id,
             payload: Payload::BusRider(Box::new(payload) as Box<dyn BusRider>),
         })
         .map_err(AnyBusHandleError::SendError)
@@ -387,7 +385,7 @@ impl Handle {
         map.send(Packet {
             to: ticket.dest.into(),
             reply_to: None,
-            from: None,
+            from: map.our_id,
             payload: Payload::BusRider(ticket.rider as Box<dyn BusRider>),
         })
         .map_err(AnyBusHandleError::SendError)
@@ -407,10 +405,10 @@ impl Handle {
             kind: crate::routing::RouteKind::Unicast,
             #[cfg(feature = "remote")]
             realm: crate::routing::Realm::Process,
-            via: crate::routing::ForwardTo::Local(tx.clone()),
+            _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
-            learned_from: 0.into(),
+            _learned_from: 0.into(),
         };
 
         let ei = (&route).into();
@@ -508,16 +506,14 @@ impl RequestHelper {
         let payload = Box::new(payload);
         let to_address: Address = T::ANYBUS_UUID.into();
 
-        self.handle
-            .route_watch_rx
-            .borrow()
-            .send(Packet {
-                to: to_address,
-                reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
-                from: None,
-                payload: Payload::BusRider(payload),
-            })
-            .map_err(AnyBusHandleError::SendError)?;
+        let fib = self.handle.route_watch_rx.borrow();
+        fib.send(Packet {
+            to: to_address,
+            reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
+            from: fib.our_id,
+            payload: Payload::BusRider(payload),
+        })
+        .map_err(AnyBusHandleError::SendError)?;
         // drop(map);
         match self.rx.recv().await {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
@@ -547,16 +543,15 @@ impl RequestHelper {
         // let address: Address = T::ANYBUS_UUID.into();
         // println!("Payload: {:?}", payload);
         // println!("To: {}", to_address);
-        self.handle
-            .route_watch_rx
-            .borrow()
-            .send(Packet {
-                to: to_address,
-                reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
-                from: None,
-                payload: Payload::BusRider(payload),
-            })
-            .map_err(AnyBusHandleError::SendError)?;
+        let fib = self.handle.route_watch_rx.borrow();
+
+        fib.send(Packet {
+            to: to_address,
+            reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
+            from: fib.our_id,
+            payload: Payload::BusRider(payload),
+        })
+        .map_err(AnyBusHandleError::SendError)?;
         // println!("Packet sent from inside rpc_helper");
         // drop(map);
         match self.rx.recv().await {

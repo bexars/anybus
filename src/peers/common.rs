@@ -1,11 +1,11 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use web_time::Instant;
 
 use crate::{
     Handle, Realm,
     messages::{NodeMessage, RouterMsg},
-    routing::{Advertisement, ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
+    routing::{ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
 };
 
 pub(crate) struct Heartbeat {
@@ -88,7 +88,6 @@ impl Peer {
         peer_id: NodeId,
         our_id: NodeId,
         handle: Handle,
-        // rx_node: mpsc::Receiver<NodeMessage>,
         realm: Realm,
         connection_id: ConnectionId,
         cost: Cost,
@@ -110,7 +109,7 @@ impl Peer {
 
         let peer_entry = PeerEntry {
             peer_tx,
-            realm: peer.realm.clone(),
+            // realm: peer.realm.clone(),
         };
 
         peer.handle.send_broker(RouterMsg::RegisterPeer(
@@ -132,22 +131,6 @@ impl Peer {
         Some(msg)
     }
 
-    fn add_endpoints(&mut self, ads: HashSet<Advertisement>) {
-        self.handle
-            .send_broker(crate::messages::RouterMsg::AddPeerEndpoints(
-                self.connection_id,
-                ads,
-            ));
-    }
-
-    fn remove_endpoints(&mut self, ads: HashSet<Advertisement>) {
-        self.handle
-            .send_broker(crate::messages::RouterMsg::RemovePeerEndpoints(
-                self.connection_id,
-                ads,
-            ));
-    }
-
     pub(crate) fn unregister(&mut self) {
         self.handle
             .send_broker(crate::messages::RouterMsg::UnRegisterPeer(
@@ -160,17 +143,15 @@ impl Peer {
         self.rx_node.close();
     }
 
-    fn send_packet(&mut self, packet: WirePacket) {
+    fn forward_packet(&mut self, packet: WirePacket, connection_id: ConnectionId) {
         self.stats.rx.record(&packet);
 
-        self.handle.send_packet(packet);
+        self.handle.forward_packet(packet, connection_id);
     }
 
     pub(crate) fn handle_node_message(&mut self, node_message: NodeMessage) {
         match node_message {
-            NodeMessage::WirePacket(packet) => self.send_packet(packet),
-            NodeMessage::Advertise(hash_set) => self.add_endpoints(hash_set),
-            NodeMessage::Withdraw(hash_set) => self.remove_endpoints(hash_set),
+            NodeMessage::WirePacket(packet) => self.forward_packet(packet, self.connection_id),
             NodeMessage::Lsa(lsa) => self.handle.send_broker(RouterMsg::LsaInbound {
                 from: self.connection_id,
                 lsa,

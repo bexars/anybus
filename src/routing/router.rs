@@ -1,21 +1,21 @@
 // use tokio_with_wasm::alias as tokio;
 
-use std::collections::HashMap;
 #[cfg(feature = "remote")]
 use std::collections::HashSet;
+// use web_time::Instant;
 
 #[cfg(feature = "remote")]
-use crate::routing::{
-    Advertisement, ConnectionId, NodeMessage, PeerEntry, Realm, peer_registry::PeerRegistry,
-};
+use crate::routing::{Advertisement, ConnectionId, PeerEntry};
 
 use crate::{
     Handle,
     routing::{
-        LsDb, RouteKind,
+        LsDb,
         linkstate::{EndpointInfo, ForwardingTable},
     },
 };
+
+use tokio_with_wasm::alias as tokio;
 
 use tokio::{
     select,
@@ -28,21 +28,21 @@ use tracing::{info, trace};
 
 use crate::{
     messages::{ClientMessage, RouterMsg},
-    routing::{Address, EndpointId, ForwardTo, NodeId, Route, routing_table::RoutingTable},
+    routing::{EndpointId, NodeId},
 };
 
 pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
 
 #[derive(Debug)]
 pub(crate) struct Router {
-    forward_table: ForwardingTable,
-    route_table: RoutingTable,
+    // forward_table: ForwardingTable,
+    // route_table: RoutingTable,
     routes_watch_tx: Sender<ForwardingTable>,
     #[allow(dead_code)]
     anybus_id: NodeId,
     broker_rx: mpsc::Receiver<RouterMsg>,
     handle: Handle,
-    lsadb: LsDb,
+    lsdb: LsDb,
 }
 
 impl Router {
@@ -59,17 +59,11 @@ impl Router {
         };
 
         Self {
-            forward_table,
             routes_watch_tx: tx,
             anybus_id: node_id,
             broker_rx,
-            route_table: RoutingTable {
-                table: HashMap::new(),
-                node_id,
-                #[cfg(feature = "remote")]
-                peers: PeerRegistry::default(),
-            },
-            lsadb: LsDb::new(node_id),
+
+            lsdb: LsDb::new(node_id),
             handle,
         }
     }
@@ -86,158 +80,6 @@ impl Router {
     pub(crate) fn get_handle(&self) -> Handle {
         self.handle.clone()
     }
-
-    // #[cfg(feature = "remote")]
-    // fn send_route_updates(&mut self) {
-    //     trace!("Route Table: {:?}", self.route_table);
-    //     trace!("Peers: {:?}", self.route_table.peers);
-    //     for (peer_id, peer_info) in self.route_table.peers.iter_mut() {
-    //         use std::collections::HashSet;
-
-    //         // trace!("routing table:{:#?}", self.route_table.table);
-    //         let mut advertisements = HashSet::new();
-    //         for (uuid, route_entry) in self.route_table.table.iter() {
-    //             use crate::routing::Advertisement;
-
-    //             let mut advertisement = Advertisement {
-    //                 endpoint_id: *uuid,
-    //                 kind: route_entry.kind,
-    //                 cost: 0,
-    //             };
-    //             if let Some(best_route) = route_entry.best_route() {
-    //                 advertisement.cost = best_route.cost + 5;
-    //                 // Don't send routes back to the peer we learned them from
-    //                 if best_route.learned_from == *peer_id {
-    //                     continue;
-    //                 }
-    //                 // Don't send routes the peer already learned from us
-    //                 if peer_info.advertised_routes.contains(&advertisement) {
-    //                     continue;
-    //                 }
-    //                 // Don't send local routes to peers
-    //                 if best_route.realm == Realm::Process {
-    //                     continue;
-    //                 }
-    //                 advertisements.insert(advertisement);
-    //             }
-    //         }
-    //         trace!(
-    //             "Peer {}: {} new advertisements to send",
-    //             peer_id,
-    //             advertisements.len()
-    //         );
-    //         let withdrawn: HashSet<_> = peer_info
-    //             .advertised_routes
-    //             .difference(&peer_info.advertised_routes)
-    //             .cloned()
-    //             .collect();
-    //         // peer_info.advertised_routes = advertisements.clone();
-    //         let ads: Vec<_> = advertisements
-    //             .difference(&peer_info.advertised_routes)
-    //             .cloned()
-    //             .collect();
-    //         for ad in ads {
-    //             peer_info.advertised_routes.insert(ad);
-    //         }
-    //         if !withdrawn.is_empty() {
-    //             let length = withdrawn.len();
-    //             let msg = NodeMessage::Withdraw(withdrawn);
-
-    //             if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
-    //                 trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
-    //             } else {
-    //                 trace!("Sent {} route withdrawals to peer {}", peer_id, length);
-    //             }
-    //         }
-    //         if !advertisements.is_empty() {
-    //             let length = advertisements.len();
-    //             let msg = NodeMessage::Advertise(advertisements);
-
-    //             if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
-    //                 trace!(
-    //                     "Failed to send route advertisement to peer {}: {}",
-    //                     peer_id, e
-    //                 );
-    //             } else {
-    //                 trace!("Sent {} route advertisements to peer {}", peer_id, length);
-    //             }
-    //         }
-    //     }
-    // }
-
-    #[cfg(feature = "remote")]
-    fn send_route_updates(&mut self) {
-        trace!("Route Table: {:?}", self.route_table);
-        // trace!("Peers: {:?}", self.route_table.peers);
-
-        for peer_info in self.route_table.peers.iter_mut() {
-            let peer_id = peer_info.peer_id;
-            let connection_id = peer_info.connection_id;
-            let mut new_advertisements = HashSet::new();
-
-            for (uuid, route_entry) in self.route_table.table.iter() {
-                if let Some(best_route) = route_entry.best_route() {
-                    // Skip Process realm and routes learned from this peer
-                    if best_route.realm == Realm::Process
-                        || best_route.learned_from == connection_id
-                    {
-                        continue;
-                    }
-                    // let a: u16 = 5;
-                    // let b = a.saturating_add(5);
-
-                    let advertisement = Advertisement {
-                        endpoint_id: *uuid,
-                        kind: route_entry.kind,
-                        cost: best_route.cost + 5,
-                    };
-
-                    new_advertisements.insert(advertisement);
-                }
-            }
-
-            // Real withdrawals = previously advertised but no longer present
-            let withdrawn: HashSet<_> = peer_info
-                .advertised_routes
-                .difference(&new_advertisements)
-                .cloned()
-                .collect();
-
-            // Real new ads = present now but not previously advertised
-            let to_advertise: HashSet<_> = new_advertisements
-                .difference(&peer_info.advertised_routes)
-                .cloned()
-                .collect();
-
-            // Update the tracking set
-            peer_info.advertised_routes = new_advertisements;
-
-            //  send new advertisements first
-            if !to_advertise.is_empty() {
-                let length = to_advertise.len();
-                let msg = NodeMessage::Advertise(to_advertise);
-                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
-                    trace!(
-                        "Failed to send route advertisement to peer {}: {}",
-                        peer_id, e
-                    );
-                } else {
-                    trace!("Sent {} route advertisements to peer {}", length, peer_id);
-                }
-            }
-
-            // Send withdrawals second
-            if !withdrawn.is_empty() {
-                let length = withdrawn.len();
-                let msg = NodeMessage::Withdraw(withdrawn);
-                if let Err(e) = peer_info.peer_entry.peer_tx.try_send(msg) {
-                    trace!("Failed to send route withdrawal to peer {}: {}", peer_id, e);
-                } else {
-                    trace!("Sent {} route withdrawals to peer {}", peer_id, length);
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -250,9 +92,9 @@ enum State {
         EndpointInfo,
         tokio::sync::mpsc::Sender<ClientMessage>,
     ),
-    RouteChange, // Notify peers of route changes
+    RouteChange, // Update the Fib
+    RefreshLSAs,
     Shutdown,
-    // HandleError(RouteTableError),
 }
 
 impl State {
@@ -268,6 +110,8 @@ impl State {
 
             // ####### Listen ##################################################
             Listen => {
+                let refresh_time = router.lsdb.when_refresh();
+
                 select! {
                     msg = router.broker_rx.recv() => {
                         match msg {
@@ -282,6 +126,9 @@ impl State {
                                 return Some(HandleBrokerMsg(msg));
                             }
                         }
+                    },
+                    () = tokio::time::sleep_until(refresh_time) => {
+                        Some(RefreshLSAs)
                     }
                 }
             }
@@ -290,47 +137,12 @@ impl State {
             HandleBrokerMsg(broker_msg) => {
                 //
                 match broker_msg {
-                    // BrokerMsg::RegisterAnycast(uuid, unbounded_sender) => todo!(),
-                    // BrokerMsg::RegisterUnicast(uuid, unbounded_sender, unicast_type) => todo!(),
                     RouterMsg::RegisterEndpoint(endpoint_id, endpoint_info, tx) => {
                         return Some(RegisterEndpoint(endpoint_id, endpoint_info, tx));
                     }
                     RouterMsg::DeadLink(endpoint_id) => {
-                        router.lsadb.remove_endpoint(endpoint_id);
-                        // let mut changed = false;
-                        // let mut delete_route = false;
-                        // let route_entry = router.route_table.table.get_mut(&endpoint_id);
-                        // if let Some(route_entry) = route_entry {
-                        //     let before_len = route_entry.routes.len();
-                        //     route_entry.routes.retain_mut(|route| match route.via {
-                        //         ForwardTo::Local(ref tx) => !tx.is_closed(),
-                        //         #[cfg(feature = "remote")]
-                        //         ForwardTo::Remote(ref tx, _) => !tx.is_closed(),
-                        //         ForwardTo::Multicast(ref set) => !set.is_empty(),
-                        //         ForwardTo::Broadcast(ref mut senders, _) => {
-                        //             senders.retain(|sender| !sender.is_closed());
-                        //             true
-                        //         }
-                        //     });
-                        //     if route_entry.routes.len() != before_len {
-                        //         changed = true;
-                        //     };
-                        //     if (route_entry.kind == RouteKind::Unicast
-                        //         || route_entry.kind == RouteKind::Anycast)
-                        //         && route_entry.routes.is_empty()
-                        //     {
-                        //         delete_route = true;
-                        //     }
-                        // }
-                        // if delete_route {
-                        //     router.route_table.table.remove(&endpoint_id);
-                        //     changed = true;
-                        // }
-                        // if changed {
-                        //     return Some(RouteChange);
-                        // } else {
-                        //     return Some(Listen);
-                        // }
+                        router.lsdb.remove_endpoint(endpoint_id);
+
                         Some(RouteChange)
                     }
                     #[cfg(feature = "remote")]
@@ -344,114 +156,28 @@ impl State {
                             false,
                             false,
                         );
-                        router.lsadb.add_peer(link);
+                        router.lsdb.add_peer(link);
                         // dbg!(&router.lsadb);
 
-                        //######### old #######
-                        // if router
-                        //     .route_table
-                        //     .peers
-                        //     .contains_connection_id_key(connection_id)
-                        // {
-                        //     // Peer already registered, ignore
-                        //     trace!("Peer {} already registered", connection_id);
-                        //     return Some(Listen);
-                        // }
-                        // let route = Route {
-                        //     kind: RouteKind::Node,
-                        //     via: ForwardTo::Remote(peer_entry.peer_tx.clone(), connection_id),
-                        //     learned_from: connection_id,
-                        //     realm: Realm::Global,
-                        //     cost: 1.into(),
-                        // };
-
-                        // router.route_table.add_route(peer_id.into(), route).unwrap();
-
-                        // let peer_info = PeerInfo::new(peer_id, peer_entry, connection_id);
-                        // router.route_table.peers.insert(peer_info);
-                        // trace!("Registered new peer: #{} {}", connection_id, peer_id);
-
-                        // // router.send_route_updates();
                         return Some(RouteChange);
                     }
                     #[cfg(feature = "remote")]
                     RouterMsg::UnRegisterPeer(connection_id) => {
-                        router.lsadb.remove_peer(connection_id);
+                        router.lsdb.remove_peer(connection_id);
                         // dbg!(&router.lsadb);
 
-                        // // ### old below
-                        // router.route_table.table.retain(|_, route_entry| {
-                        //     route_entry
-                        //         .routes
-                        //         .retain(|route| route.learned_from != connection_id);
-                        //     !route_entry.routes.is_empty()
-                        // });
-                        // router
-                        //     .route_table
-                        //     .peers
-                        //     .remove_by_connection_id(connection_id);
                         return Some(RouteChange);
                     }
-                    #[cfg(feature = "remote")]
-                    RouterMsg::AddPeerEndpoints(peer_id, hash_set) => {
-                        match router.route_table.add_peer_endpoints(peer_id, hash_set) {
-                            Some(count) => {
-                                trace!("Added {} routes from peer {}", count, peer_id);
-                                return Some(RouteChange);
-                            }
-                            None => {
-                                trace!("Peer {} not found for AddPeerEndpoints", peer_id);
-                                return Some(Listen);
-                            }
-                        }
-                    }
 
-                    #[cfg(feature = "remote")]
-                    RouterMsg::RemovePeerEndpoints(connection_id, advertisements) => {
-                        if let Some(peer_info) = router
-                            .route_table
-                            .peers
-                            .get_mut_by_connection_id(connection_id)
-                        {
-                            for ad in &advertisements {
-                                peer_info.received_routes.remove(ad);
-                            }
-                        }
-
-                        // Remove matching routes that were learned from this peer
-                        let mut changed = false;
-                        router.route_table.table.retain(|endpoint_id, route_entry| {
-                            let before = route_entry.routes.len();
-                            route_entry.routes.retain(|route| {
-                                // Keep the route unless it matches one of the withdrawn advertisements
-                                // and was learned from this peer
-                                !advertisements.iter().any(|ad| {
-                                    ad.endpoint_id == *endpoint_id
-                                        && ad.kind == route.kind
-                                        && route.learned_from == connection_id
-                                })
-                            });
-                            if route_entry.routes.len() != before {
-                                changed = true;
-                            }
-                            !route_entry.routes.is_empty()
-                        });
-
-                        if changed {
-                            Some(RouteChange)
-                        } else {
-                            Some(Listen)
-                        }
-                    }
                     RouterMsg::LsaInbound { from, lsa } => {
                         // dbg!(&from, &lsa);
-                        router.lsadb.handle_lsa(lsa, from);
+                        router.lsdb.handle_lsa(lsa, from);
                         // dbg!(&router.lsadb);
                         Some(RouteChange)
                     }
 
                     RouterMsg::LsaAckInbound { from, key, seq } => {
-                        router.lsadb.handle_ack(from, key, seq);
+                        router.lsdb.handle_ack(from, key, seq);
                         // dbg!(&router.lsadb);
                         Some(Listen)
                     }
@@ -465,129 +191,30 @@ impl State {
 
             // ####### RegisterRoute ##################################################
             RegisterEndpoint(endpoint_id, endpoint_info, sender) => {
-                router
-                    .lsadb
-                    .add_endpoint(endpoint_id, endpoint_info, sender);
-                // dbg!(&router.lsadb);
-
-                // let forward_to = route.via.clone();
-                // return match router.route_table.add_route(endpoint_id, route) {
-                //     Ok(_) => {
-                //         match forward_to {
-                //             ForwardTo::Local(tx) => {
-                //                 tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                //                     .await
-                //                     .ok();
-                //             }
-                //             #[cfg(feature = "remote")]
-                //             ForwardTo::Remote(_unbounded_sender, _node_id) => {
-                //                 panic!("Can't create remote endpoint locally")
-                //             }
-                //             ForwardTo::Broadcast(listener, _) => {
-                //                 for tx in listener {
-                //                     // There should only be one in here on creation
-                //                     tx.send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                //                         .await
-                //                         .ok();
-                //                 }
-                //             }
-                //             ForwardTo::Multicast(items) => {
-                //                 match items
-                //                     .into_iter()
-                //                     .next()
-                //                     .expect("This should be set when this was created")
-                //                 {
-                //                     Address::Endpoint(local_endpoint_id) => {
-                //                         // this is all to lookup the right address to return Success to
-                //                         if let ForwardTo::Local(tx) = router
-                //                             .forward_table
-                //                             .lookup(&local_endpoint_id.into())
-                //                             .unwrap()
-                //                         {
-                //                             tx.send(ClientMessage::SuccessfulRegistration(
-                //                                 endpoint_id,
-                //                             ))
-                //                             .await
-                //                             .ok();
-                //                         }
-                //                     }
-                //                     _ => {}
-                //                 }
-                //             }
-                //         }
-
-                //         Some(RouteChange)
-                //     }
-
-                //     Err((route, e)) => {
-                //         if let Route {
-                //             via: ForwardTo::Local(tx),
-                //             ..
-                //         } = route
-                //         {
-                //             tx.send(ClientMessage::FailedRegistration(
-                //                 endpoint_id,
-                //                 e.to_string(),
-                //             ))
-                //             .await
-                //             .ok();
-                //         }
-                //         Some(Listen)
-                //     }
-                // };
+                router.lsdb.add_endpoint(endpoint_id, endpoint_info, sender);
+                
                 Some(RouteChange)
             }
 
             // ####### Shutdown ##################################################
             Shutdown => {
                 info!("Shutting down");
-                router.lsadb.shutdown();
-                #[cfg(feature = "remote")]
-                router.route_table.peers.clear();
-                router
-                    .route_table
-                    .table
-                    .iter()
-                    .for_each(|(_, route_entry)| {
-                        route_entry
-                            .routes
-                            .iter()
-                            .for_each(|route| match &route.via {
-                                ForwardTo::Local(tx) => {
-                                    tx.try_send(ClientMessage::Shutdown).ok();
-                                }
-                                #[cfg(feature = "remote")]
-                                ForwardTo::Remote(_tx, _node_id) => {}
-                                ForwardTo::Multicast(_forward_tos) => {}
-                                ForwardTo::Broadcast(listeners, _) => {
-                                    for listener in listeners {
-                                        listener.try_send(ClientMessage::Shutdown).ok();
-                                    }
-                                }
-                            });
-                    });
+                router.lsdb.shutdown();
+
                 return None;
             }
 
             // ####### RouteChange ##################################################
             RouteChange => {
-                let fib_table = router.lsadb.build_fib();
+                let fib_table = router.lsdb.build_fib();
                 // dbg!(&fib_table);
                 router.routes_watch_tx.send(fib_table).unwrap();
 
-                // let new_forward_table = ForwardingTable::from(&router.route_table);
-                // dbg!(&new_forward_table, &fib_table);
+                return Some(Listen);
+            }
 
-                // router.forward_table = new_forward_table;
-                // // trace!("Updated forwarding table: Router: {:#?}", router);
-                // let forward_table = router.forward_table.clone();
-                // trace!("New forwarding table: {:#?}", forward_table);
-
-                // router.routes_watch_tx.send(forward_table).unwrap();
-                // trace!("Updated forwarding table: Router: {:#?}", router);
-                // Notify peers of route changes
-                // #[cfg(feature = "remote")]
-                // router.send_route_updates();
+            RefreshLSAs => {
+                router.lsdb.refresh_and_purge_lsas();
                 return Some(Listen);
             }
         }
@@ -605,15 +232,15 @@ pub(crate) struct PeerInfo {
     pub(crate) connection_id: ConnectionId,
 }
 
-#[cfg(feature = "remote")]
-impl PeerInfo {
-    fn new(peer_id: NodeId, peer_entry: PeerEntry, connection_id: ConnectionId) -> Self {
-        Self {
-            peer_id,
-            received_routes: Default::default(),
-            advertised_routes: Default::default(),
-            peer_entry,
-            connection_id,
-        }
-    }
-}
+// #[cfg(feature = "remote")]
+// impl PeerInfo {
+//     fn new(peer_id: NodeId, peer_entry: PeerEntry, connection_id: ConnectionId) -> Self {
+//         Self {
+//             peer_id,
+//             received_routes: Default::default(),
+//             advertised_routes: Default::default(),
+//             peer_entry,
+//             connection_id,
+//         }
+//     }
+// }

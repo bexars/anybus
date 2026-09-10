@@ -7,7 +7,7 @@ use crate::routing::ConnectionId;
 #[cfg(feature = "remote")]
 // use uuid::Uuid;
 #[cfg(feature = "remote")]
-use crate::routing::{Address, Advertisement, ForwardTo, Realm, peer_registry::PeerRegistry};
+use crate::routing::{Address, Advertisement, ForwardTo, Realm};
 use crate::routing::{EndpointId, NodeId, Route, RouteKind, RouteTableError};
 use tracing::debug;
 #[cfg(feature = "remote")]
@@ -17,9 +17,9 @@ use tracing::trace;
 pub(super) struct RoutingTable {
     pub(crate) table: HashMap<EndpointId, RouteEntry>,
     pub(crate) node_id: NodeId,
-    #[cfg(feature = "remote")]
+    // #[cfg(feature = "remote")]
     // pub(crate) peers: HashMap<NodeId, PeerInfo>,
-    pub(crate) peers: PeerRegistry,
+    // pub(crate) peers: PeerRegistry,
 }
 
 impl RoutingTable {

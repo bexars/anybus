@@ -16,7 +16,7 @@ pub(crate) struct ForwardingTable {
     table: HashMap<EndpointId, FibEntry>,
     links: HashMap<ConnectionId, Link>,
     next_hop: HashMap<NodeId, Link>, // dest → neighbor
-    parent: HashMap<NodeId, NodeId>,
+                                     // parent: HashMap<NodeId, NodeId>,
 }
 
 impl ForwardingTable {
@@ -26,13 +26,15 @@ impl ForwardingTable {
             table: HashMap::new(),
             links: HashMap::new(),
             next_hop: HashMap::new(),
-            parent: HashMap::new(),
+            // parent: HashMap::new(),
         }
     }
 
     /// From local clients
     pub(crate) fn send(&self, packet: impl Into<Packet>) -> Result<(), SendError> {
         let packet = packet.into();
+        tracing::debug!("Sending packet to {:?}", packet.to);
+        tracing::debug!("FIB entry: {:?}", self.table.get(&packet.to.into()));
         let endpoint_id = packet.to.into();
         let Some(fib_entry) = self.table.get(&endpoint_id) else {
             return Err(SendError::NoRoute(packet.payload));
@@ -87,8 +89,21 @@ impl ForwardingTable {
     }
     /// From remote peers
     #[cfg(feature = "remote")]
-    pub(crate) fn forward(&self, packet: WirePacket) {
-        // tracing::trace!("Forwarding: {:#?}", &packet);
+    pub(crate) fn forward(&self, packet: WirePacket, connection_id: ConnectionId) {
+        tracing::debug!("Forwarding: {:?}", &packet);
+        if packet.from == self.our_id {
+            return; // shouldn't be forwarding our own packets
+        }
+
+        let from_hop = self.next_hop.get(&packet.from);
+        if let Some(link) = from_hop {
+            if link.connection_id != connection_id {
+                tracing::debug!("Dropping packet RPF mismatch");
+                return; // only forward packets that came from the right path
+            }
+        } else {
+            return; // no route back just drop
+        }
 
         let endpoint_id = packet.to.into();
         let Some(fib_entry) = self.table.get(&endpoint_id) else {
@@ -117,7 +132,7 @@ impl ForwardingTable {
                 }
             },
             FibEntry::Multi(fib_forward_tos) => {
-                for fib_forward in fib_forward_tos {
+                'multi: for fib_forward in fib_forward_tos {
                     match fib_forward {
                         FibForwardTo::Local(sender) => {
                             let packet = packet.clone();
@@ -130,29 +145,24 @@ impl ForwardingTable {
                                     );
                                 });
                         }
-                        FibForwardTo::Remote(next_hop) => {
-                            // rpf check
-                            let Some(from) = packet.from else { continue };
-                            let from: EndpointId = from.into();
-                            let from: NodeId = from.0.into();
-                            if let Some(parent) = self.parent.get(&from) {
-                                if *parent == next_hop.peer_id {
+                        FibForwardTo::Remote(link) => {
+                            // check if the destination is back towards the sending node
+                            let from = packet.from;
+                            if let Some(from_hop) = self.next_hop.get(&from) {
+                                if from_hop.peer_id == link.peer_id {
                                     tracing::debug!(
-                                        "Dropping packet from {} to {} on connection #{} due to RPF check",
-                                        from,
-                                        packet.to,
-                                        next_hop.connection_id
+                                        "Not forwarding to {} due to back path",
+                                        link.connection_id
                                     );
-                                    return;
+                                    continue 'multi;
                                 }
                             }
-                            next_hop
-                                .tx
+                            link.tx
                                 .try_send(crate::messages::NodeMessage::WirePacket(packet.clone()))
                                 .unwrap_or_else(|e| {
                                     tracing::error!(
                                         "Failed to forward packet on connection #{}: {}",
-                                        next_hop.connection_id,
+                                        link.connection_id,
                                         e
                                     );
                                 });
@@ -174,7 +184,7 @@ impl ForwardingTable {
         let mut fib = ForwardingTable::new(lsdb.self_id);
         fib.links = lsdb.links.clone();
         fib.next_hop = lsdb.next_hop.clone();
-        fib.parent = lsdb.parent.clone();
+        // fib.parent = lsdb.parent.clone();
         for (endpoint_id, route_entry) in lsdb.routes.routes().iter() {
             let fib_entry = match route_entry.kind {
                 RouteKind::Unicast | RouteKind::Anycast | RouteKind::Node => {
@@ -216,17 +226,16 @@ impl ForwardingTable {
                     for node_id in remotes {
                         if let Some(next_hop) = lsdb.next_hop.get(&node_id) {
                             forwards.push(FibForwardTo::Remote(next_hop.clone()));
+                        } else {
+                            tracing::debug!("No next hop for remote node {}", node_id);
                         }
                     }
 
                     if forwards.is_empty() {
                         continue;
                     }
-                    if forwards.len() == 1 {
-                        FibEntry::Single(forwards.into_iter().next().unwrap())
-                    } else {
-                        FibEntry::Multi(forwards)
-                    }
+
+                    FibEntry::Multi(forwards)
                 }
                 RouteKind::Multicast => todo!(),
             };
