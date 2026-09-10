@@ -150,7 +150,7 @@ impl ForwardingTable {
                             let from = packet.from;
                             if let Some(from_hop) = self.next_hop.get(&from) {
                                 if from_hop.peer_id == link.peer_id {
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         "Not forwarding to {} due to back path",
                                         link.connection_id
                                     );
@@ -218,7 +218,9 @@ impl ForwardingTable {
                                 forwards.push(FibForwardTo::Local(sender.clone()));
                             }
                             LsForwardTo::Remote(node_id) => {
-                                remotes.insert(node_id);
+                                lsdb.next_hop.get(&node_id).map(|next_hop| {
+                                    remotes.insert(next_hop.peer_id);
+                                });
                             }
                         };
                     }

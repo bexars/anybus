@@ -21,7 +21,8 @@ use crate::{
     routing::{
         ConnectionId, Cost, Link, Lsa, LsaKey, NodeId, RealmList, RouteKind,
         linkstate::{
-            Adjacency, EndpointInfo, Entry, LsaBody, LsaRecord, db::route_table::RouteTable,
+            Adjacency, EndpointInfo, Entry, LinkError, LsaBody, LsaRecord,
+            db::route_table::RouteTable,
         },
     },
 };
@@ -41,6 +42,7 @@ pub(crate) struct LsDb {
     rebuild_requested: Option<Instant>,
     last_refresh: Instant,
     lsa_timeout: Duration,
+    last_tick: Instant,
 }
 
 impl LsDb {
@@ -57,6 +59,7 @@ impl LsDb {
             rebuild_requested: None,
             last_refresh: Instant::now(),
             lsa_timeout: Duration::from_secs(60),
+            last_tick: Instant::now(),
         };
         let lsa_key = LsaKey {
             origin: self_id,
@@ -83,15 +86,31 @@ impl LsDb {
         self.routes.shutdown();
     }
 
-    pub(crate) fn when_refresh(&self) -> Instant {
-        self.last_refresh + self.lsa_timeout / 3
+    pub(crate) fn when_tick(&self) -> Instant {
+        self.last_tick + Duration::from_millis(100)
+    }
+
+    pub(crate) fn tick(&mut self) {
+        let now = Instant::now();
+        self.last_tick = now;
+
+        if self.last_refresh + self.lsa_timeout / 3 < now {
+            self.refresh_and_purge_lsas();
+        }
+        if self.rebuild_requested.is_some() {
+            self.rebuild_requested = None;
+            self.build_fib();
+        }
     }
 
     pub(crate) fn refresh_and_purge_lsas(&mut self) {
         let mut to_flood = Vec::new();
-        for (_, record) in self.db.iter_mut() {
-            let now = Instant::now();
+        let now = Instant::now();
 
+        for (_, record) in self.db.iter_mut() {
+            if record.lsa.key.origin != self.self_id {
+                continue;
+            }
             if record.updated_at + self.lsa_timeout / 3 < now {
                 record.updated_at = now;
                 record.lsa.seq += 1;
@@ -104,17 +123,28 @@ impl LsDb {
             .for_each(|lsa| self.flood_all_neighbors(lsa, None));
 
         if self.purge_stale_lsas() {
-            self.compute_spf();
-            self.build_fib();
+            self.compute_spf(self.self_id);
+            self.request_rebuild();
+            // self.build_fib();
         }
         self.last_refresh = Instant::now();
     }
 
     fn purge_stale_lsas(&mut self) -> bool {
-        let len = self.db.len();
-        self.db
-            .retain(|_, record| record.updated_at + self.lsa_timeout >= Instant::now());
-        len != self.db.len()
+        let mut to_purge = self
+            .db
+            .extract_if(|_, record| record.updated_at + self.lsa_timeout < Instant::now())
+            .peekable();
+        let dirty = to_purge.peek().is_some();
+        let dirty = dirty
+            || to_purge
+                .map(|(key, _)| {
+                    self.routes
+                        .remove_remote_endpoint(key.endpoint_id.into(), key.origin)
+                })
+                .any(|effect| matches!(effect, Effects::RebuildFib));
+
+        dirty
     }
 
     fn remove_dead_lsa(&mut self, lsa: Lsa) {
@@ -209,10 +239,10 @@ impl LsDb {
 
     fn send_ack(&self, in_connection_id: ConnectionId, key: LsaKey, seq: u64) {
         let Some(in_link) = self.links.get(&in_connection_id) else {
-            tracing::error!(
-                "Received LSA from unknown connection_id {:?}. Cannot send ack.",
-                in_connection_id
-            );
+            // tracing::error!(
+            //     "Received LSA from unknown connection_id {:?}. Cannot send ack.",
+            //     in_connection_id
+            // );
             return;
         };
 
@@ -251,11 +281,11 @@ impl LsDb {
         };
 
         if self.upsert_lsa(&lsa).is_err() {
-            tracing::warn!(
-                "Ignoring LSA with seq {} which is not newer than current seq for key {:?}",
-                lsa.seq,
-                lsa.key
-            );
+            // tracing::warn!(
+            //     "Ignoring LSA with seq {} which is not newer than current seq for key {:?}",
+            //     lsa.seq,
+            //     lsa.key
+            // );
             return;
         };
 
@@ -265,11 +295,11 @@ impl LsDb {
         self.flood_all_neighbors(lsa, Some(in_connection_id));
 
         if run_spf {
-            self.compute_spf();
+            self.compute_spf(self.self_id);
         };
-        tracing::debug!("After LSA {:#?}", self.db);
+        // tracing::debug!("After LSA {:#?}", self.db);
 
-        tracing::debug!("After LSA routing {:#?}", self.routes);
+        // tracing::debug!("After LSA routing {:#?}", self.routes);
     }
 
     pub(crate) fn handle_ack(&mut self, from: ConnectionId, key: LsaKey, seq: u64) {
@@ -288,15 +318,20 @@ impl LsDb {
 
     pub(crate) fn add_peer(&mut self, link: Link) {
         let connection_id = link.connection_id;
-        self.add_adjacency(
+        let Some(lsa) = self.add_adjacency(
             link.peer_id,
             link.connection_id,
             link.realms.clone(),
             link.cost,
-        );
+        ) else {
+            return;
+        };
         self.links.insert(link.connection_id, link);
-        self.compute_spf();
+        // self.compute_spf(self.self_id);
         // self.purge_unreachable();
+        // let lsa = self.db.get(&LsaKey { endpoint_id: self.sel})
+        self.request_rebuild();
+        self.flood_all_neighbors(lsa, Some(connection_id));
         self.flood_peer(connection_id);
     }
 
@@ -306,7 +341,7 @@ impl LsDb {
         connection_id: ConnectionId,
         realms: RealmList,
         cost: Cost,
-    ) {
+    ) -> Option<Lsa> {
         let adjacency = Adjacency {
             peer_id,
             cost, // TODO: determine cost based on link properties
@@ -348,7 +383,9 @@ impl LsDb {
             *updated_at = Instant::now();
         } else {
             tracing::error!("LSA body is not a Router type for node_id: {:?}", peer_id);
+            return None;
         }
+        Some(root_lsa.lsa.clone())
     }
 
     pub(crate) fn remove_peer(&mut self, connection_id: ConnectionId) {
@@ -390,7 +427,7 @@ impl LsDb {
             return;
         }
 
-        self.compute_spf();
+        self.compute_spf(self.self_id);
         // self.purge_unreachable();
     }
 
@@ -417,6 +454,9 @@ impl LsDb {
                 // self.pending_tx
                 //     .insert((link.connection_id, record.lsa.key.clone()), record.lsa.seq);
                 if let Err(e) = link.send_lsa(record.lsa.clone()) {
+                    if matches!(e, LinkError::RealmMismatch) {
+                        continue;
+                    }
                     tracing::error!(
                         "Failed to send LSA to peer {:?} over connection {:?}: {:?}",
                         link.peer_id,
@@ -436,7 +476,7 @@ impl LsDb {
         }
     }
 
-    fn compute_spf(&mut self) {
+    fn compute_spf(&mut self, root: NodeId) {
         self.next_hop.clear();
         self.cost.clear();
         self.parent.clear();
@@ -453,7 +493,7 @@ impl LsDb {
             })
             .collect::<HashMap<_, _>>();
 
-        let root = self.self_id;
+        // let root = self.self_id;
 
         for node_id in nodes.keys() {
             self.cost.insert(*node_id, u16::MAX.into());
@@ -463,17 +503,21 @@ impl LsDb {
         let mut queue = VecDeque::new();
         queue.push_back(Entry(Cost(0), root));
 
-        while let Some(Entry(current_cost, current_node)) = queue.pop_front() {
+        while let Some(current_entry) = queue.pop_front() {
             // dbg!(current_cost, &current_node, &queue);
-            if let Some(adjacencies) = nodes.get(&current_node) {
+            if let Some(adjacencies) = nodes.get(&current_entry.1) {
                 for adjacency in adjacencies.into_iter() {
                     let next_node = adjacency.peer_id;
-                    let new_cost = current_cost + adjacency.cost;
-
-                    if new_cost < *self.cost.get(&next_node).unwrap_or(&Cost(u16::MAX)) {
+                    let new_cost = current_entry.0 + adjacency.cost;
+                    let alt_entry = Entry(new_cost, next_node);
+                    let other_entry = Entry(
+                        *self.cost.get(&next_node).unwrap_or(&Cost(u16::MAX)),
+                        next_node,
+                    );
+                    if alt_entry.better(&other_entry) {
                         self.cost.insert(next_node, new_cost);
-                        self.parent.insert(next_node, current_node);
-                        if current_node == root {
+                        self.parent.insert(next_node, current_entry.1);
+                        if current_entry.1 == root {
                             self.links
                                 .values()
                                 .find(|link| link.peer_id == next_node)
@@ -483,7 +527,7 @@ impl LsDb {
                         } else {
                             self.next_hop.insert(
                                 next_node,
-                                self.next_hop.get(&current_node).unwrap().clone(),
+                                self.next_hop.get(&current_entry.1).unwrap().clone(),
                             );
                         }
 
@@ -494,7 +538,7 @@ impl LsDb {
                         {
                             queue.remove(pos);
                         };
-                        let pos = queue.partition_point(|e| e.0 < entry.0);
+                        let pos = queue.partition_point(|e| e.better(&entry));
                         queue.insert(pos, entry);
                     }
                 }
@@ -517,6 +561,17 @@ impl LsDb {
             if lsa.key.origin == out_link.peer_id {
                 continue; // don't forward back to the originator
             };
+
+            let from = lsa.key.origin;
+            if let Some(from_hop) = self.next_hop.get(&from) {
+                if from_hop.peer_id == out_link.peer_id {
+                    tracing::trace!(
+                        "Not forwarding LSA to {} due to back path",
+                        out_link.connection_id
+                    );
+                    continue;
+                }
+            }
 
             match out_link.send_lsa(lsa.clone()) {
                 Ok(_) => {
@@ -634,11 +689,11 @@ impl LsDb {
     }
 
     pub(crate) fn build_fib(&mut self) -> ForwardingTable {
-        self.compute_spf();
+        self.compute_spf(self.self_id);
 
         // self.purge_unreachable();
-        tracing::debug!("After SPF {:#?}", self.next_hop);
-        tracing::debug!("After SPF {:#?}", self.cost);
+        // tracing::debug!("After SPF {:#?}", self.next_hop);
+        // tracing::debug!("After SPF {:#?}", self.cost);
 
         ForwardingTable::build_from_db(self)
     }

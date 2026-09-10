@@ -209,6 +209,12 @@ pub(crate) enum LinkError {
     RealmMismatch,
 }
 
+// impl PartialEq for LinkError {
+//     fn eq(&self, other: &Self) -> bool {
+//         self == other
+//     }
+// }
+
 impl From<tokio::sync::mpsc::error::TrySendError<NodeMessage>> for LinkError {
     fn from(err: tokio::sync::mpsc::error::TrySendError<NodeMessage>) -> Self {
         LinkError::TrySendError(err)
@@ -217,19 +223,57 @@ impl From<tokio::sync::mpsc::error::TrySendError<NodeMessage>> for LinkError {
 
 #[derive(Eq, Debug)]
 struct Entry(Cost, NodeId);
-impl PartialOrd for Entry {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.0.cmp(&self.0))
+
+impl Entry {
+    pub(crate) fn better(&self, other: &Self) -> bool {
+        self < other
     }
 }
+
+impl PartialOrd for Entry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(other.cmp(&self))
+    }
+}
+
+// We want the lowest cost and the lowest UUID to win
 impl Ord for Entry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.0.cmp(&self.0)
+        other.0.cmp(&self.0).then(self.1.cmp(&other.1))
     }
 }
 
 impl PartialEq for Entry {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use uuid::{Uuid, uuid};
+
+    use crate::routing::linkstate::Entry;
+
+    #[test]
+    fn test_entry_ord() {
+        let uuid1 = uuid!("d87e3825-9c8f-4a0b-85d1-ef8c5d28a3f1");
+        let uuid2 = uuid!("d87e3825-9c8f-4a0b-85d1-ef8c5d28a3f2");
+        let entry1 = Entry(1.into(), uuid1.into());
+        let entry2 = Entry(1.into(), uuid2.into());
+        let entry3 = Entry(2.into(), uuid1.into());
+        assert!(entry1 == entry1);
+        assert!(entry1 < entry3);
+        assert!(entry1 > entry2);
+    }
+
+    #[test]
+    fn test_uuid7_now() {
+        let uuid1 = Uuid::now_v7();
+        let uuid2 = Uuid::now_v7();
+        let entry1 = Entry(1.into(), uuid1.into());
+        let entry2 = Entry(1.into(), uuid2.into());
+
+        assert!(entry1 > entry2);
     }
 }

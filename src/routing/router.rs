@@ -110,7 +110,7 @@ impl State {
 
             // ####### Listen ##################################################
             Listen => {
-                let refresh_time = router.lsdb.when_refresh();
+                let next_tick_at = router.lsdb.when_tick();
 
                 select! {
                     msg = router.broker_rx.recv() => {
@@ -127,7 +127,7 @@ impl State {
                             }
                         }
                     },
-                    () = tokio::time::sleep_until(refresh_time) => {
+                    () = tokio::time::sleep_until(next_tick_at) => {
                         Some(RefreshLSAs)
                     }
                 }
@@ -192,7 +192,7 @@ impl State {
             // ####### RegisterRoute ##################################################
             RegisterEndpoint(endpoint_id, endpoint_info, sender) => {
                 router.lsdb.add_endpoint(endpoint_id, endpoint_info, sender);
-                
+
                 Some(RouteChange)
             }
 
@@ -214,7 +214,8 @@ impl State {
             }
 
             RefreshLSAs => {
-                router.lsdb.refresh_and_purge_lsas();
+                router.lsdb.tick();
+                // router.lsdb.refresh_and_purge_lsas();
                 return Some(Listen);
             }
         }

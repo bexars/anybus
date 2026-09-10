@@ -33,7 +33,7 @@ use crate::{BusRider, messages::ClientMessage};
 // pub(crate) type EndpointId = Uuid;
 // pub(crate) type NodeId = Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeId(Uuid);
 

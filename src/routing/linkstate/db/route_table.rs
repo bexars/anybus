@@ -45,6 +45,7 @@ impl RouteTable {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum Effects {
     AddLsa(EndpointId, EndpointInfo),
     UpdateLsa(EndpointId, EndpointInfo),
