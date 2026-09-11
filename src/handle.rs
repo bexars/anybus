@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::BusDeserialize;
 use crate::BusTicket;
-use crate::common::Realm;
+use crate::Realm;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 use crate::messages::AnyBusStatusMsg;

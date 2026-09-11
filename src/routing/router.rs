@@ -115,8 +115,7 @@ impl State {
                         match msg {
                             None => {
                                 info!("Broker channel closed, shutting down router");
-                                // all handles were dropped is probably hard to do since we own a handle,
-                                // but it means we can't notify so can't call handle.shutdown()
+
                                 return Some(Shutdown);
                             }
                             Some(msg) => {

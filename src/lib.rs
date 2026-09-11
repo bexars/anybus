@@ -12,7 +12,6 @@
 mod anybus;
 #[cfg(feature = "remote")]
 mod codec;
-mod common;
 pub mod errors;
 mod handle;
 pub mod helper;
@@ -32,7 +31,6 @@ pub use anybus::AnyBusConfig;
 pub use anybus::builder::AnyBusBuilder;
 pub use anybus_macro::anybus_rpc;
 pub use anybus_macro::bus_uuid;
-pub use common::Realm;
 #[cfg(feature = "dioxus")]
 pub use dioxus;
 pub use errors::ReceiveError;
@@ -47,6 +45,7 @@ pub use peers::ws::WsRemoteOptions;
 pub use receivers::Receiver;
 pub use receivers::RpcReceiver;
 pub use receivers::rpc_receiver::RpcRequest;
+pub use routing::Realm;
 #[cfg(feature = "serde")]
 pub use serde;
 #[cfg(feature = "tokio")]
