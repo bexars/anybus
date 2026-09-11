@@ -163,29 +163,13 @@ struct NodeMessageReceived {
 #[async_trait]
 impl State for NodeMessageReceived {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        match self.message {
-            NodeMessage::WirePacket(packet) => {
-                match state_machine.stream.send(IpcMessage::Packet(packet)).await {
-                    Ok(_) => Some(Box::new(WaitForMessages {})),
-                    Err(e) => Some(Box::new(HandleError { error: e.into() })),
-                }
-            }
-            NodeMessage::Advertise(vec) => {
-                match state_machine.stream.send(IpcMessage::Advertise(vec)).await {
-                    Ok(()) => Some(Box::new(WaitForMessages {})),
-                    Err(e) => b(HandleError { error: e.into() }),
-                }
-            }
-            NodeMessage::Withdraw(advertisements) => {
-                match state_machine
-                    .stream
-                    .send(IpcMessage::Withdraw(advertisements))
-                    .await
-                {
-                    Ok(()) => Some(Box::new(WaitForMessages {})),
-                    Err(e) => b(HandleError { error: e.into() }),
-                }
-            } 
+        match state_machine
+            .stream
+            .send(IpcMessage::NodeMsg(self.message))
+            .await
+        {
+            Ok(_) => Some(Box::new(WaitForMessages {})),
+            Err(e) => Some(Box::new(HandleError { error: e.into() })),
         }
     }
 }
@@ -239,9 +223,9 @@ impl State for IpcMessageReceived {
                     .ok();
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
-            IpcMessage::Packet(wire_packet) => {
-                state_machine.peer.send_packet(wire_packet);
-            }
+            // IpcMessage::Packet(wire_packet) => {
+            //     state_machine.peer.send_packet(wire_packet);
+            // }
             // IpcMessage::BusRider(endpoint_id, items) => {
             //     _ = state_machine
             //         .peer
@@ -249,14 +233,17 @@ impl State for IpcMessageReceived {
             //         .send_to_address(endpoint_id, items);
             // }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
-            IpcMessage::Advertise(ads) => {
-                state_machine.peer.add_endpoints(ads);
-            }
+            // IpcMessage::Advertise(ads) => {
+            //     state_machine.peer.add_endpoints(ads);
+            // }
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
             }
-            IpcMessage::Withdraw(uuids) => {
-                state_machine.peer.remove_endpoints(uuids);
+            // IpcMessage::Withdraw(uuids) => {
+            //     state_machine.peer.remove_endpoints(uuids);
+            // }
+            IpcMessage::NodeMsg(node_message) => {
+                state_machine.peer.handle_node_message(node_message);
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -280,7 +267,6 @@ impl State for ClosePeer {
             .ok();
         state_machine.peer.unregister();
         state_machine.ipc_control.close();
-        state_machine.peer.close();
         state_machine.stream.close().await.ok();
 
         None

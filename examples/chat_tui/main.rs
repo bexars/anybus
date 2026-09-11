@@ -182,7 +182,7 @@ impl App {
     }
 
     async fn run(&mut self) -> Result<()> {
-        dbg!(&self);
+        // dbg!(&self);
         let mut tui = tui::Tui::new()?
             .tick_rate(4.0) // 4 ticks per second
             .frame_rate(30.0); // 30 frames per second

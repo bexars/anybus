@@ -12,7 +12,6 @@
 mod anybus;
 #[cfg(feature = "remote")]
 mod codec;
-mod common;
 pub mod errors;
 mod handle;
 pub mod helper;

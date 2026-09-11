@@ -32,6 +32,10 @@ impl PacketReceiver {
 
     pub(super) async fn recv(&mut self) -> Result<Packet, ReceiveError> {
         loop {
+            tracing::info!(
+                "PacketReceiver waiting for message on endpoint {:?}",
+                self.endpoint_id
+            );
             let new_msg = self.rx.recv().await;
 
             match new_msg {

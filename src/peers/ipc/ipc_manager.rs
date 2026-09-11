@@ -18,13 +18,12 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    AnyBusStatusMsg, Handle, Receiver,
-    common::SharedCounter,
+    AnyBusStatusMsg, Handle, Realm, Receiver,
     peers::{
         common::Peer,
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
     },
-    routing::NodeId,
+    routing::{ConnectionIdCounter, NodeId, RealmList},
     spawn,
 };
 
@@ -42,14 +41,14 @@ pub(crate) struct IpcManager {
     rendezvous_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
     anybus_status: Receiver<AnyBusStatusMsg>,
-    connection_counter: SharedCounter,
+    connection_counter: ConnectionIdCounter,
 }
 impl IpcManager {
     pub(crate) async fn new(
         rendezvous: String,
         handle: Handle,
         our_nodeid: NodeId,
-        connection_counter: SharedCounter,
+        connection_counter: ConnectionIdCounter,
     ) -> Self {
         let (tx, rx) = channel(32);
         let anybus_status = handle
@@ -104,7 +103,7 @@ impl State for ConnectToRendezvous {
             .rendezvous
             .clone()
             .to_ns_name::<GenericNamespaced>()
-            .unwrap();
+            .expect("IPC rendezvous name is hardcoded and tested so shouldn't cause a failure");
         match local_socket::tokio::Stream::connect(name).await {
             Ok(stream) => {
                 let stream: AsyncBincodeStream<
@@ -119,7 +118,10 @@ impl State for ConnectToRendezvous {
                     extra_streams: vec![],
                 })
             }
-            Err(_e) => b(StartRendezvous {}),
+            Err(e) => {
+                tracing::debug!("Failed to connect to IPC rendezvous: {}", e);
+                b(StartRendezvous {})
+            }
         }
     }
 }
@@ -173,17 +175,17 @@ impl State for StartRendezvous {
             .name(name)
             .reclaim_name(true);
 
-        #[cfg(unix)]
-        let _ = {
-            use std::path::PathBuf;
-            let path = PathBuf::from("/tmp").join(&state.rendezvous);
-            _ = std::fs::remove_file(path);
-        };
+        // #[cfg(unix)]
+        // let _ = {
+        //     use std::path::PathBuf;
+        //     let path = PathBuf::from("/tmp").join(&state.rendezvous);
+        //     _ = std::fs::remove_file(path);
+        // };
         state.rendezvous_listener = match listener_opts.create_tokio() {
             Ok(rl) => Some(rl),
             Err(e) => {
                 debug!("Failed to create rendezvous listener: {}", e);
-                return b(HandleError::new(e));
+                return b(ConnectToRendezvous {});
             }
         };
         b(AnnounceMaster {})
@@ -284,6 +286,7 @@ impl State for StartListener {
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(name)
             .reclaim_name(true);
+
         state.peer_listener = listener_opts.create_tokio().ok(); // If it failed we just won't listen and hope someone else is listening
         b(Listen {})
     }
@@ -347,31 +350,28 @@ impl State for HandleIpcCommand {
 
                 peer_ids.retain(|id| !existing_peers.contains(id));
 
-                // let peer_ids: Vec<_> = peer_ids
-                //     .difference(&existing_peers)
-                //     .filter(|u| **u != state.uuid)
-                //     .cloned()
-                //     .collect();
-
                 for peer_id in peer_ids {
                     let name = peer_id.to_name();
                     let stream = local_socket::tokio::Stream::connect(name).await;
-                    if stream.is_err() {
-                        continue;
-                    }
-                    let stream = stream.unwrap();
+                    let stream = match stream {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            tracing::error!("Failed to connect to IPC peer: {}", e);
+                            continue;
+                        }
+                    };
+
                     streams.push(AsyncBincodeStream::from(stream).for_async())
                 }
 
-                if streams.is_empty() {
-                    return b(Listen {});
+                match streams.pop() {
+                    Some(stream) => b(HandShake {
+                        stream,
+                        peer_is_master: false,
+                        extra_streams: streams,
+                    }),
+                    None => b(Listen {}),
                 }
-                let first = streams.pop().unwrap(); //guaranteed due to previous if
-                b(HandShake {
-                    stream: first,
-                    peer_is_master: false,
-                    extra_streams: streams,
-                })
             }
         }
     }
@@ -390,13 +390,17 @@ impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         let connection_id = state.connection_counter.next();
         let (tx, rx) = channel(32);
+        let mut realms: RealmList = Realm::Userspace.into();
+        realms.add(Realm::Global);
 
         let peer = Peer::register_peer(
             self.peer_id,
             state.our_nodeid,
             state.handle.clone(),
-            crate::routing::Realm::Userspace, // Always userspace for IPC peers
+            Realm::Userspace, // Always userspace for IPC peers
             connection_id,
+            10.into(),
+            realms,
         );
         let ipc_peer = IpcPeer::new(
             self.stream,

@@ -1,25 +1,39 @@
 #[cfg(feature = "remote")]
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "remote")]
-use crate::routing::{Advertisement, NodeId, PeerEntry, WirePacket};
+use crate::routing::{ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket};
 use crate::{
     BusRiderWithUuid,
-    routing::{EndpointId, Packet, Route},
+    routing::{EndpointId, Packet},
 };
+
+use crate::routing::EndpointInfo;
 
 #[derive(Debug)]
 pub(crate) enum RouterMsg {
-    RegisterRoute(EndpointId, Route),
+    RegisterEndpoint(EndpointId, EndpointInfo, Sender<ClientMessage>),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
-    RegisterPeer(NodeId, u16, PeerEntry),
+    RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost, RealmList),
     #[cfg(feature = "remote")]
-    UnRegisterPeer(u16),
+    UnRegisterPeer(ConnectionId),
+    // #[cfg(feature = "remote")]
+    // AddPeerEndpoints(ConnectionId, HashSet<Advertisement>),
+    // #[cfg(feature = "remote")]
+    // RemovePeerEndpoints(ConnectionId, HashSet<Advertisement>),
     #[cfg(feature = "remote")]
-    AddPeerEndpoints(u16, HashSet<Advertisement>),
+    LsaInbound {
+        from: ConnectionId,
+        lsa: Lsa,
+    },
     #[cfg(feature = "remote")]
-    RemovePeerEndpoints(u16, HashSet<Advertisement>),
+    LsaAckInbound {
+        from: ConnectionId,
+        key: LsaKey,
+        seq: u64,
+    },
     Shutdown,
 }
 
@@ -60,10 +74,11 @@ impl BusRiderWithUuid for AnyBusStatusMsg {
 
 #[cfg(feature = "remote")]
 /// Messages going to the Peer entity that is owned by the connection to a remote peer
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum NodeMessage {
     WirePacket(WirePacket),
-    Advertise(HashSet<Advertisement>),
-    Withdraw(HashSet<Advertisement>),
-
+    // Advertise(HashSet<Advertisement>),
+    // Withdraw(HashSet<Advertisement>),
+    Lsa(Lsa),
+    LsaAck { key: LsaKey, seq: u64 },
 }

@@ -1,14 +1,12 @@
 pub(super) mod ipc_manager;
 mod ipc_peer;
 
-use std::collections::HashSet;
-
 use async_bincode::{AsyncDestination, tokio::AsyncBincodeStream};
 use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 use serde::{Deserialize, Serialize};
 // use uuid::Uuid;
 
-use crate::routing::{Advertisement, NodeId, WirePacket};
+use crate::{messages::NodeMessage, routing::NodeId};
 
 pub(super) type IpcPeerStream = AsyncBincodeStream<
     interprocess::local_socket::tokio::Stream,
@@ -60,9 +58,10 @@ pub(super) enum IpcMessage {
     NeighborRemoved(NodeId), //Node/Peer ID
     // BusRider(Address, Vec<u8>), // Destination ID
     CloseConnection,
-    Advertise(HashSet<Advertisement>),
-    Withdraw(HashSet<Advertisement>),
-    Packet(WirePacket),
+    // Advertise(HashSet<Advertisement>),
+    // Withdraw(HashSet<Advertisement>),
+    // Packet(WirePacket),
+    NodeMsg(NodeMessage),
     IAmMaster,
 }
 
@@ -81,10 +80,11 @@ impl std::fmt::Debug for IpcMessage {
             //     write!(f, "BusRider({}, {} bytes)", uuid, bytes.len())
             // }
             IpcMessage::CloseConnection => write!(f, "CloseConnection"),
-            IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
+            // IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
             IpcMessage::IAmMaster => write!(f, "IAmMaster"),
-            IpcMessage::Withdraw(uuids) => write!(f, "Withdraw ({:?})", uuids),
-            IpcMessage::Packet(_wire_packet) => write!(f, "Packet(..)"),
+            // IpcMessage::Withdraw(uuids) => write!(f, "Withdraw ({:?})", uuids),
+            // IpcMessage::Packet(_wire_packet) => write!(f, "Packet(..)"),
+            IpcMessage::NodeMsg(node_msg) => write!(f, "NodeMsg({:?})", node_msg),
         }
     }
 }

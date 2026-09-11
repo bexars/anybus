@@ -18,9 +18,8 @@ use wasm_socket_handle::WsHandle;
 #[cfg(feature = "ws_server")]
 use crate::anybus::config::WebSocketServerConfig;
 use crate::{
-    AnyBusStatusMsg, Handle, Receiver,
+    AnyBusStatusMsg, Handle, Realm, Receiver,
     anybus::config::WebSocketPeerConfig,
-    common::SharedCounter,
     peers::{
         common::Peer,
         ws::{
@@ -28,7 +27,7 @@ use crate::{
             WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
-    routing::{NodeId, Realm},
+    routing::{ConnectionIdCounter, NodeId},
     spawn,
 };
 
@@ -70,7 +69,7 @@ pub(crate) struct WebsocketManager {
     disconnected_peers: Vec<WsPendingPeer>,
     anybus_status: Receiver<AnyBusStatusMsg>,
     ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
-    connection_counter: SharedCounter,
+    connection_counter: ConnectionIdCounter,
 }
 
 impl WebsocketManager {
@@ -80,7 +79,7 @@ impl WebsocketManager {
         #[cfg(feature = "ws_server")] ws_listener_options: Option<WebSocketServerConfig>,
         ws_peers: Vec<WebSocketPeerConfig>,
         ws_rpc_rx: tokio::sync::mpsc::Receiver<WsRpcMessage>,
-        connection_counter: SharedCounter,
+        connection_counter: ConnectionIdCounter,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let anybus_status = handle
@@ -320,12 +319,16 @@ impl WebsocketManager {
             Ok(InMessage::WsMessage(WsMessage::Hello(peer_id))) => {
                 debug!("Received Hello from peer: {} ", peer_id);
                 let connection_id = self.connection_counter.next();
+                let realms = Realm::Global.into();
+
                 let peer = Peer::register_peer(
                     peer_id,
                     self.node_id,
                     self.handle.clone(),
                     Realm::Global, // WebSocket peers are always in the global realm
                     connection_id,
+                    20.into(),
+                    realms,
                 );
 
                 let (tx, rx) = tokio::sync::mpsc::channel(32);

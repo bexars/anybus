@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Display};
+use std::fmt::Display;
 #[cfg(feature = "ws_server")]
 use std::{
     fs::File,
@@ -22,7 +22,8 @@ use crate::{anybus::config::WebSocketServerConfig, spawn};
 use crate::{
     anybus::config::{WebSocketPeerConfig, WsUrl},
     define_local_rpc,
-    routing::{Advertisement, NodeId, WirePacket},
+    messages::NodeMessage,
+    routing::NodeId,
 };
 
 pub(super) mod ws_manager;
@@ -80,10 +81,11 @@ define_local_rpc! {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum WsMessage {
     Hello(NodeId),
-    Packet(WirePacket),
+    NodeMsg(NodeMessage),
+    // Packet(WirePacket),
     CloseConnection,
-    Advertise(HashSet<Advertisement>),
-    Withdraw(HashSet<Advertisement>),
+    // Advertise(HashSet<Advertisement>),
+    // Withdraw(HashSet<Advertisement>),
     Ping(u64),
     Pong(u64),
 }

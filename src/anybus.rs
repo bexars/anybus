@@ -10,8 +10,9 @@ pub use config::AnyBusConfig;
 // use uuid::Uuid;
 
 use crate::anybus::builder::AnyBusBuilder;
-use crate::common::SharedCounter;
 use crate::errors::AnyBusHandleError;
+#[cfg(feature = "remote")]
+use crate::routing::ConnectionIdCounter;
 use crate::routing::NodeId;
 use crate::services::BusStopService;
 use crate::{
@@ -33,7 +34,8 @@ pub struct AnyBus {
     // options: AnyBusBuilder,
     config: AnyBusConfig,
     router: Option<Router>,
-    connection_counter: SharedCounter,
+    #[cfg(feature = "remote")]
+    connection_counter: ConnectionIdCounter,
     #[cfg(feature = "ws")]
     ws_rpc_client: Option<localrpc::LocalRpcClient<peers::ws::WsRpcMessage>>,
 }
@@ -60,7 +62,8 @@ impl AnyBus {
         let router = Router::new(id);
 
         let handle = router.get_handle();
-        let connection_counter = SharedCounter::new(1); // start at 1 since 0 is basically localhost/ourselves
+        #[cfg(feature = "remote")]
+        let connection_counter = ConnectionIdCounter::new(); // start at 1 since 0 is basically localhost/ourselves
 
         let anybus = AnyBus {
             id,
@@ -69,6 +72,7 @@ impl AnyBus {
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_rpc_client: None,
+            #[cfg(feature = "remote")]
             connection_counter,
         };
         anybus
@@ -81,7 +85,7 @@ impl AnyBus {
     }
 
     /// Passes the shutdown command to the AnyBus system and all local listeners.  
-    /// If optional delay is set, an AnyBusStatusMsg::Shutdown will be sent immediately, with peers and routing 
+    /// If optional delay is set, an AnyBusStatusMsg::Shutdown will be sent immediately, with peers and routing
     /// actually closed after the indicated delay.
     ///
     pub fn shutdown(&mut self, delay: Option<Duration>) {

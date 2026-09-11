@@ -1,11 +1,11 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use web_time::Instant;
 
 use crate::{
     Handle, Realm,
     messages::{NodeMessage, RouterMsg},
-    routing::{Advertisement, NodeId, PeerEntry, WirePacket},
+    routing::{ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
 };
 
 pub(crate) struct Heartbeat {
@@ -77,8 +77,10 @@ pub(crate) struct Peer {
     rx_node: mpsc::Receiver<NodeMessage>,
     handle: Handle,
     pub(crate) realm: Realm,
-    pub(crate) connection_id: u16,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) cost: Cost,
     pub(crate) stats: PeerStats,
+    pub(crate) realms: RealmList,
 }
 
 impl Peer {
@@ -86,9 +88,10 @@ impl Peer {
         peer_id: NodeId,
         our_id: NodeId,
         handle: Handle,
-        // rx_node: mpsc::Receiver<NodeMessage>,
         realm: Realm,
-        connection_id: u16,
+        connection_id: ConnectionId,
+        cost: Cost,
+        realms: RealmList,
     ) -> Self {
         let (peer_tx, rx_node) = tokio::sync::mpsc::channel(32);
 
@@ -99,18 +102,22 @@ impl Peer {
             handle,
             realm,
             connection_id,
+            cost,
             stats: PeerStats::default(),
+            realms,
         };
 
         let peer_entry = PeerEntry {
             peer_tx,
-            realm: peer.realm.clone(),
+            // realm: peer.realm.clone(),
         };
 
         peer.handle.send_broker(RouterMsg::RegisterPeer(
             peer.peer_id,
             peer.connection_id,
             peer_entry,
+            peer.cost,
+            peer.realms.clone(),
         ));
 
         peer
@@ -124,37 +131,37 @@ impl Peer {
         Some(msg)
     }
 
-    pub(crate) fn add_endpoints(&mut self, ads: HashSet<Advertisement>) {
-        self.handle
-            .send_broker(crate::messages::RouterMsg::AddPeerEndpoints(
-                self.connection_id,
-                ads,
-            ));
-    }
-
-    pub(crate) fn remove_endpoints(&mut self, ads: HashSet<Advertisement>) {
-        self.handle
-            .send_broker(crate::messages::RouterMsg::RemovePeerEndpoints(
-                self.connection_id,
-                ads,
-            ));
-    }
-
     pub(crate) fn unregister(&mut self) {
         self.handle
             .send_broker(crate::messages::RouterMsg::UnRegisterPeer(
                 self.connection_id,
             ));
+        self.close();
     }
 
-    pub(crate) fn close(&mut self) {
+    fn close(&mut self) {
         self.rx_node.close();
     }
 
-    pub(crate) fn send_packet(&mut self, packet: WirePacket) {
+    fn forward_packet(&mut self, packet: WirePacket, connection_id: ConnectionId) {
         self.stats.rx.record(&packet);
 
-        self.handle.send_packet(packet, self.connection_id);
+        self.handle.forward_packet(packet, connection_id);
+    }
+
+    pub(crate) fn handle_node_message(&mut self, node_message: NodeMessage) {
+        match node_message {
+            NodeMessage::WirePacket(packet) => self.forward_packet(packet, self.connection_id),
+            NodeMessage::Lsa(lsa) => self.handle.send_broker(RouterMsg::LsaInbound {
+                from: self.connection_id,
+                lsa,
+            }),
+            NodeMessage::LsaAck { key, seq } => self.handle.send_broker(RouterMsg::LsaAckInbound {
+                from: self.connection_id,
+                key,
+                seq,
+            }),
+        }
     }
 }
 

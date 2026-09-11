@@ -3,25 +3,29 @@
 
 #[cfg(feature = "ws_server")]
 use std::net::IpAddr;
+#[cfg(feature = "remote")]
 use std::{collections::HashMap, fmt::Display};
 
 use crate::AnyBusBuilder;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer};
 #[cfg(feature = "ws")]
 use url::Url;
 
 /// Structure for configuring a new AnyBus instance
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
 pub struct AnyBusConfig {
     #[serde(default)]
     #[cfg(feature = "ipc")]
     pub(crate) ipc: Option<IpcConfig>,
+    #[cfg(feature = "remote")]
     #[serde(default)]
     pub(crate) peer: HashMap<String, PeerType>,
     #[serde(default)]
     #[cfg(feature = "ws_server")]
     pub(crate) ws_server: Option<WebSocketServerConfig>,
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) enable_ctrlc_shutdown: bool,
 }
@@ -47,6 +51,7 @@ impl AnyBusConfig {
 /// Temporary crutch while phasing out the old AnyBusBuilder
 impl From<AnyBusBuilder> for AnyBusConfig {
     fn from(builder: AnyBusBuilder) -> Self {
+        #[cfg(feature = "ws")]
         let mut peers = HashMap::new();
         #[cfg(feature = "ws")]
         for (index, peer) in builder.ws_remote_options.iter().enumerate() {
@@ -64,6 +69,7 @@ impl From<AnyBusBuilder> for AnyBusConfig {
             ipc: Some(IpcConfig {
                 enabled: builder.enable_ipc,
             }),
+            #[cfg(feature = "remote")]
             peer: peers,
 
             #[cfg(feature = "ws_server")]
@@ -87,6 +93,7 @@ pub(crate) struct IpcConfig {
     pub(crate) enabled: bool,
 }
 
+#[cfg(feature = "remote")]
 #[derive(Deserialize, Debug, Clone)]
 // #[serde(tag = "type")]
 pub(crate) enum PeerType {
@@ -102,6 +109,7 @@ pub(crate) struct WebSocketPeerConfig {
     pub(crate) name: String,
 }
 
+#[cfg(feature = "ws")]
 impl Display for WebSocketPeerConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -112,8 +120,10 @@ impl Display for WebSocketPeerConfig {
     }
 }
 
+#[cfg(feature = "remote")]
 struct PeerMap(HashMap<String, PeerType>);
 
+#[cfg(feature = "ws")]
 impl From<PeerMap> for Vec<WebSocketPeerConfig> {
     fn from(peer_map: PeerMap) -> Self {
         peer_map
@@ -208,6 +218,7 @@ impl AnyBusConfig {
     }
 }
 
+#[cfg(feature = "ws")]
 fn parse_ws_url(s: &str) -> Result<Url, String> {
     let url = Url::parse(s).map_err(|e| e.to_string())?;
     match url.scheme() {
@@ -216,15 +227,18 @@ fn parse_ws_url(s: &str) -> Result<Url, String> {
     }
 }
 
+#[cfg(feature = "ws")]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WsUrl(Url);
 
+#[cfg(feature = "ws")]
 impl From<WsUrl> for Url {
     fn from(ws_url: WsUrl) -> Self {
         ws_url.0
     }
 }
 
+#[cfg(feature = "ws")]
 impl TryFrom<Url> for WsUrl {
     type Error = String;
 
@@ -236,12 +250,14 @@ impl TryFrom<Url> for WsUrl {
     }
 }
 
+#[cfg(feature = "ws")]
 impl Display for WsUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
+#[cfg(feature = "ws")]
 impl<'de> Deserialize<'de> for WsUrl {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
