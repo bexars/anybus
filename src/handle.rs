@@ -26,6 +26,7 @@ use crate::routing::WirePacket;
 use crate::routing::router::RoutesWatchRx;
 use crate::routing::{EndpointId, Packet, Payload, Route};
 
+use crate::spawn;
 use crate::traits::{BusRider, BusRiderRpc, BusRiderWithUuid};
 
 /// The handle for talking to the [AnyBus] instance that created it.  It can be cloned freely
@@ -447,9 +448,13 @@ impl Handle {
     /// Allows internal communication to the Router
     pub(crate) fn send_broker(&self, msg: RouterMsg) {
         // self.tx.try_send(msg).ok();
-        if let Err(e) = self.tx.blocking_send(msg) {
-            tracing::warn!("Failed to send broker message: {}", e);
-        }
+
+        let tx = self.tx.clone();
+        spawn(async move {
+            if let Err(e) = tx.send(msg).await {
+                tracing::warn!("Failed to send broker message: {}", &e);
+            }
+        });
     }
 
     /// Start building a registration with the builder pattern
