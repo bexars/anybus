@@ -103,7 +103,7 @@ impl State for ConnectToRendezvous {
             .rendezvous
             .clone()
             .to_ns_name::<GenericNamespaced>()
-            .unwrap();
+            .expect("IPC rendezvous name is hardcoded and tested so shouldn't cause a failure");
         match local_socket::tokio::Stream::connect(name).await {
             Ok(stream) => {
                 let stream: AsyncBincodeStream<
@@ -118,7 +118,10 @@ impl State for ConnectToRendezvous {
                     extra_streams: vec![],
                 })
             }
-            Err(_e) => b(StartRendezvous {}),
+            Err(e) => {
+                tracing::debug!("Failed to connect to IPC rendezvous: {}", e);
+                b(StartRendezvous {})
+            }
         }
     }
 }
@@ -283,6 +286,7 @@ impl State for StartListener {
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(name)
             .reclaim_name(true);
+
         state.peer_listener = listener_opts.create_tokio().ok(); // If it failed we just won't listen and hope someone else is listening
         b(Listen {})
     }
@@ -346,31 +350,28 @@ impl State for HandleIpcCommand {
 
                 peer_ids.retain(|id| !existing_peers.contains(id));
 
-                // let peer_ids: Vec<_> = peer_ids
-                //     .difference(&existing_peers)
-                //     .filter(|u| **u != state.uuid)
-                //     .cloned()
-                //     .collect();
-
                 for peer_id in peer_ids {
                     let name = peer_id.to_name();
                     let stream = local_socket::tokio::Stream::connect(name).await;
-                    if stream.is_err() {
-                        continue;
-                    }
-                    let stream = stream.unwrap();
+                    let stream = match stream {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            tracing::error!("Failed to connect to IPC peer: {}", e);
+                            continue;
+                        }
+                    };
+
                     streams.push(AsyncBincodeStream::from(stream).for_async())
                 }
 
-                if streams.is_empty() {
-                    return b(Listen {});
+                match streams.pop() {
+                    Some(stream) => b(HandShake {
+                        stream,
+                        peer_is_master: false,
+                        extra_streams: streams,
+                    }),
+                    None => b(Listen {}),
                 }
-                let first = streams.pop().unwrap(); //guaranteed due to previous if
-                b(HandShake {
-                    stream: first,
-                    peer_is_master: false,
-                    extra_streams: streams,
-                })
             }
         }
     }
