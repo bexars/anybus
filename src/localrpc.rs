@@ -1,10 +1,14 @@
+#[cfg(feature = "remote")]
 use std::time::Duration;
+#[cfg(feature = "remote")]
 use tokio::sync::{
     mpsc::{self, Receiver},
     oneshot,
 };
 
 // The foundational trait linking requests to their specific return types
+#[cfg(feature = "remote")]
+
 pub(crate) trait LocalRpcRequest {
     type Reply: Send + 'static;
 }
@@ -53,6 +57,7 @@ macro_rules! define_local_rpc {
 
 // Core operational framework errors
 #[derive(Debug, thiserror::Error)] // using standard errors, or implement Debug/Display manually
+#[cfg(feature = "remote")]
 pub(crate) enum RpcError {
     #[error("The remote task dropped the response channel")]
     ServerDropped,
@@ -62,16 +67,20 @@ pub(crate) enum RpcError {
     Timeout(Duration),
 }
 
+#[cfg(feature = "remote")]
 pub fn create_rpc<T>() -> (LocalRpcClient<T>, Receiver<T>) {
     let (tx, rx) = mpsc::channel(32);
     (LocalRpcClient { sender: tx }, rx)
 }
 
 #[derive(Clone, Debug)]
+#[cfg(feature = "remote")]
+
 pub struct LocalRpcClient<T> {
     sender: mpsc::Sender<T>,
 }
 
+#[cfg(feature = "remote")]
 impl<T> LocalRpcClient<T> {
     pub async fn call<R>(&self, request: R) -> Result<R::Reply, RpcError>
     where

@@ -6,8 +6,10 @@ use tokio::sync::mpsc::Sender;
 use crate::routing::{ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket};
 use crate::{
     BusRiderWithUuid,
-    routing::{EndpointId, EndpointInfo, Packet},
+    routing::{EndpointId, Packet},
 };
+
+use crate::routing::EndpointInfo;
 
 #[derive(Debug)]
 pub(crate) enum RouterMsg {
@@ -21,10 +23,12 @@ pub(crate) enum RouterMsg {
     // AddPeerEndpoints(ConnectionId, HashSet<Advertisement>),
     // #[cfg(feature = "remote")]
     // RemovePeerEndpoints(ConnectionId, HashSet<Advertisement>),
+    #[cfg(feature = "remote")]
     LsaInbound {
         from: ConnectionId,
         lsa: Lsa,
     },
+    #[cfg(feature = "remote")]
     LsaAckInbound {
         from: ConnectionId,
         key: LsaKey,

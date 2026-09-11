@@ -2,41 +2,50 @@ mod forward_table;
 mod route_table;
 
 pub(crate) use forward_table::ForwardingTable;
-
+#[cfg(feature = "remote")]
 use itertools::Itertools;
 use tokio::{sync::mpsc::Sender, time::Instant};
 use tokio_with_wasm::alias as tokio;
 
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt::Debug,
-    time::Duration,
-};
+#[cfg(feature = "remote")]
+use std::collections::VecDeque;
+use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 // use web_time::Instant;
 
 use crate::{
-    EndpointId, Realm,
+    EndpointId,
     messages::ClientMessage,
     routing::{
-        ConnectionId, Cost, Link, Lsa, LsaKey, NodeId, RealmList, RouteKind,
-        linkstate::{
-            Adjacency, EndpointInfo, Entry, LinkError, LsaBody, LsaRecord,
-            db::route_table::RouteTable,
-        },
+        NodeId,
+        linkstate::{EndpointInfo, LsaKey, LsaRecord, db::route_table::RouteTable},
     },
 };
 
+#[cfg(feature = "remote")]
+use crate::{
+    Realm,
+    routing::{
+        ConnectionId, Cost, Link, RealmList, RouteKind,
+        linkstate::{Adjacency, Entry, Lsa, LsaBody},
+    },
+};
+#[cfg(feature = "remote")]
 use route_table::Effects;
 
 #[derive(Debug)]
 pub(crate) struct LsDb {
     db: HashMap<LsaKey, LsaRecord>,
     self_id: NodeId,
+    #[cfg(feature = "remote")]
     links: HashMap<ConnectionId, Link>,
+    #[cfg(feature = "remote")]
     pending_tx: HashMap<(ConnectionId, LsaKey), u64>,
+    #[cfg(feature = "remote")]
     next_hop: HashMap<NodeId, Link>, // dest → neighbor
+    #[cfg(feature = "remote")]
     cost: HashMap<NodeId, Cost>,
+    #[cfg(feature = "remote")]
     parent: HashMap<NodeId, NodeId>, // need spf to populate this
     routes: RouteTable,
     rebuild_requested: Option<Instant>,
@@ -47,13 +56,18 @@ pub(crate) struct LsDb {
 
 impl LsDb {
     pub(crate) fn new(self_id: NodeId) -> LsDb {
-        let mut lsdb = LsDb {
+        let lsdb = LsDb {
             db: HashMap::new(),
             self_id,
+            #[cfg(feature = "remote")]
             links: HashMap::new(),
+            #[cfg(feature = "remote")]
             pending_tx: HashMap::new(),
+            #[cfg(feature = "remote")]
             next_hop: HashMap::new(),
+            #[cfg(feature = "remote")]
             cost: HashMap::new(),
+            #[cfg(feature = "remote")]
             parent: HashMap::new(),
             routes: RouteTable::new(),
             rebuild_requested: None,
@@ -61,27 +75,34 @@ impl LsDb {
             lsa_timeout: Duration::from_secs(60),
             last_tick: Instant::now(),
         };
-        let lsa_key = LsaKey {
-            origin: self_id,
-            endpoint_id: self_id.0,
-        };
 
-        let lsa = Lsa {
-            key: lsa_key,
-            seq: 0,
-            dead: false,
-            body: LsaBody::Router(vec![]),
-        };
-        let record = LsaRecord {
-            lsa,
-            updated_at: Instant::now(),
-        };
-        lsdb.db.insert(lsa_key, record);
+        #[cfg(feature = "remote")]
+        {
+            let mut lsdb = lsdb;
+            let lsa_key = LsaKey {
+                origin: self_id,
+                endpoint_id: self_id.0,
+            };
+            let lsa = Lsa {
+                key: lsa_key,
+                seq: 0,
+                dead: false,
+                body: LsaBody::Router(vec![]),
+            };
+            let record = LsaRecord {
+                lsa,
+                updated_at: Instant::now(),
+            };
+            lsdb.db.insert(lsa_key, record);
+            lsdb
+        }
+        #[cfg(not(feature = "remote"))]
         lsdb
     }
 
     pub(crate) fn shutdown(&mut self) {
         self.db.clear();
+        #[cfg(feature = "remote")]
         self.links.clear();
         self.routes.shutdown();
     }
@@ -104,6 +125,7 @@ impl LsDb {
     }
 
     pub(crate) fn refresh_and_purge_lsas(&mut self) {
+        #[cfg(feature = "remote")]
         let mut to_flood = Vec::new();
         let now = Instant::now();
 
@@ -114,14 +136,18 @@ impl LsDb {
             if record.updated_at + self.lsa_timeout / 3 < now {
                 record.updated_at = now;
                 record.lsa.seq += 1;
+                #[cfg(feature = "remote")]
                 let lsa = record.lsa.clone();
+                #[cfg(feature = "remote")]
                 to_flood.push(lsa);
             }
         }
+        #[cfg(feature = "remote")]
         to_flood
             .drain(..)
             .for_each(|lsa| self.flood_all_neighbors(lsa, None));
 
+        #[cfg(feature = "remote")]
         if self.purge_stale_lsas() {
             self.compute_spf(self.self_id);
             self.request_rebuild();
@@ -130,6 +156,7 @@ impl LsDb {
         self.last_refresh = Instant::now();
     }
 
+    #[cfg(feature = "remote")]
     fn purge_stale_lsas(&mut self) -> bool {
         let mut to_purge = self
             .db
@@ -147,11 +174,14 @@ impl LsDb {
         dirty
     }
 
+    #[cfg(feature = "remote")]
+
     fn remove_dead_lsa(&mut self, lsa: Lsa) {
         assert!(lsa.dead, "removed_dead_lsa called with non-dead LSA");
         if let Some(current_lsa) = self.db.get(&lsa.key) {
             if current_lsa.lsa.seq < lsa.seq {
                 self.db.remove(&lsa.key);
+                #[cfg(feature = "remote")]
                 self.flood_all_neighbors(lsa.clone(), None);
 
                 self.request_rebuild();
@@ -165,6 +195,7 @@ impl LsDb {
                 return;
             }
         }
+        #[cfg(feature = "remote")]
         self.routes
             .remove_remote_endpoint(lsa.key.endpoint_id.into(), lsa.key.origin);
     }
@@ -174,6 +205,8 @@ impl LsDb {
             self.rebuild_requested = Some(Instant::now());
         }
     }
+
+    #[cfg(feature = "remote")]
 
     fn upsert_lsa(&mut self, lsa: &Lsa) -> Result<(), ()> {
         if let Some(current_lsa) = self.db.get_mut(&lsa.key) {
@@ -237,6 +270,7 @@ impl LsDb {
         Ok(())
     }
 
+    #[cfg(feature = "remote")]
     fn send_ack(&self, in_connection_id: ConnectionId, key: LsaKey, seq: u64) {
         let Some(in_link) = self.links.get(&in_connection_id) else {
             // tracing::error!(
@@ -256,6 +290,7 @@ impl LsDb {
         });
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn handle_lsa(&mut self, lsa: Lsa, in_connection_id: ConnectionId) {
         self.send_ack(in_connection_id, lsa.key, lsa.seq); // Regardless we let them know we got it
 
@@ -302,12 +337,13 @@ impl LsDb {
         // tracing::debug!("After LSA routing {:#?}", self.routes);
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn handle_ack(&mut self, from: ConnectionId, key: LsaKey, seq: u64) {
         tracing::trace!("Got an ack from: {} key: {:?} seq: {}", &from, &key, &seq);
         if let Some(val) = self.pending_tx.remove(&(from, key)) {
-            if val != seq {
+            if val > seq {
                 self.pending_tx.insert((from, key), val);
-                tracing::warn!("Re-inserting a pending ack");
+                tracing::warn!("Re-inserting a pending ack - our seq: {val} rcvd seq: {seq}");
             }
             return;
         } else {
@@ -316,6 +352,7 @@ impl LsDb {
         // dbg!(&self.pending_tx);
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn add_peer(&mut self, link: Link) {
         let connection_id = link.connection_id;
         let Some(lsa) = self.add_adjacency(
@@ -335,6 +372,7 @@ impl LsDb {
         self.flood_peer(connection_id);
     }
 
+    #[cfg(feature = "remote")]
     fn add_adjacency(
         &mut self,
         peer_id: NodeId,
@@ -388,6 +426,7 @@ impl LsDb {
         Some(root_lsa.lsa.clone())
     }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn remove_peer(&mut self, connection_id: ConnectionId) {
         tracing::info!("LsDb removing peer on connection {}", connection_id);
         if let Some(link) = self.links.remove(&connection_id) {
@@ -431,19 +470,20 @@ impl LsDb {
         // self.purge_unreachable();
     }
 
-    pub(crate) fn _purge_unreachable(&mut self) {
-        let list: Vec<_> = self
-            .cost
-            .extract_if(|_k, v| *v == u16::MAX.into())
-            .map(|(k, _v)| k)
-            .collect();
+    // pub(crate) fn _purge_unreachable(&mut self) {
+    //     let list: Vec<_> = self
+    //         .cost
+    //         .extract_if(|_k, v| *v == u16::MAX.into())
+    //         .map(|(k, _v)| k)
+    //         .collect();
 
-        for id in list {
-            self.db.retain(|k, _| k.origin != id);
-            self.routes._purge_dead_origin(id);
-        }
-    }
+    //     for id in list {
+    //         self.db.retain(|k, _| k.origin != id);
+    //         self.routes.purge_dead_origin(id);
+    //     }
+    // }
 
+    #[cfg(feature = "remote")]
     pub(crate) fn flood_peer(&mut self, connection_id: ConnectionId) {
         if let Some(link) = self.links.get(&connection_id) {
             for record in self.db.values() {
@@ -454,6 +494,8 @@ impl LsDb {
                 // self.pending_tx
                 //     .insert((link.connection_id, record.lsa.key.clone()), record.lsa.seq);
                 if let Err(e) = link.send_lsa(record.lsa.clone()) {
+                    use crate::routing::linkstate::LinkError;
+
                     if matches!(e, LinkError::RealmMismatch) {
                         continue;
                     }
@@ -476,6 +518,7 @@ impl LsDb {
         }
     }
 
+    #[cfg(feature = "remote")]
     fn compute_spf(&mut self, root: NodeId) {
         self.next_hop.clear();
         self.cost.clear();
@@ -547,6 +590,7 @@ impl LsDb {
         // dbg!(&self.next_hop, &self.cost, &self.parent);
     }
 
+    #[cfg(feature = "remote")]
     fn flood_all_neighbors(
         &mut self,
         lsa: Lsa,
@@ -609,10 +653,12 @@ impl LsDb {
             .routes
             .add_endpoint(endpoint_id, endpoint_info, sender.clone())
         {
+            #[cfg_attr(not(feature = "remote"), allow(unused))]
             Ok(effect) => {
                 sender
                     .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
                     .ok();
+                #[cfg(feature = "remote")]
                 match effect {
                     Effects::AddLsa(endpoint_id, endpoint_info) => {
                         let body = LsaBody::Endpoint(endpoint_info);
@@ -630,32 +676,34 @@ impl LsDb {
                             lsa,
                             updated_at: Instant::now(),
                         };
+                        #[cfg(feature = "remote")]
                         self.flood_all_neighbors(record.lsa.clone(), Some(0.into()));
 
                         self.db.insert(key, record);
+                    }
+                    // Effects::UpdateLsa(endpoint_id, endpoint_info) => {
+                    //     let record = self.db.get_mut(&LsaKey {
+                    //         origin: self.self_id,
+                    //         endpoint_id: endpoint_id.0,
+                    //     });
+
+                    //     if let Some(record) = record {
+                    //         record.lsa.seq += 1;
+                    //         record.lsa.body = LsaBody::Endpoint(endpoint_info);
+                    //         record.updated_at = Instant::now();
+                    //         let lsa = record.lsa.clone();
+                    //         self.flood_all_neighbors(lsa, None);
+                    //         self.request_rebuild();
+                    //     } else {
+                    //         tracing::error!(
+                    //             "Failed to update LSA for endpoint {:?}: LSA not found",
+                    //             endpoint_id
+                    //         );
+                    //     }
+                    // }
+                    _ => {
                         self.request_rebuild();
                     }
-                    Effects::UpdateLsa(endpoint_id, endpoint_info) => {
-                        let record = self.db.get_mut(&LsaKey {
-                            origin: self.self_id,
-                            endpoint_id: endpoint_id.0,
-                        });
-
-                        if let Some(record) = record {
-                            record.lsa.seq += 1;
-                            record.lsa.body = LsaBody::Endpoint(endpoint_info);
-                            record.updated_at = Instant::now();
-                            let lsa = record.lsa.clone();
-                            self.flood_all_neighbors(lsa, None);
-                            self.request_rebuild();
-                        } else {
-                            tracing::error!(
-                                "Failed to update LSA for endpoint {:?}: LSA not found",
-                                endpoint_id
-                            );
-                        }
-                    }
-                    _ => {}
                 }
             }
             Err(_e) => {
@@ -666,7 +714,10 @@ impl LsDb {
         }
     }
     pub(crate) fn remove_endpoint(&mut self, endpoint_id: EndpointId) {
+        #[cfg_attr(not(feature = "remote"), allow(unused))]
         let effects = self.routes.remove_endpoint(endpoint_id);
+        self.request_rebuild();
+        #[cfg(feature = "remote")]
         match effects {
             Effects::RemoveLsa(endpoint_id) => {
                 let key = LsaKey {
@@ -676,6 +727,7 @@ impl LsDb {
                 if let Some(mut record) = self.db.remove(&key) {
                     record.lsa.dead = true;
                     record.lsa.seq += 1;
+                    #[cfg(feature = "remote")]
                     self.flood_all_neighbors(record.lsa.clone(), None);
                 } else {
                     tracing::error!(
@@ -689,6 +741,7 @@ impl LsDb {
     }
 
     pub(crate) fn build_fib(&mut self) -> ForwardingTable {
+        #[cfg(feature = "remote")]
         self.compute_spf(self.self_id);
 
         // self.purge_unreachable();

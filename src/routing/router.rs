@@ -7,12 +7,10 @@ use std::collections::HashSet;
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, ConnectionId, PeerEntry};
 
+use crate::routing::LsDb;
 use crate::{
     Handle,
-    routing::{
-        LsDb,
-        linkstate::{EndpointInfo, ForwardingTable},
-    },
+    routing::linkstate::{EndpointInfo, ForwardingTable},
 };
 
 use tokio_with_wasm::alias as tokio;
@@ -169,6 +167,7 @@ impl State {
                         return Some(RouteChange);
                     }
 
+                    #[cfg(feature = "remote")]
                     RouterMsg::LsaInbound { from, lsa } => {
                         // dbg!(&from, &lsa);
                         router.lsdb.handle_lsa(lsa, from);
@@ -176,6 +175,7 @@ impl State {
                         Some(RouteChange)
                     }
 
+                    #[cfg(feature = "remote")]
                     RouterMsg::LsaAckInbound { from, key, seq } => {
                         router.lsdb.handle_ack(from, key, seq);
                         // dbg!(&router.lsadb);

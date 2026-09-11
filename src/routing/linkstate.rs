@@ -16,32 +16,46 @@ use std::fmt::Debug;
 use tokio::time::Instant;
 use tokio_with_wasm::alias as tokio;
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use crate::{
     Realm,
-    messages::{ClientMessage, NodeMessage},
-    routing::{ConnectionId, Cost, NodeId, RealmList, Route, RouteKind},
+    messages::ClientMessage,
+    routing::{Cost, NodeId, Route, RouteKind},
+};
+#[cfg(feature = "remote")]
+use crate::{
+    messages::NodeMessage,
+    routing::{ConnectionId, RealmList},
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Lsa {
     key: LsaKey, // (origin: NodeId, kind: Router | Endpoint, id)
     seq: u64,    // monotonic per key for this incarnation
-    dead: bool,  // withdraw / max-age
+    #[cfg(feature = "remote")]
+    dead: bool, // withdraw / max-age
+    #[cfg(feature = "remote")]
     body: LsaBody,
 }
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct LsaKey {
     origin: NodeId,
     endpoint_id: Uuid, // Router: origin (or nil). Endpoint: EndpointId
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+// #[cfg_attr(not(feature = "remote"), allow(unused))]
+#[cfg(feature = "remote")]
 enum LsaBody {
+    #[cfg(feature = "remote")]
     Router(Vec<Adjacency>),
     Endpoint(EndpointInfo),
 }
@@ -50,15 +64,14 @@ enum LsaBody {
 pub(crate) struct LsRoute {
     pub(crate) via: LsForwardTo,
     pub(crate) cost: Cost,
-    #[cfg(feature = "remote")]
     pub(crate) realm: Realm,
-    #[cfg(feature = "remote")]
     pub(crate) kind: RouteKind,
 }
 
 #[derive(Clone)]
 pub(crate) enum LsForwardTo {
     Local(Sender<ClientMessage>),
+    #[cfg(feature = "remote")]
     Remote(NodeId), // Consult the LsDb for nexthops
 }
 
@@ -66,11 +79,13 @@ impl std::fmt::Debug for LsForwardTo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LsForwardTo::Local(_sender) => write!(f, "Local(Sender<ClientMessage>)"),
+            #[cfg(feature = "remote")]
             LsForwardTo::Remote(node_id) => write!(f, "Remote({}", node_id.0),
         }
     }
 }
 
+#[cfg(feature = "remote")]
 impl LsForwardTo {
     pub(crate) fn is_local(&self) -> bool {
         match self {
@@ -80,7 +95,8 @@ impl LsForwardTo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct EndpointInfo {
     pub(crate) kind: RouteKind,
     pub(crate) realm: Realm,
@@ -126,10 +142,13 @@ impl LsRouteEntry {
 #[derive(Debug, Clone)]
 enum FibForwardTo {
     Local(Sender<ClientMessage>),
+    #[cfg(feature = "remote")]
     Remote(Link),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg(feature = "remote")]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 struct Adjacency {
     connection_id: ConnectionId,
     peer_id: NodeId,
@@ -143,6 +162,7 @@ struct LsaRecord {
     updated_at: Instant,
 }
 
+#[cfg(feature = "remote")]
 #[derive(Debug, Clone)]
 pub(crate) struct Link {
     tx: Sender<NodeMessage>,
@@ -154,6 +174,7 @@ pub(crate) struct Link {
     _role_stub: bool,
 }
 
+#[cfg(feature = "remote")]
 impl Link {
     pub(crate) fn new(
         tx: Sender<NodeMessage>,
@@ -204,6 +225,7 @@ impl Link {
 
 #[allow(unused)]
 #[derive(Debug)]
+#[cfg(feature = "remote")]
 pub(crate) enum LinkError {
     TrySendError(tokio::sync::mpsc::error::TrySendError<NodeMessage>),
     RealmMismatch,
@@ -215,26 +237,31 @@ pub(crate) enum LinkError {
 //     }
 // }
 
+#[cfg(feature = "remote")]
 impl From<tokio::sync::mpsc::error::TrySendError<NodeMessage>> for LinkError {
     fn from(err: tokio::sync::mpsc::error::TrySendError<NodeMessage>) -> Self {
         LinkError::TrySendError(err)
     }
 }
 
+#[cfg(feature = "remote")]
 #[derive(Eq, Debug)]
 struct Entry(Cost, NodeId);
+#[cfg(feature = "remote")]
 
 impl Entry {
     pub(crate) fn better(&self, other: &Self) -> bool {
         self < other
     }
 }
+#[cfg(feature = "remote")]
 
 impl PartialOrd for Entry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(other.cmp(&self))
     }
 }
+#[cfg(feature = "remote")]
 
 // We want the lowest cost and the lowest UUID to win
 impl Ord for Entry {
@@ -242,6 +269,7 @@ impl Ord for Entry {
         other.0.cmp(&self.0).then(self.1.cmp(&other.1))
     }
 }
+#[cfg(feature = "remote")]
 
 impl PartialEq for Entry {
     fn eq(&self, other: &Self) -> bool {

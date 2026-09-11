@@ -2,7 +2,10 @@
 
 use thiserror::Error;
 
-use crate::routing::Payload;
+use crate::{
+    messages::ClientMessage,
+    routing::{Packet, Payload},
+};
 
 /// Errors returned by [BusListener::recv()](crate::BusListener::recv())
 #[derive(Error, Debug)]
@@ -80,9 +83,35 @@ pub enum AnyBusHandleError {
 pub enum SendError {
     /// No route found in forwarding table
     #[error("No Route to Endpoint")]
-    NoRoute(Payload),
+    NoRoute(Option<Payload>),
 
     /// Destination Queue is full
     #[error("Queue full")]
-    Full(Payload),
+    Full(Option<Payload>),
+    /// The destination queue is closed
+    #[error("Queue closed")]
+    Closed(Option<Payload>),
+}
+
+impl From<tokio::sync::mpsc::error::TrySendError<ClientMessage>> for SendError {
+    fn from(value: tokio::sync::mpsc::error::TrySendError<ClientMessage>) -> Self {
+        use tokio::sync::mpsc::error::TrySendError;
+
+        match value {
+            TrySendError::Full(cm) => {
+                if let ClientMessage::Message(Packet { payload, .. }) = cm {
+                    SendError::Full(Some(payload))
+                } else {
+                    SendError::Full(None)
+                }
+            }
+            TrySendError::Closed(cm) => {
+                if let ClientMessage::Message(Packet { payload, .. }) = cm {
+                    SendError::Closed(Some(payload))
+                } else {
+                    SendError::Closed(None)
+                }
+            }
+        }
+    }
 }

@@ -1,4 +1,3 @@
-#[cfg(feature = "remote")]
 mod linkstate;
 // pub(crate) mod peer_registry;
 pub(crate) mod router;
@@ -6,20 +5,26 @@ pub(crate) mod router;
 // use tokio_with_wasm::alias as tokio;
 
 pub(crate) use linkstate::EndpointInfo;
+pub(crate) use linkstate::LsDb;
 #[cfg(feature = "remote")]
-pub(crate) use linkstate::{Link, LsDb, Lsa, LsaKey};
+pub(crate) use linkstate::LsaKey;
+#[cfg(feature = "remote")]
+pub(crate) use linkstate::{Link, Lsa};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "remote")]
+use std::collections::HashSet;
+#[cfg(feature = "remote")]
+use std::sync::{
+    Arc,
+    atomic::{AtomicU16, Ordering},
+};
 use std::{
     any::Any,
-    collections::HashSet,
     fmt::{Debug, Display},
     ops::Deref,
-    sync::{
-        Arc,
-        atomic::{AtomicU16, Ordering},
-    },
 };
 // use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -28,7 +33,7 @@ use uuid::Uuid;
 
 #[cfg(feature = "remote")]
 use crate::messages::NodeMessage;
-use crate::{BusRider, messages::ClientMessage};
+use crate::{BusRider, common::Realm, messages::ClientMessage};
 
 // pub(crate) type EndpointId = Uuid;
 // pub(crate) type NodeId = Uuid;
@@ -382,7 +387,6 @@ pub(crate) struct PeerEntry {
 #[derive(Clone)]
 pub(crate) enum ForwardTo {
     Local(Sender<ClientMessage>),
-    #[cfg(feature = "remote")]
     // Remote(Sender<NodeMessage>, ConnectionId),
     Broadcast(Vec<Sender<ClientMessage>>, Realm),
     // Multicast(HashSet<Address>), // List of Node IDs to broadcast to including myself
@@ -392,7 +396,6 @@ impl std::fmt::Debug for ForwardTo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local(_arg0) => f.debug_tuple("Local").finish(),
-            #[cfg(feature = "remote")]
             // Self::Remote(_arg0, arg1) => f.debug_tuple("Remote").field(arg1).finish(),
             Self::Broadcast(arg0, arg1) => {
                 write!(f, "Broadcast: {:?} {} entries", arg1, arg0.len())
@@ -405,6 +408,7 @@ impl std::fmt::Debug for ForwardTo {
 pub(crate) struct Packet {
     pub(crate) to: Address,
     pub(crate) reply_to: Option<Address>,
+    #[cfg_attr(not(feature = "remote"), allow(unused))]
     pub(crate) from: NodeId,
     pub(crate) payload: Payload,
 }
@@ -487,6 +491,7 @@ pub enum Payload {
     // Bytes(Vec<u8>),
     // Packet(Box<Packet>), // For internal use only
 }
+
 #[cfg(not(feature = "remote"))]
 impl Payload {
     pub(crate) fn reveal<T: BusRider>(self) -> Result<T, Self> {
@@ -561,7 +566,6 @@ pub(crate) struct Advertisement {
 pub(crate) struct Route {
     pub(crate) _via: ForwardTo,
     pub(crate) cost: Cost,
-    #[cfg(feature = "remote")]
     pub(crate) realm: Realm,
     #[cfg(feature = "remote")]
     pub(crate) _learned_from: ConnectionId, // (0 for local)
@@ -624,23 +628,6 @@ impl Display for RouteKind {
     }
 }
 
-/// Used to control how the route is advertised
-#[derive(Debug, Copy, Clone, PartialEq, Default, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[allow(dead_code)]
-pub enum Realm {
-    /// Only within the current process
-    Process,
-    /// Within the current userspace instance (multiple processes on same machine)
-    Userspace,
-    /// Within the local network (LAN)
-    LocalNet,
-    /// Globally routable (Websocket)
-    #[default]
-    Global,
-    // BroadcastProxy(EndpointId),
-}
-
 #[cfg(feature = "remote")]
 // impl Realm {
 //     pub(crate) fn allow_broadcast(&self, other: &Realm) -> bool {
@@ -683,7 +670,7 @@ impl RealmList {
         self.0.is_empty()
     }
 }
-
+#[cfg(feature = "remote")]
 impl From<Realm> for RealmList {
     fn from(realm: Realm) -> Self {
         let mut list = HashSet::new();
@@ -700,7 +687,8 @@ impl From<Realm> for RealmList {
 //     UnicastRouteExists,
 // }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Cost(u16);
 
 impl std::ops::Add for Cost {
@@ -737,13 +725,19 @@ impl From<u16> for Cost {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg(feature = "remote")]
+
 pub(crate) struct ConnectionId(u16);
+#[cfg(feature = "remote")]
+
 impl From<u16> for ConnectionId {
     fn from(value: u16) -> Self {
         ConnectionId(value)
     }
 }
+#[cfg(feature = "remote")]
 
 impl Display for ConnectionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -752,11 +746,13 @@ impl Display for ConnectionId {
 }
 
 #[derive(Clone)]
+#[cfg(feature = "remote")]
+
 pub(crate) struct ConnectionIdCounter {
     // Arc allows multiple tasks to own a reference to this same memory
     current: Arc<AtomicU16>,
 }
-
+#[cfg(feature = "remote")]
 impl std::fmt::Debug for ConnectionIdCounter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -766,7 +762,7 @@ impl std::fmt::Debug for ConnectionIdCounter {
         )
     }
 }
-
+#[cfg(feature = "remote")]
 impl ConnectionIdCounter {
     pub(crate) fn new() -> Self {
         ConnectionIdCounter {

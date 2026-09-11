@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 
-use tokio::sync::mpsc::Sender;
-
 #[cfg(feature = "remote")]
+use crate::routing::NodeId;
+use crate::routing::linkstate::db::route_table::RouteTableError::MismatchedRouteKind;
+use crate::routing::{RouteKind, linkstate::LsRoute};
 use crate::{
     EndpointId,
+    messages::ClientMessage,
     routing::{
-        NodeId, RouteKind,
-        linkstate::{
-            EndpointInfo, LsForwardTo, LsRoute,
-            db::route_table::RouteTableError::MismatchedRouteKind,
-        },
+        EndpointInfo,
+        linkstate::{LsForwardTo, LsRouteEntry},
     },
 };
-use crate::{messages::ClientMessage, routing::linkstate::LsRouteEntry};
+use tokio::sync::mpsc::Sender;
 
 /// This will eventually replace the existing routing_table.rs
 ///
@@ -36,6 +35,7 @@ impl RouteTable {
                     LsForwardTo::Local(ref sender) => {
                         sender.try_send(ClientMessage::Shutdown).ok();
                     }
+                    #[cfg(feature = "remote")]
                     LsForwardTo::Remote(ref _node_id) => {}
                 }
             }
@@ -47,12 +47,14 @@ impl RouteTable {
 
 #[derive(Debug)]
 pub(crate) enum Effects {
+    #[cfg_attr(not(feature = "remote"), allow(unused))]
     AddLsa(EndpointId, EndpointInfo),
-    UpdateLsa(EndpointId, EndpointInfo),
+    // _UpdateLsa(EndpointId, EndpointInfo),
+    #[cfg_attr(not(feature = "remote"), allow(unused))]
     RemoveLsa(EndpointId),
     RebuildFib,
     Noop,
-    UnicastAlreadyExists,
+    // UnicastAlreadyExists,
 }
 
 #[derive(Debug)]
@@ -87,9 +89,7 @@ impl RouteTable {
         let ls_route = LsRoute {
             via: LsForwardTo::Local(sender),
             cost: endpoint_info.cost,
-            #[cfg(feature = "remote")]
             realm: endpoint_info.realm,
-            #[cfg(feature = "remote")]
             kind: endpoint_info.kind,
         };
 
@@ -99,7 +99,7 @@ impl RouteTable {
                     effect = Effects::AddLsa(endpoint_id, endpoint_info);
                     route_entry.routes.push(ls_route);
                 } else {
-                    effect = Effects::UnicastAlreadyExists;
+                    return Err(RouteTableError::DuplicateUnicast);
                 }
             }
             RouteKind::Anycast | RouteKind::Broadcast | RouteKind::Multicast => {
@@ -136,6 +136,7 @@ impl RouteTable {
                     true
                 }
             }
+            #[cfg(feature = "remote")]
             LsForwardTo::Remote(_) => {
                 delete = false;
                 true
@@ -150,6 +151,8 @@ impl RouteTable {
         }
         Effects::Noop
     }
+
+    #[cfg(feature = "remote")]
 
     pub(crate) fn add_remote_endpoint(
         &mut self,
@@ -184,6 +187,8 @@ impl RouteTable {
         Ok(effect)
     }
 
+    #[cfg(feature = "remote")]
+
     pub(crate) fn remove_remote_endpoint(
         &mut self,
         endpoint_id: EndpointId,
@@ -215,21 +220,21 @@ impl RouteTable {
         }
     }
 
-    pub(crate) fn _purge_dead_origin(&mut self, origin: NodeId) {
-        let mut to_remove = vec![];
-        for (endpoint_id, entry) in self.table.iter_mut() {
-            let len = entry.routes.len();
-            entry.routes.retain(|r| match r.via {
-                LsForwardTo::Remote(ref node_id) => *node_id != origin,
-                LsForwardTo::Local(_) => true,
-            });
-            if entry.routes.is_empty() {
-                to_remove.push(*endpoint_id);
-            } else if len != entry.routes.len() {
-            }
-        }
-        for endpoint_id in to_remove {
-            self.table.remove(&endpoint_id);
-        }
-    }
+    // pub(crate) fn purge_dead_origin(&mut self, origin: NodeId) {
+    //     let mut to_remove = vec![];
+    //     for (endpoint_id, entry) in self.table.iter_mut() {
+    //         let len = entry.routes.len();
+    //         entry.routes.retain(|r| match r.via {
+    //             LsForwardTo::Remote(ref node_id) => *node_id != origin,
+    //             LsForwardTo::Local(_) => true,
+    //         });
+    //         if entry.routes.is_empty() {
+    //             to_remove.push(*endpoint_id);
+    //         } else if len != entry.routes.len() {
+    //         }
+    //     }
+    //     for endpoint_id in to_remove {
+    //         self.table.remove(&endpoint_id);
+    //     }
+    // }
 }

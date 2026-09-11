@@ -11,6 +11,7 @@ pub use config::AnyBusConfig;
 
 use crate::anybus::builder::AnyBusBuilder;
 use crate::errors::AnyBusHandleError;
+#[cfg(feature = "remote")]
 use crate::routing::ConnectionIdCounter;
 use crate::routing::NodeId;
 use crate::services::BusStopService;
@@ -33,6 +34,7 @@ pub struct AnyBus {
     // options: AnyBusBuilder,
     config: AnyBusConfig,
     router: Option<Router>,
+    #[cfg(feature = "remote")]
     connection_counter: ConnectionIdCounter,
     #[cfg(feature = "ws")]
     ws_rpc_client: Option<localrpc::LocalRpcClient<peers::ws::WsRpcMessage>>,
@@ -60,6 +62,7 @@ impl AnyBus {
         let router = Router::new(id);
 
         let handle = router.get_handle();
+        #[cfg(feature = "remote")]
         let connection_counter = ConnectionIdCounter::new(); // start at 1 since 0 is basically localhost/ourselves
 
         let anybus = AnyBus {
@@ -69,6 +72,7 @@ impl AnyBus {
             router: Some(router),
             #[cfg(feature = "ws")]
             ws_rpc_client: None,
+            #[cfg(feature = "remote")]
             connection_counter,
         };
         anybus

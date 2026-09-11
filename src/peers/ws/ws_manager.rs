@@ -18,7 +18,7 @@ use wasm_socket_handle::WsHandle;
 #[cfg(feature = "ws_server")]
 use crate::anybus::config::WebSocketServerConfig;
 use crate::{
-    AnyBusStatusMsg, Handle, Receiver,
+    AnyBusStatusMsg, Handle, Realm, Receiver,
     anybus::config::WebSocketPeerConfig,
     peers::{
         common::Peer,
@@ -27,7 +27,7 @@ use crate::{
             WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
-    routing::{ConnectionIdCounter, NodeId, Realm},
+    routing::{ConnectionIdCounter, NodeId},
     spawn,
 };
 

@@ -7,6 +7,7 @@ use tracing::info;
 
 use crate::BusDeserialize;
 use crate::BusTicket;
+use crate::common::Realm;
 use crate::errors::AnyBusHandleError;
 use crate::errors::ReceiveError;
 use crate::messages::AnyBusStatusMsg;
@@ -20,8 +21,6 @@ use crate::routing::Address;
 
 #[cfg(feature = "remote")]
 use crate::routing::ConnectionId;
-#[cfg(feature = "remote")]
-use crate::routing::Realm;
 #[cfg(feature = "remote")]
 use crate::routing::WirePacket;
 use crate::routing::router::RoutesWatchRx;
@@ -43,7 +42,8 @@ impl Handle {
         if let Some(delay) = delay {
             std::thread::sleep(delay)
         };
-        self.tx.try_send(RouterMsg::Shutdown).ok();
+
+        self.send_broker(RouterMsg::Shutdown);
     }
 
     /// Convenience function to register_broadcast::<AnyBusStatusMsg>
@@ -89,7 +89,6 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Anycast,
-            #[cfg(feature = "remote")]
             realm,
             _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
@@ -136,7 +135,6 @@ impl Handle {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let route = Route {
             kind: crate::routing::RouteKind::Unicast,
-            #[cfg(feature = "remote")]
             realm,
             _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
@@ -181,8 +179,7 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Unicast,
-            #[cfg(feature = "remote")]
-            realm: crate::routing::Realm::Userspace,
+            realm: Realm::default(),
             _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
@@ -227,7 +224,6 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Broadcast,
-            #[cfg(feature = "remote")]
             realm,
             _via: crate::routing::ForwardTo::Broadcast(vec![tx.clone()], realm),
 
@@ -322,7 +318,7 @@ impl Handle {
 
         match registration_response {
             ClientMessage::Message(_packet) => {
-                _ = self.tx.send(RouterMsg::DeadLink(endpoint_id));
+                _ = self.send_broker(RouterMsg::DeadLink(endpoint_id));
                 Err(ReceiveError::RegistrationFailed(
                     "Bad response from Bus".into(),
                 ))
@@ -403,8 +399,7 @@ impl Handle {
 
         let route = Route {
             kind: crate::routing::RouteKind::Unicast,
-            #[cfg(feature = "remote")]
-            realm: crate::routing::Realm::Process,
+            realm: Realm::Process,
             _via: crate::routing::ForwardTo::Local(tx.clone()),
             cost: 0.into(),
             #[cfg(feature = "remote")]
@@ -414,10 +409,8 @@ impl Handle {
         let ei = (&route).into();
 
         let register_msg = RouterMsg::RegisterEndpoint(response_uuid, ei, tx);
-        self.tx
-            .send(register_msg)
-            .await
-            .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
+        self.send_broker(register_msg);
+        // .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
         let returned_uuid =
             if let Some(ClientMessage::SuccessfulRegistration(uuid)) = rx.recv().await {
                 uuid
@@ -448,12 +441,15 @@ impl Handle {
     }
 
     pub(crate) fn unregister_endpoint(&self, endpoint_id: EndpointId) {
-        self.tx.try_send(RouterMsg::DeadLink(endpoint_id)).ok();
+        self.send_broker(RouterMsg::DeadLink(endpoint_id));
     }
 
     /// Allows internal communication to the Router
     pub(crate) fn send_broker(&self, msg: RouterMsg) {
-        self.tx.try_send(msg).ok();
+        // self.tx.try_send(msg).ok();
+        if let Err(e) = self.tx.blocking_send(msg) {
+            tracing::warn!("Failed to send broker message: {}", e);
+        }
     }
 
     /// Start building a registration with the builder pattern
