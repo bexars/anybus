@@ -175,17 +175,17 @@ impl State for StartRendezvous {
             .name(name)
             .reclaim_name(true);
 
-        #[cfg(unix)]
-        let _ = {
-            use std::path::PathBuf;
-            let path = PathBuf::from("/tmp").join(&state.rendezvous);
-            _ = std::fs::remove_file(path);
-        };
+        // #[cfg(unix)]
+        // let _ = {
+        //     use std::path::PathBuf;
+        //     let path = PathBuf::from("/tmp").join(&state.rendezvous);
+        //     _ = std::fs::remove_file(path);
+        // };
         state.rendezvous_listener = match listener_opts.create_tokio() {
             Ok(rl) => Some(rl),
             Err(e) => {
                 debug!("Failed to create rendezvous listener: {}", e);
-                return b(HandleError::new(e));
+                return b(ConnectToRendezvous {});
             }
         };
         b(AnnounceMaster {})
