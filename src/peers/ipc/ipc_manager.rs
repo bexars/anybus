@@ -78,6 +78,17 @@ impl IpcManager {
     }
 }
 
+impl Drop for IpcManager {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        let _ = {
+            use std::path::PathBuf;
+            let path = PathBuf::from("/tmp").join(&self.rendezvous);
+            _ = std::fs::remove_file(path);
+        };
+    }
+}
+
 #[async_trait]
 trait State: Send + std::fmt::Debug {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>>;
@@ -175,16 +186,16 @@ impl State for StartRendezvous {
             .name(name)
             .reclaim_name(true);
 
-        // #[cfg(unix)]
-        // let _ = {
-        //     use std::path::PathBuf;
-        //     let path = PathBuf::from("/tmp").join(&state.rendezvous);
-        //     _ = std::fs::remove_file(path);
-        // };
         state.rendezvous_listener = match listener_opts.create_tokio() {
             Ok(rl) => Some(rl),
             Err(e) => {
                 debug!("Failed to create rendezvous listener: {}", e);
+                #[cfg(unix)]
+                let _ = {
+                    use std::path::PathBuf;
+                    let path = PathBuf::from("/tmp").join(&state.rendezvous);
+                    _ = std::fs::remove_file(path);
+                };
                 return b(ConnectToRendezvous {});
             }
         };

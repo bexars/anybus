@@ -1,3 +1,5 @@
+#![cfg(feature = "ipc")]
+
 mod common;
 use anybus::AnyBusBuilder;
 
@@ -11,8 +13,8 @@ async fn test_unicast_two_buses() {
 
     use tokio::time;
 
-    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mut mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mut mb2 = AnyBusBuilder::new().enable_ipc(true).run();
     let handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
@@ -20,9 +22,10 @@ async fn test_unicast_two_buses() {
     handle2.send(NumberMessage { value: 100 }).unwrap();
     let msg: NumberMessage = listener1.recv().await.unwrap();
     assert_eq!(msg.value, 100);
+    mb1.shutdown(None);
+    mb2.shutdown(None);
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_three_buses_with_drop() {
     // tracing_subscriber::fmt::init();
@@ -58,34 +61,39 @@ async fn test_unicast_three_buses_with_drop() {
 #[tokio::test]
 async fn test_rpc_two_busses() {
     // tracing_subscriber::fmt::init();
+    // println!("Hello");
 
     use anybus::AnyBusBuilder;
-    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mut mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+    let mut mb2 = AnyBusBuilder::new().enable_ipc(true).run();
 
     let handle1 = mb1.handle().clone();
     let handle2 = mb2.handle().clone();
     let mut listener1 = handle1.register_rpc::<common::RpcMessage>().await.unwrap();
-    dbg!(&listener1);
     let join_handle = tokio::spawn(async move {
-        // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         let mut responder = listener1.recv().await.unwrap();
-        dbg!(&responder);
         let msg = responder.payload().unwrap();
         assert_eq!(msg.value, 41);
-        // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         responder.reply(common::RpcResponse { value: 123 }).unwrap();
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
     assert!(!join_handle.is_finished());
-    let response = handle2
-        .rpc_once(common::RpcMessage { value: 41 })
+    let mut receiver = handle2.rpc_helper().await.unwrap();
+
+    let response = receiver
+        .request(common::RpcMessage { value: 41 })
         .await
         .unwrap();
+
     assert_eq!(response.value, 123);
+    mb1.shutdown(None);
+    mb2.shutdown(None);
+    drop(handle1);
+    drop(handle2);
 }
 
 /// This test verifies that anycast messages are delivered to local listeners first,

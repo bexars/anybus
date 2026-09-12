@@ -233,11 +233,17 @@ pub enum Address {
     Remote(EndpointId, NodeId), // EndpointId, NodeId
 }
 
-impl From<Address> for EndpointId {
-    fn from(value: Address) -> Self {
-        match value {
-            Address::Endpoint(eid) => eid,
-            Address::Remote(eid, _nid) => eid,
+impl Address {
+    pub(crate) fn get_endpoint(&self, local_node_id: NodeId) -> EndpointId {
+        match self {
+            Address::Endpoint(endpoint_id) => *endpoint_id,
+            Address::Remote(endpoint_id, node_id) => {
+                if local_node_id == *node_id {
+                    *endpoint_id
+                } else {
+                    EndpointId::from(*node_id)
+                }
+            }
         }
     }
 }

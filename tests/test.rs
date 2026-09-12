@@ -1,7 +1,9 @@
+mod common;
 use anybus::BusRiderRpc;
 
 use anybus::bus_uuid;
 use serde::{Deserialize, Serialize};
+use tokio::join;
 // use std::time::Duration;
 
 // use tokio::time::timeout;
@@ -118,7 +120,8 @@ async fn test_rpc_local() {
     // console_subscriber::init();
     use anybus::spawn;
 
-    let mb1 = anybus::AnyBus::new();
+    let mut mb1 = anybus::AnyBus::new();
+    mb1.run();
     let handle1 = mb1.handle().clone();
     // dbg!("Before Spawn: {:?}", &handle1);
     let mut listener1 = handle1.register_rpc().await.unwrap();
@@ -137,11 +140,17 @@ async fn test_rpc_local() {
     // dbg!("AnyBus: {:?}", &mb1);
 
     let handle2 = mb1.handle().clone();
-    let response = handle2.rpc_once(RpcMessage { value: 5 }).await.unwrap();
+    let response = tokio::spawn(async move {
+        let handle2 = handle2.clone();
+    
+        let res = handle2.rpc_once(RpcMessage { value: 5 }).await.unwrap();
+        res
+    });
+    let response = join!(response).0.unwrap();
 
     assert_eq!(response.value, 100);
     drop(handle1);
-    drop(handle2);
+    mb1.shutdown(None);
 }
 
 // #[cfg(feature = "tokio")]

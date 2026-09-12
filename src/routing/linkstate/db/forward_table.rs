@@ -51,8 +51,11 @@ impl ForwardingTable {
     /// From local clients
     pub(crate) fn send(&self, packet: Packet) -> Result<(), SendError> {
         tracing::debug!("Sending packet to {:?}", packet.to);
-        tracing::debug!("FIB entry: {:?}", self.table.get(&packet.to.into()));
-        let endpoint_id = packet.to.into();
+        tracing::trace!(
+            "FIB entry: {:?}",
+            self.table.get(&packet.to.get_endpoint(self.our_id))
+        );
+        let endpoint_id = packet.to.get_endpoint(self.our_id);
         let Some(fib_entry) = self.table.get(&endpoint_id) else {
             return Err(SendError::NoRoute(Some(packet.payload)));
         };
@@ -124,11 +127,10 @@ impl ForwardingTable {
             return; // no route back just drop
         }
 
-        let endpoint_id = packet.to.into();
+        let endpoint_id = packet.to.get_endpoint(self.our_id);
         let Some(fib_entry) = self.table.get(&endpoint_id) else {
             return;
         };
-
         let mut locals = fib_entry.locals().peekable();
         let mut remotes = fib_entry.remotes().peekable();
         let has_local = locals.peek().is_some();
@@ -152,7 +154,6 @@ impl ForwardingTable {
                     tracing::error!("Failed to forward packet to remote: {}", e);
                 });
         };
-
         match (has_local, has_remote) {
             (true, true) => {
                 Self::deliver(locals, packet.clone().into(), tx_local);
@@ -169,12 +170,16 @@ impl ForwardingTable {
     }
 
     #[cfg(feature = "remote")]
-    fn deliver<I, T, F>(iter: Peekable<impl Iterator<Item = I>>, value: T, mut f: F)
-    where
+    fn deliver<I: std::fmt::Debug, T: std::fmt::Debug, F>(
+        iter: Peekable<impl Iterator<Item = I>>,
+        value: T,
+        mut f: F,
+    ) where
         T: Clone,
         F: FnMut(I, T),
     {
         let mut iter = iter.into_iter().peekable();
+
         while let Some(hop) = iter.next() {
             if iter.peek().is_some() {
                 f(hop, value.clone());
