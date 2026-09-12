@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use anybus::BusRiderRpc;
 use anybus::bus_uuid;
 use serde::{Deserialize, Serialize};
