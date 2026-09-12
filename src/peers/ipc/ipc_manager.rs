@@ -15,6 +15,7 @@ use tokio::{
         mpsc::{self, channel},
     },
 };
+
 use tracing::{debug, error};
 
 use crate::{
@@ -75,17 +76,6 @@ impl IpcManager {
             debug!("Entering: {:?}", &old_state);
             state = old_state.next(&mut self).await;
         }
-    }
-}
-
-impl Drop for IpcManager {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        let _ = {
-            use std::path::PathBuf;
-            let path = PathBuf::from("/tmp").join(&self.rendezvous);
-            _ = std::fs::remove_file(path);
-        };
     }
 }
 
@@ -181,6 +171,9 @@ impl State for StartRendezvous {
             .clone()
             .to_ns_name::<GenericNamespaced>()
             .unwrap();
+
+        debug!("Tmp directory {:?}", std::env::temp_dir());
+
         let listener_opts = local_socket::ListenerOptions::new()
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(name)
@@ -191,11 +184,11 @@ impl State for StartRendezvous {
             Err(e) => {
                 debug!("Failed to create rendezvous listener: {}", e);
                 #[cfg(unix)]
-                let _ = {
-                    use std::path::PathBuf;
-                    let path = PathBuf::from("/tmp").join(&state.rendezvous);
-                    _ = std::fs::remove_file(path);
-                };
+                // let _ = {
+                //     // use std::path::PathBuf;
+                //     let path = std::env::temp_dir().join(&state.rendezvous);
+                //     _ = std::fs::remove_file(path);
+                // };
                 return b(ConnectToRendezvous {});
             }
         };
@@ -282,6 +275,20 @@ impl State for Shutdown {
             // state.handle.unregister_peer(id);
         }
         None
+    }
+}
+
+#[derive(Debug)]
+struct SendNewPeersControl {}
+
+#[async_trait]
+impl State for SendNewPeersControl {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        for (_id, tx) in state.peers.read().await.iter() {
+            tx.send(IpcControl::SendPeers).await.ok();
+            // state.handle.unregister_peer(id);
+        }
+        b(Listen {})
     }
 }
 
@@ -423,7 +430,6 @@ impl State for CreateIpcPeer {
         );
 
         state.peers.write().await.push((self.peer_id, tx));
-
         _ = spawn(ipc_peer.start());
 
         let s = self.extra_streams.pop(); // Handle learning multiple peers at once
@@ -433,7 +439,7 @@ impl State for CreateIpcPeer {
                 peer_is_master: false,
                 extra_streams: self.extra_streams,
             }),
-            None => b(Listen {}),
+            None => b(SendNewPeersControl {}),
         }
     }
 }
