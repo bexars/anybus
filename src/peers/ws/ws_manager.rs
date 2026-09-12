@@ -304,9 +304,13 @@ impl WebsocketManager {
     ) -> ManagerState {
         let connection_id = self.connection_counter.next();
         let realms = Realm::Global.into();
+
         let stream_direction = match ws_pending_peer {
             Some(ws_pending_peer) => StreamDirection::Outbound(ws_pending_peer.config),
+            #[cfg(feature = "ws_server")]
             None => StreamDirection::Inbound,
+            #[cfg(not(feature = "ws_server"))]
+            None => unreachable!(),
         };
 
         let peer = Peer::register_peer(
@@ -365,13 +369,12 @@ impl WebsocketManager {
         trace!("Connected: {:?}", attempt);
         match attempt {
             Ok(ws_stream) => {
-                #[cfg(not(target_family = "wasm"))]
                 {
+                    #[cfg(not(target_family = "wasm"))]
                     let (stream, _response) = ws_stream;
-                    // let msg = WsCommand::NewWsStream {
-                    //     stream: stream.into(),
-                    //     direction: StreamDirection::Outbound(ws_pending_peer.config),
-                    // };
+
+                    #[cfg(target_family = "wasm")]
+                    let stream = ws_stream;
 
                     spawn(WebsocketManager::handshake_peer(
                         ws_command,
@@ -380,21 +383,6 @@ impl WebsocketManager {
                         our_id,
                         Some(ws_pending_peer),
                     ));
-
-                    // ws_command.send(msg).await.ok();
-
-                    // ManagerState::NewWsStream {
-                    //     stream: stream.into(),
-                    //     direction: StreamDirection::Outbound(ws_pending_peer.config),
-                    // }
-                }
-                #[cfg(target_family = "wasm")]
-                {
-                    let stream = ws_stream;
-                    ManagerState::NewWsStream {
-                        stream: stream.into(),
-                        direction: StreamDirection::Outbound(ws_pending_peer.config),
-                    }
                 }
             }
             Err(e) => {

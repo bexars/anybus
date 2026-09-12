@@ -40,7 +40,6 @@ pub(crate) enum WsControl {
 
 // #[derive(Debug)]
 pub(crate) enum WsCommand {
-    #[cfg(feature = "ws_server")]
     NewWsStream {
         stream: WebSockStream,
         // socket_addr: SocketAddr,
@@ -54,7 +53,6 @@ pub(crate) enum WsCommand {
 impl Debug for WsCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            #[cfg(feature = "ws_server")]
             Self::NewWsStream {
                 ws_pending_peer: direction,
                 ..

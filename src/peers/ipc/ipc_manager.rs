@@ -183,7 +183,7 @@ impl State for StartRendezvous {
             Ok(rl) => Some(rl),
             Err(e) => {
                 debug!("Failed to create rendezvous listener: {}", e);
-                #[cfg(unix)]
+                // #[cfg(unix)]
                 // let _ = {
                 //     // use std::path::PathBuf;
                 //     let path = std::env::temp_dir().join(&state.rendezvous);
