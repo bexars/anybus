@@ -153,6 +153,9 @@ impl AnyBus {
 
     /// Starts the AnyBus system.  This will start any configured listeners (WebSocket, IPC, etc) and begin processing messages.
     pub fn run(&mut self) {
+        #[cfg(all(not(target_arch = "wasm32"), target_family = "unix"))]
+        spawn(crate::helper::watch_signals(self.handle.clone()));
+
         #[cfg(not(target_arch = "wasm32"))]
         if self.config.enable_ctrlc_shutdown {
             self.shutdown_with_ctrlc();

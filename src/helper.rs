@@ -47,3 +47,24 @@ pub(crate) async fn watch_ctrlc(handle: crate::Handle) {
         handle.shutdown(Some(Duration::from_secs(1)));
     }
 }
+
+#[cfg(all(not(target_arch = "wasm32"), target_family = "unix"))]
+pub(crate) async fn watch_signals(handle: crate::Handle) {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut sig_user = signal(SignalKind::user_defined1()).unwrap();
+    let mut sig_term = signal(SignalKind::terminate()).unwrap();
+
+    loop {
+        use std::time::Duration;
+
+        tokio::select! {
+            _ = sig_user.recv() => {
+                dbg!(&handle);
+            }
+            _ = sig_term.recv() => {
+                handle.shutdown(Some(Duration::from_millis(100)));
+            }
+        }
+    }
+}
