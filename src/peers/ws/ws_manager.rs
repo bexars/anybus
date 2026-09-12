@@ -19,17 +19,19 @@ use wasm_socket_handle::WsHandle;
 use crate::anybus::config::WebSocketServerConfig;
 use crate::{
     AnyBusStatusMsg, Handle, Realm, Receiver,
-    anybus::config::WebSocketPeerConfig,
+    anybus::config::{WebSocketPeerConfig, WsUrl},
     peers::{
         common::Peer,
         ws::{
-            self, StreamDirection, WebSockStream, WsActivePeer, WsCommand, WsError, WsMessage,
-            WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
+            self, AddPeer, RemovePeer, StreamDirection, WebSockStream, WsActivePeer, WsCommand,
+            WsError, WsMessage, WsPendingPeer, WsRpcMessage, ws_peer::InMessage,
         },
     },
     routing::{ConnectionIdCounter, NodeId},
     spawn,
 };
+
+type RpcResponseSender = tokio::sync::oneshot::Sender<Result<(), String>>;
 
 #[cfg(feature = "ws_server")]
 use crate::peers::ws::listener::create_listener;
@@ -52,6 +54,8 @@ enum ManagerState {
     },
     ConnectRemote(WsPendingPeer),
     QueueReconnect(WsPendingPeer),
+    AddWsPeer(AddPeer, RpcResponseSender),
+    RemoveWsPeer(RemovePeer, RpcResponseSender),
     Error(WsError),
     Shutdown,
 }
@@ -123,6 +127,12 @@ impl WebsocketManager {
                     let current_peers = take(&mut self.current_peers);
                     spawn(Self::notify_peers(current_peers));
                     break;
+                }
+                ManagerState::AddWsPeer(ws_url, rpc_sender) => {
+                    self.add_ws_peer(ws_url, rpc_sender).await
+                }
+                ManagerState::RemoveWsPeer(ws_url, rpc_sender) => {
+                    self.remove_ws_peer(ws_url, rpc_sender).await
                 }
             };
         }
@@ -205,38 +215,12 @@ impl WebsocketManager {
             Some(rpc_request) = self.ws_rpc_rx.recv() => {
                 match rpc_request{
                     WsRpcMessage::AddPeer { req, respond_to } => {
-                        if self.pending_peers.iter().any(|p| p.config == req.peer_config)
-                            || self.disconnected_peers.iter().any(|p| p.config == req.peer_config)
-                            || self.current_peers.iter().any(|p| p.direction == req.peer_config) {
-                            respond_to.send(Err(format!("Peer already exists: {}", req.peer_config))).ok();
-                            tracing::warn!("Peer already exists: {}", req.peer_config);
-                        } else {
-                            tracing::info!("Added new peer: {}", &req.peer_config);
-                            self.pending_peers.push(req.peer_config.into());
-                            respond_to.send(Ok(())).ok();
-                        }
+                         ManagerState::AddWsPeer(req, respond_to)
                     },
                     WsRpcMessage::RemovePeer { req, respond_to } => {
-                        let len_orig = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
-                        self.pending_peers.retain(|p| p.config.url != req.url);
-                        self.disconnected_peers.retain(|p| p.config.url != req.url);
-                        if let Some(idx) = self.current_peers.iter().position(|p| p.direction == req.url){
-                            let peer = self.current_peers.remove(idx);
-                            spawn(async move {peer.ws_control.send(ws::WsControl::Shutdown).await.ok();});
-                        }
-                        let len_now = self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
-                        if len_now < len_orig {
-                            respond_to.send(Ok(())).ok();
-                            tracing::info!("Removed peer: {}", req.url);
-                        }
-                        else {
-                            respond_to.send(Err(format!("Unable to find url: {}", req.url))).ok();
-                            tracing::warn!("Unable to find url: {}", req.url);
-                        }
-
+                         ManagerState::RemoveWsPeer(req, respond_to)
                     },
                 }
-                ManagerState::Listen
             }
 
             Some(cmd) = self.rx.recv() => {
@@ -394,6 +378,65 @@ impl WebsocketManager {
                 ManagerState::QueueReconnect(ws_pending_peer)
             }
         }
+    }
+
+    async fn add_ws_peer(&mut self, req: AddPeer, respond_to: RpcResponseSender) -> ManagerState {
+        if self
+            .pending_peers
+            .iter()
+            .any(|p| p.config == req.peer_config)
+            || self
+                .disconnected_peers
+                .iter()
+                .any(|p| p.config == req.peer_config)
+            || self
+                .current_peers
+                .iter()
+                .any(|p| p.direction == req.peer_config)
+        {
+            respond_to
+                .send(Err(format!("Peer already exists: {}", req.peer_config)))
+                .ok();
+            tracing::warn!("Peer already exists: {}", req.peer_config);
+        } else {
+            tracing::info!("Added new peer: {}", &req.peer_config);
+            self.pending_peers.push(req.peer_config.into());
+            respond_to.send(Ok(())).ok();
+        }
+        ManagerState::Listen
+    }
+
+    async fn remove_ws_peer(
+        &mut self,
+        req: RemovePeer,
+        respond_to: RpcResponseSender,
+    ) -> ManagerState {
+        let len_orig =
+            self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
+        self.pending_peers.retain(|p| p.config.url != req.url);
+        self.disconnected_peers.retain(|p| p.config.url != req.url);
+        if let Some(idx) = self
+            .current_peers
+            .iter()
+            .position(|p| p.direction == req.url)
+        {
+            let peer = self.current_peers.remove(idx);
+            spawn(async move {
+                peer.ws_control.send(ws::WsControl::Shutdown).await.ok();
+            });
+        }
+        let len_now =
+            self.pending_peers.len() + self.disconnected_peers.len() + self.current_peers.len();
+        if len_now < len_orig {
+            respond_to.send(Ok(())).ok();
+            tracing::info!("Removed peer: {}", req.url);
+        } else {
+            respond_to
+                .send(Err(format!("Unable to find url: {}", req.url)))
+                .ok();
+            tracing::warn!("Unable to find url: {}", req.url);
+        };
+        ManagerState::Listen
     }
 
     async fn queue_reconnect(&mut self, mut ws_pending_peer: WsPendingPeer) -> ManagerState {
