@@ -506,23 +506,28 @@ impl RequestHelper {
         let node_id = self.handle.route_watch_rx.borrow().get_node_id();
         let payload = Box::new(payload);
         let to_address: Address = T::ANYBUS_UUID.into();
+        {
+            let fib = self.handle.route_watch_rx.borrow();
+            fib.send(Packet {
+                to: to_address,
+                reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
+                from: fib.our_id,
+                payload: Payload::BusRider(payload),
+            })
+            .map_err(AnyBusHandleError::SendError)?;
+        }
+        let incoming = self.rx.recv().await;
 
-        let fib = self.handle.route_watch_rx.borrow();
-        fib.send(Packet {
-            to: to_address,
-            reply_to: Some(Address::Remote(self.response_endpoint_id.into(), node_id)),
-            from: fib.our_id,
-            payload: Payload::BusRider(payload),
-        })
-        .map_err(AnyBusHandleError::SendError)?;
-        // drop(map);
-        match self.rx.recv().await {
+        let res = match incoming {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
             }),
             None => Err(AnyBusHandleError::Shutdown),
-            _ => todo!(),
-        }
+            _ => {
+                unreachable!()
+            }
+        };
+        res
     }
 
     /// A request using user provided Uuid
