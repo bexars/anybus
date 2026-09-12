@@ -32,7 +32,7 @@ use crate::{
 };
 
 #[cfg(feature = "ws_server")]
-use crate::peers::ws::create_listener;
+use crate::peers::ws::listener::create_listener;
 
 /// Helper function to box a State and return it as an Option
 // fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
@@ -292,7 +292,7 @@ impl WebsocketManager {
                 }
                 ManagerState::Listen
             }
-            WsCommand::QueueReconnect(pending_peer) => todo!(),
+            WsCommand::QueueReconnect(pending_peer) => ManagerState::QueueReconnect(pending_peer),
         }
     }
 
