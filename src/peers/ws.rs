@@ -41,7 +41,12 @@ pub(crate) enum WsControl {
 // #[derive(Debug)]
 pub(crate) enum WsCommand {
     #[cfg(feature = "ws_server")]
-    NewWsStream(WebSockStream, SocketAddr, StreamDirection),
+    NewWsStream {
+        stream: WebSockStream,
+        // socket_addr: SocketAddr,
+        ws_pending_peer: Option<WsPendingPeer>,
+        peer_id: NodeId,
+    },
     PeerClosed(NodeId),
     QueueReconnect(WsPendingPeer),
 }
@@ -50,9 +55,12 @@ impl Debug for WsCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             #[cfg(feature = "ws_server")]
-            Self::NewWsStream(_arg0, arg1, direction) => f
+            Self::NewWsStream {
+                ws_pending_peer: direction,
+                ..
+            } => f
                 .debug_tuple("NewWsStream")
-                .field(arg1)
+                // .field(socket_addr)
                 .field(direction)
                 .finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),

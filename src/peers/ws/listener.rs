@@ -3,10 +3,10 @@ use tokio::sync::mpsc::Sender;
 use tracing::error;
 
 #[cfg(feature = "ws_server")]
-use crate::peers::ws::StreamDirection;
+use crate::routing::NodeId;
 use crate::{
     anybus::config::WebSocketServerConfig,
-    peers::ws::{WsCommand, WsError},
+    peers::ws::{WsCommand, WsError, ws_manager::WebsocketManager},
     spawn,
 };
 
@@ -15,6 +15,7 @@ use std::{fs::File, io::BufReader};
 pub(super) async fn create_listener(
     ws_listener_options: WebSocketServerConfig,
     ws_command: tokio::sync::mpsc::Sender<WsCommand>,
+    our_id: NodeId,
 ) -> Result<(), WsError> {
     // Create the listener here
     //
@@ -86,7 +87,7 @@ pub(super) async fn create_listener(
             error!("Failed to bind to address {}: {}", sock_addr, e);
             WsError::BindFailure(sock_addr)
         })?;
-    spawn(run_ws_listener(listener, ws_command, acceptor));
+    spawn(run_ws_listener(listener, ws_command, acceptor, our_id));
     Ok(())
 }
 
@@ -95,62 +96,50 @@ async fn run_ws_listener(
     listener: tokio::net::TcpListener,
     ws_command: Sender<WsCommand>,
     acceptor: Option<tokio_rustls::TlsAcceptor>,
+    our_id: NodeId,
 ) {
-    loop {
-        // use tokio_tungstenite::MaybeTlsStream;
+    // use tokio_tungstenite::MaybeTlsStream;
 
-        use tokio_tungstenite::MaybeTlsStream;
+    use tokio_tungstenite::MaybeTlsStream;
 
-        tokio::select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((stream, addr)) => {
-                        // Handle the new connection
-                        let command = match acceptor {
-                            Some(ref a) => match a.accept(stream).await {
-                                Ok(s) => {
-                                    // let s = rustls::client::TlsStream::fr
-                                    // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
-                                    let stream = match tokio_tungstenite::accept_async(s).await {
-                                        Ok(stream) => stream,
-                                        Err(e) => { tracing::error!("Failed to accept websocket connection from {}: {}", addr, e);
-                                            continue },
-                                    };
-                                    WsCommand::NewWsStream(stream.into(),addr, StreamDirection::Inbound)
-                                }
-                                ,
-                                Err(e) => {
-                                    error!("TLS handshake failed with {}: {}", addr, e);
-                                    continue;
-                                }
-                            },
-                            None => {
-                                let stream = tokio_tungstenite::accept_async(MaybeTlsStream::Plain(stream )).await.unwrap();
-                                    WsCommand::NewWsStream(stream.into(),addr, StreamDirection::Inbound)
-                                }
-                        };
-                        // let s = stream..into_inner();
-                        // let stream = match stream {
-                        //     Ok(s) => {
-                        //         // let s = rustls::client::TlsStream::fr
-                        //         // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
-                        //         tokio_tungstenite::accept_async(s).await.unwrap()}
-                        //     ,
-                        //     Err(e) => {
-                        //         error!("TLS handshake failed with {}: {}", addr, e);
-                        //         continue;
-                        //     }
-                        // };
-                        tracing::info!("Accepted connection from {}", addr);
-
-                        ws_command.send(command).await.ok();
-                    }
-                    Err(e) => {
-                        error!("Failed to accept connection: {}", e);
+    while let Ok((stream, socket_addr)) = listener.accept().await {
+        // Handle the new connection
+        let stream = match acceptor {
+            Some(ref a) => match a.accept(stream).await {
+                Ok(s) => {
+                    // let s = rustls::client::TlsStream::fr
+                    // let s = MaybeTlsStream::RustlsClientServer(tokio_rustls::TlsStream::Server(s));
+                    match tokio_tungstenite::accept_async(s).await {
+                        Ok(stream) => stream.into(),
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to accept websocket connection from {}: {}",
+                                socket_addr,
+                                e
+                            );
+                            continue;
+                        }
                     }
                 }
-            }
+                Err(e) => {
+                    error!("TLS handshake failed with {}: {}", socket_addr, e);
+                    continue;
+                }
+            },
+            None => tokio_tungstenite::accept_async(MaybeTlsStream::Plain(stream))
+                .await
+                .unwrap()
+                .into(),
+        };
+        spawn(WebsocketManager::handshake_peer(
+            ws_command.clone(),
+            stream,
+            our_id,
+            None,
+        ));
 
-        }
+        tracing::info!("Accepted connection from {}", socket_addr);
+
+        // ws_command.send(command).await.ok();
     }
 }
