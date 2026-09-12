@@ -45,29 +45,27 @@ pub(crate) enum WsControl {
     Shutdown,
 }
 
-// #[async_trait]
-// trait WebSockStream {
-//     async fn send_msg(&mut self, message: WsMessage) -> Result<(), Box<dyn std::error::Error>>;
-
-//     async fn next_msg(&mut self) -> InMessage;
-
-//     async fn close_conn(&mut self) -> Result<(), Box<dyn std::error::Error>>;
-// }
-
 // #[derive(Debug)]
 pub(crate) enum WsCommand {
-    // NewTcpStream(tokio::net::TcpStream, SocketAddr),
     #[cfg(feature = "ws_server")]
-    NewWsStream(WebSockStream, SocketAddr),
+    NewWsStream(WebSockStream, SocketAddr, StreamDirection),
     PeerClosed(NodeId),
+    QueueReconnect(WsPendingPeer),
 }
 
 impl Debug for WsCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             #[cfg(feature = "ws_server")]
-            Self::NewWsStream(_arg0, arg1) => f.debug_tuple("NewWsStream").field(arg1).finish(),
+            Self::NewWsStream(_arg0, arg1, direction) => f
+                .debug_tuple("NewWsStream")
+                .field(arg1)
+                .field(direction)
+                .finish(),
             Self::PeerClosed(arg0) => f.debug_tuple("PeerClosed").field(arg0).finish(),
+            Self::QueueReconnect(pending_peer) => {
+                f.debug_tuple("QueueReconnect").field(pending_peer).finish()
+            }
         }
     }
 }
@@ -82,10 +80,7 @@ define_local_rpc! {
 pub(crate) enum WsMessage {
     Hello(NodeId),
     NodeMsg(NodeMessage),
-    // Packet(WirePacket),
     CloseConnection,
-    // Advertise(HashSet<Advertisement>),
-    // Withdraw(HashSet<Advertisement>),
     Ping(u64),
     Pong(u64),
 }
@@ -126,7 +121,7 @@ pub struct WsRemoteOptions {
 }
 
 #[derive(Debug)]
-enum StreamDirection {
+pub(crate) enum StreamDirection {
     #[cfg(feature = "ws_server")]
     Inbound,
     Outbound(WebSocketPeerConfig),
@@ -371,7 +366,7 @@ async fn run_ws_listener(
                                         Err(e) => { tracing::error!("Failed to accept websocket connection from {}: {}", addr, e);
                                             continue },
                                     };
-                                    WsCommand::NewWsStream(stream.into(),addr)
+                                    WsCommand::NewWsStream(stream.into(),addr, StreamDirection::Inbound)
                                 }
                                 ,
                                 Err(e) => {
@@ -381,7 +376,7 @@ async fn run_ws_listener(
                             },
                             None => {
                                 let stream = tokio_tungstenite::accept_async(MaybeTlsStream::Plain(stream )).await.unwrap();
-                                    WsCommand::NewWsStream(stream.into(),addr)
+                                    WsCommand::NewWsStream(stream.into(),addr, StreamDirection::Inbound)
                                 }
                         };
                         // let s = stream..into_inner();

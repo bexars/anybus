@@ -197,9 +197,10 @@ impl WebsocketManager {
             } => {
                 if let Some(pending) = self.get_next_ready_peer() {
                     debug!("Reconnecting to remote WebSocket peer at {}", pending.config);
-                    return ManagerState::ConnectRemote(pending);
+                    ManagerState::ConnectRemote(pending)
+                } else {
+                    ManagerState::Listen
                 }
-                ManagerState::Listen
             }
             Some(rpc_request) = self.ws_rpc_rx.recv() => {
                 match rpc_request{
@@ -262,18 +263,17 @@ impl WebsocketManager {
     async fn handle_command(&mut self, command: WsCommand) -> ManagerState {
         match command {
             #[cfg(feature = "ws_server")]
-            WsCommand::NewWsStream(stream, _addr) => ManagerState::NewWsStream {
+            WsCommand::NewWsStream(stream, _addr, direction) => ManagerState::NewWsStream {
                 stream: stream,
-                direction: StreamDirection::Inbound,
+                direction,
             },
             WsCommand::PeerClosed(uuid) => {
                 debug!("Peer {} closed connection", uuid);
                 // Remove the peer from current_peers
                 // If the peer was a remote peer, schedule a reconnect
-                // _state.current_peers.retain(|p| p.peer_id != uuid);
+
                 if let Some(pos) = self.current_peers.iter().position(|p| p.peer_id == uuid) {
                     let closed_peer = self.current_peers.remove(pos);
-                    // if url == closed_peer.peer_config {
 
                     #[cfg_attr(not(feature = "ws_server"), allow(irrefutable_let_patterns))]
                     if let StreamDirection::Outbound(ref config) = closed_peer.direction {
@@ -292,6 +292,7 @@ impl WebsocketManager {
                 }
                 ManagerState::Listen
             }
+            WsCommand::QueueReconnect(pending_peer) => todo!(),
         }
     }
 
@@ -353,42 +354,6 @@ impl WebsocketManager {
                 error!("Timeout waiting for Hello response");
             }
         }
-        // #[cfg(target_arch = "wasm32")]
-        // match self.stream.next_msg().await {
-        //     InMessage::WsMessage(WsMessage::Hello(peer_id)) => {
-        //         debug!("Received Hello from peer: {} ", peer_id);
-        //         let (tx_nodemessage, rx) = tokio::sync::mpsc::unbounded_channel();
-        //         let peer = Peer::new(
-        //             peer_id,
-        //             state.node_id,
-        //             state.handle.clone(),
-        //             rx,
-        //             Realm::Global, // WebSocket peers are always in the global realm
-        //         );
-        //         let peer_entry = PeerEntry {
-        //             peer_tx: tx_nodemessage,
-        //             realm: Realm::Global,
-        //         };
-        //         state.handle.register_peer(peer_id, peer_entry);
-        //         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        //         spawn(ws::ws_peer::run_ws_peer(
-        //             self.stream,
-        //             state.bus_control.clone(),
-        //             state.tx.clone(),
-        //             rx,
-        //             peer,
-        //         ));
-        //         let peer = WsActivePeer {
-        //             peer_id,
-        //             url: self.pending.and_then(|p| Some(p.url)),
-        //             ws_control: tx,
-        //         };
-        //         state.current_peers.push(peer);
-        //     }
-        //     other => {
-        //         error!("Unexpected message: {:?}", other);
-        //     }
-        // }
 
         ManagerState::Listen
     }
@@ -399,17 +364,10 @@ impl WebsocketManager {
 
         #[cfg(target_family = "wasm")]
         let attempt = WsHandle::new(&ws_pending_peer.config.url.to_string()).await;
-        // #[cfg(not(target_family = "wasm"))]
-        // if let Some(domain) = ws_pending_peer.url.domain() {
-        //     let ip = tokio::net::lookup_host(domain).await;
-        //     if let Ok(ip) = ip {
-        //         for ip in ip {
-        //             trace!("Connecting to: {}", ip);
-        //         }
-        //     }
-        // }
+
         #[cfg(not(target_family = "wasm"))]
         let attempt = connect_async(ws_pending_peer.config.url.to_string()).await;
+
         trace!("Connected: {:?}", attempt);
         match attempt {
             Ok(ws_stream) => {
