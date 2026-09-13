@@ -60,7 +60,7 @@ pub(crate) async fn watch_signals(handle: crate::Handle) {
 
         tokio::select! {
             _ = sig_user.recv() => {
-                dbg!(&handle);
+                dbg!(&handle);  // allow this debug since it's diagnotic when it receives a SIG_USR1 (30 on Macos)
             }
             _ = sig_term.recv() => {
                 handle.shutdown(Some(Duration::from_millis(100)));
