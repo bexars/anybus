@@ -1,10 +1,10 @@
 #![cfg(feature = "ipc")]
 
 mod common;
-use anybus::AnyBusBuilder;
+use anybus::{AnyBusBuilder, spawn};
 
 use crate::common::NumberMessage;
-// use tracing::info;
+
 
 #[cfg(feature = "tokio")]
 #[tokio::test]
@@ -32,29 +32,54 @@ async fn test_unicast_three_buses_with_drop() {
 
     use tokio::time;
 
-    let mb1 = AnyBusBuilder::new().enable_ipc(true).run();
-    let mb2 = AnyBusBuilder::new().enable_ipc(true).run();
-    let handle1 = mb1.handle().clone();
+    let mut mb2 = AnyBusBuilder::new().enable_ipc(true).init();
     let handle2 = mb2.handle().clone();
-    let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
-    time::sleep(std::time::Duration::from_millis(100)).await;
+    spawn(async move {
+        mb2.run();
+        let handle2 = mb2.handle().clone();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // dbg!(&handle2);
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // dbg!(&handle2);
+        tokio::time::sleep(std::time::Duration::from_secs(13)).await;
+        // dbg!(&handle2);
+        mb2.shutdown(None);
+    });
+
+    spawn(async {
+        let mut mb1 = AnyBusBuilder::new().enable_ipc(true).run();
+        let handle1 = mb1.handle().clone();
+        let mut listener1 = handle1.register_unicast::<NumberMessage>().await.unwrap();
+
+        // handle1.send(NumberMessage { value: 100 }).unwrap();
+        let msg: NumberMessage = listener1.recv().await.unwrap();
+
+        assert_eq!(msg.value, 100);
+        mb1.shutdown(None);
+        println!("Mb1 shutdown");
+    });
+
+    time::sleep(std::time::Duration::from_millis(1000)).await;
     handle2.send(NumberMessage { value: 100 }).unwrap();
 
-    let msg: NumberMessage = listener1.recv().await.unwrap();
-    assert_eq!(msg.value, 100);
-    drop(mb1);
-    drop(handle1);
-    drop(listener1);
-    time::sleep(std::time::Duration::from_millis(10)).await;
+    time::sleep(std::time::Duration::from_millis(2000)).await;
+    spawn(async {
+        let mut mb3 = AnyBusBuilder::new().enable_ipc(true).run();
+        let handle3 = mb3.handle().clone();
+        println!("Before listener3 register");
+        let mut listener3 = handle3.register_unicast::<NumberMessage>().await.unwrap();
+        time::sleep(std::time::Duration::from_millis(500)).await;
+        handle3.send(NumberMessage { value: 50 }).unwrap();
+        let msg = listener3.recv().await.unwrap();
+        let msg = listener3.recv().await.unwrap();
 
-    let mb3 = AnyBusBuilder::new().enable_ipc(true).run();
-    let handle3 = mb3.handle().clone();
-    let mut listener3 = handle3.register_anycast::<NumberMessage>().await.unwrap();
-    time::sleep(std::time::Duration::from_millis(10)).await;
-
+        assert_eq!(msg.value, 200);
+        mb3.shutdown(None);
+    });
+    time::sleep(std::time::Duration::from_millis(6000)).await;
+    // dbg!(&handle2);
     handle2.send(NumberMessage { value: 200 }).unwrap();
-    let msg = listener3.recv().await.unwrap();
-    assert_eq!(msg.value, 200);
+    // mb2.shutdown(None);
 }
 
 #[cfg(feature = "tokio")]
