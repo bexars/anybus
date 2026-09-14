@@ -210,12 +210,14 @@ impl State for AnnounceMaster {
             .map(|(id, tx)| (id, tx.try_send(IpcControl::IAmMaster))) // FIX need to handle full case correctly
             .filter_map(|(id, res)| if res.is_err() { Some(id) } else { None });
 
-        b(Listen {})
+        b(Listen::default())
     }
 }
 
-#[derive(Debug)]
-struct Listen {}
+#[derive(Debug, Default)]
+struct Listen {
+    shutdown: bool,
+}
 
 #[async_trait]
 impl State for Listen {
@@ -236,7 +238,11 @@ impl State for Listen {
                     .map(|l| Box::pin(l.accept())),
             );
 
-        let ipc_listeners = future::select_all(ipc_listeners);
+        let ipc_listeners = if self.shutdown {
+            future::select_all(None)
+        } else {
+            future::select_all(ipc_listeners)
+        };
 
         select! {
                     (stream, _idx, _vec) = ipc_listeners => {
@@ -254,13 +260,26 @@ impl State for Listen {
                     }
                     status = state.anybus_status.recv() => {
                         match status {
-                            Ok(AnyBusStatusMsg::ShuttingDown) => b(Shutdown{}),
+                            Ok(AnyBusStatusMsg::ShuttingDown) => b(SoftShutdown{}),
                             Err(_) => b(Shutdown{}),
-                            _ => b(Listen {})
+                            _ => b(Listen::default())
                         }
                     }
 
                 }
+    }
+}
+
+#[derive(Debug)]
+struct SoftShutdown {}
+
+#[async_trait]
+impl State for SoftShutdown {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        state.peer_listener = None;
+        //TODO shutdown the rendezvous listener.  Need to stop peering on that connection and have it just 
+        // return a list of node IPCs to connect to and drop
+        b(Listen { shutdown: true })
     }
 }
 
@@ -288,7 +307,7 @@ impl State for SendNewPeersControl {
             tx.send(IpcControl::SendPeers).await.ok();
             // state.handle.unregister_peer(id);
         }
-        b(Listen {})
+        b(Listen::default())
     }
 }
 
@@ -306,7 +325,7 @@ impl State for StartListener {
             .reclaim_name(true);
 
         state.peer_listener = listener_opts.create_tokio().ok(); // If it failed we just won't listen and hope someone else is listening
-        b(Listen {})
+        b(Listen::default())
     }
 }
 
@@ -335,7 +354,7 @@ impl State for HandleError {
             self.location.file(),
             self.location.line()
         );
-        b(Listen {})
+        b(Listen::default())
     }
 }
 
@@ -353,7 +372,7 @@ impl State for HandleIpcCommand {
                 if was_master {
                     b(StartRendezvous {})
                 } else {
-                    b(Listen {})
+                    b(Listen::default())
                 }
             }
             IpcCommand::LearnedPeers(mut peer_ids) => {
@@ -388,7 +407,7 @@ impl State for HandleIpcCommand {
                         peer_is_master: false,
                         extra_streams: streams,
                     }),
-                    None => b(Listen {}),
+                    None => b(Listen::default()),
                 }
             }
         }
