@@ -543,7 +543,7 @@ impl std::fmt::Debug for ConnectionIdCounter {
         write!(
             f,
             "SharedCounter {{ current: {} }}",
-            self.current.load(Ordering::SeqCst)
+            self.current.load(Ordering::Relaxed)
         )
     }
 }
@@ -557,6 +557,6 @@ impl ConnectionIdCounter {
 
     pub(crate) fn next(&self) -> ConnectionId {
         // Fetch the current value and increment it by 1 atomically
-        self.current.fetch_add(1, Ordering::SeqCst).into()
+        self.current.fetch_add(1, Ordering::Relaxed).into()
     }
 }
