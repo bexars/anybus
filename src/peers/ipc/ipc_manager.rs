@@ -90,12 +90,14 @@ struct Creation {}
 #[async_trait]
 impl State for Creation {
     async fn next(self: Box<Self>, _state: &mut IpcManager) -> Option<Box<dyn State>> {
-        b(ConnectToRendezvous {})
+        b(ConnectToRendezvous::default())
     }
 }
 
-#[derive(Debug)]
-struct ConnectToRendezvous {}
+#[derive(Debug, Default)]
+struct ConnectToRendezvous {
+    create_failed: bool,
+}
 
 #[async_trait]
 impl State for ConnectToRendezvous {
@@ -121,7 +123,14 @@ impl State for ConnectToRendezvous {
             }
             Err(e) => {
                 tracing::debug!("Failed to connect to IPC rendezvous: {}", e);
-                b(StartRendezvous {})
+                if self.create_failed {
+                    tracing::error!(
+                        "Unable connect or create rendezvous point.  Closing IPC manager"
+                    );
+                    b(Shutdown {})
+                } else {
+                    b(StartRendezvous {})
+                }
             }
         }
     }
@@ -177,6 +186,7 @@ impl State for StartRendezvous {
         let listener_opts = local_socket::ListenerOptions::new()
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(name)
+            .try_overwrite(true)
             .reclaim_name(true);
 
         state.rendezvous_listener = match listener_opts.create_tokio() {
@@ -189,7 +199,9 @@ impl State for StartRendezvous {
                 //     let path = std::env::temp_dir().join(&state.rendezvous);
                 //     _ = std::fs::remove_file(path);
                 // };
-                return b(ConnectToRendezvous {});
+                return b(ConnectToRendezvous {
+                    create_failed: true,
+                });
             }
         };
         b(AnnounceMaster {})
@@ -277,7 +289,7 @@ struct SoftShutdown {}
 impl State for SoftShutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         state.peer_listener = None;
-        //TODO shutdown the rendezvous listener.  Need to stop peering on that connection and have it just 
+        //TODO shutdown the rendezvous listener.  Need to stop peering on that connection and have it just
         // return a list of node IPCs to connect to and drop
         b(Listen { shutdown: true })
     }
