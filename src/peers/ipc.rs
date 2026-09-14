@@ -47,6 +47,7 @@ pub(super) enum IpcCommand {
 #[derive(Debug)]
 pub(super) enum IpcControl {
     IAmMaster,
+    SendPeers,
     Shutdown,
 }
 

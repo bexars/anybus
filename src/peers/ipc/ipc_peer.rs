@@ -98,7 +98,11 @@ impl State for SendPeers {
             .iter()
             .map(|(uuid, _tx)| *uuid)
             .filter(|u| *u != state_machine.peer.peer_id)
-            .collect();
+            .collect::<Vec<_>>();
+        debug!("Sending Peers: {:?}", &peers);
+        if peers.is_empty() {
+            return b(WaitForMessages {});
+        }
         match state_machine
             .stream
             .send(IpcMessage::KnownPeers(peers))
@@ -127,13 +131,17 @@ impl State for WaitForMessages {
             control_msg = state_machine.ipc_control.recv() => {
                 match control_msg {
                     Some(control_msg) => Some(Box::new(IpcControlReceived { message: control_msg})),
-                    None  => Some(Box::new(Shutdown {})), // something important crashed, bail out
+                    None  => {
+                        tracing::error!("control_msg returned None");
+                        Some(Box::new(Shutdown {}))}, // something important crashed, bail out
                 }
             }
             peer_msg = state_machine.peer.recv() => {
                 match peer_msg {
                     Some(node_msg) => Some(Box::new(NodeMessageReceived {message: node_msg})),
-                    None => Some(Box::new(Shutdown {})),  // something important crashed, bail out
+                    None  => {
+                        tracing::error!("peer_msg returned None");
+                        Some(Box::new(Shutdown {}))},  // something important crashed, bail out
                 }
             }
         }
@@ -183,6 +191,7 @@ struct IpcControlReceived {
 impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
+            IpcControl::SendPeers => b(SendPeers {}),
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
             IpcControl::IAmMaster => b(SendMaster {}),
         }
@@ -220,6 +229,7 @@ impl State for IpcMessageReceived {
                     .ipc_command
                     .send(IpcCommand::LearnedPeers(uuids))
                     .await
+                    .map_err(|e| debug!("Failed to send LearnedPeers: {}", e))
                     .ok();
             }
             IpcMessage::NeighborRemoved(_uuid) => {}

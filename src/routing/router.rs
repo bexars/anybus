@@ -124,7 +124,7 @@ impl State {
                             }
                         }
                     },
-                    () = tokio::time::sleep_until(next_tick_at) => {
+                    () = ::tokio::time::sleep_until(next_tick_at) => {
                         Some(RefreshLSAs)
                     }
                 }

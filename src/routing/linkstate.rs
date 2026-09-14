@@ -10,10 +10,10 @@
 
 mod db;
 
+use ::tokio::time::Instant;
 pub(crate) use db::ForwardingTable;
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
-use tokio::time::Instant;
 use tokio_with_wasm::alias as tokio;
 
 #[cfg(feature = "serde")]

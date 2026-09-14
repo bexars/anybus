@@ -1,11 +1,16 @@
 mod forward_table;
 mod route_table;
 
+use ::tokio::time::Instant;
 pub(crate) use forward_table::ForwardingTable;
 #[cfg(feature = "remote")]
 use itertools::Itertools;
-use tokio::{sync::mpsc::Sender, time::Instant};
+use tokio::sync::mpsc::Sender;
+// #[cfg(not(target_arch = "wasm32"))]
 use tokio_with_wasm::alias as tokio;
+
+// #[cfg(target_arch = "wasm32")]
+// use web_time::Instant;
 
 #[cfg(feature = "remote")]
 use std::collections::VecDeque;
