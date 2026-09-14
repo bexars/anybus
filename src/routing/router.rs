@@ -2,6 +2,7 @@
 
 #[cfg(feature = "remote")]
 use std::collections::HashSet;
+use std::sync::Arc;
 // use web_time::Instant;
 
 #[cfg(feature = "remote")]
@@ -13,14 +14,12 @@ use crate::{
     routing::linkstate::{EndpointInfo, ForwardingTable},
 };
 
+use arc_swap::ArcSwap;
 use tokio_with_wasm::alias as tokio;
 
 use tokio::{
     select,
-    sync::{
-        mpsc::{self},
-        watch::{self, Receiver, Sender},
-    },
+    sync::mpsc::{self},
 };
 use tracing::{info, trace};
 
@@ -29,40 +28,34 @@ use crate::{
     routing::{EndpointId, NodeId},
 };
 
-pub(crate) type RoutesWatchRx = Receiver<ForwardingTable>;
-
 #[derive(Debug)]
 pub(crate) struct Router {
-    // forward_table: ForwardingTable,
-    // route_table: RoutingTable,
-    routes_watch_tx: Sender<ForwardingTable>,
     #[allow(dead_code)]
     anybus_id: NodeId,
     broker_rx: mpsc::Receiver<RouterMsg>,
     handle: Handle,
     lsdb: LsDb,
+    fib: Arc<ArcSwap<ForwardingTable>>,
 }
 
 impl Router {
     pub(crate) fn new(node_id: NodeId) -> Self {
-        // let forward_table = ForwardingTable::default();
         let forward_table = ForwardingTable::new(node_id);
-
-        let (tx, rx) = watch::channel(forward_table.clone());
+        let fib = Arc::new(ArcSwap::from_pointee(forward_table));
 
         let (broker_tx, broker_rx) = tokio::sync::mpsc::channel(32);
         let handle = Handle {
             tx: broker_tx,
-            route_watch_rx: rx,
+            fib: Arc::clone(&fib),
+            // route_watch_rx: rx,
         };
 
         Self {
-            routes_watch_tx: tx,
             anybus_id: node_id,
             broker_rx,
-
             lsdb: LsDb::new(node_id),
             handle,
+            fib: fib,
         }
     }
 
@@ -205,16 +198,13 @@ impl State {
 
             // ####### RouteChange ##################################################
             RouteChange => {
-                let fib_table = router.lsdb.build_fib();
-                // dbg!(&fib_table);
-                router.routes_watch_tx.send(fib_table).unwrap();
-
+                let fib_table = Arc::new(router.lsdb.build_fib());
+                router.fib.swap(fib_table);
                 return Some(Listen);
             }
 
             RefreshLSAs => {
                 router.lsdb.tick();
-                // router.lsdb.refresh_and_purge_lsas();
                 return Some(Listen);
             }
         }
