@@ -106,6 +106,25 @@ impl LsDb {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        // dbg!(&self);
+        #[cfg(feature = "remote")]
+        let lsa_record = self.db.get_mut(&LsaKey {
+            origin: self.self_id,
+            endpoint_id: self.self_id.0,
+        });
+        #[cfg(feature = "remote")]
+        if let Some(LsaRecord { lsa, updated_at }) = lsa_record {
+            lsa.dead = true;
+            *updated_at = Instant::now();
+            lsa.seq += 1;
+            if let LsaBody::Router(_) = lsa.body {
+                let lsa = lsa.clone();
+                self.flood_all_neighbors(lsa, None);
+            }
+        } else {
+            tracing::warn!("lsa_record is None in shutdown()");
+        }
+
         self.db.clear();
         #[cfg(feature = "remote")]
         self.links.clear();
@@ -113,7 +132,7 @@ impl LsDb {
     }
 
     pub(crate) fn when_tick(&self) -> Instant {
-        self.last_tick + Duration::from_millis(100)
+        self.last_tick + Duration::from_millis(50)
     }
 
     pub(crate) fn tick(&mut self) {
@@ -183,9 +202,21 @@ impl LsDb {
 
     fn remove_dead_lsa(&mut self, lsa: Lsa) {
         assert!(lsa.dead, "removed_dead_lsa called with non-dead LSA");
-        if let Some(current_lsa) = self.db.get(&lsa.key) {
-            if current_lsa.lsa.seq < lsa.seq {
-                self.db.remove(&lsa.key);
+        if let Some(current_lsa_record) = self.db.get(&lsa.key) {
+            if current_lsa_record.lsa.seq < lsa.seq {
+                if let LsaBody::Router(_) = current_lsa_record.lsa.body {
+                    self.db
+                        .extract_if(|k, _v| k.origin == lsa.key.origin)
+                        .for_each(|(k, _v)| {
+                            self.routes
+                                .remove_remote_endpoint(k.endpoint_id.into(), k.origin);
+                        });
+                } else {
+                    self.routes
+                        .remove_remote_endpoint(lsa.key.endpoint_id.into(), lsa.key.origin);
+                    self.db.remove(&lsa.key);
+                }
+
                 #[cfg(feature = "remote")]
                 self.flood_all_neighbors(lsa.clone(), None);
 
@@ -194,7 +225,7 @@ impl LsDb {
                 tracing::warn!(
                     "Received dead LSA with seq {} which is not newer than current seq {} for key {:?}",
                     lsa.seq,
-                    current_lsa.lsa.seq,
+                    current_lsa_record.lsa.seq,
                     lsa.key
                 );
                 return;
@@ -256,6 +287,10 @@ impl LsDb {
                                 .unwrap_or(Cost(u16::MAX)),
                         },
                     )
+                    .map_err(|e| {
+                        tracing::error!("Failed to add remote endpoint: {:?}", &e);
+                        e
+                    })
                     .ok();
             }
             LsaBody::Endpoint(ref endpoint_info) => {
@@ -596,13 +631,7 @@ impl LsDb {
     }
 
     #[cfg(feature = "remote")]
-    fn flood_all_neighbors(
-        &mut self,
-        lsa: Lsa,
-        in_connection_id: Option<ConnectionId>,
-        // seq: u64,
-        // key: LsaKey,
-    ) {
+    fn flood_all_neighbors(&mut self, lsa: Lsa, in_connection_id: Option<ConnectionId>) {
         for (out_conn_id, out_link) in self.links.iter() {
             if Some(*out_conn_id) == in_connection_id {
                 continue; // Don't send back to the sender
@@ -621,7 +650,6 @@ impl LsDb {
                     continue;
                 }
             }
-
             match out_link.send_lsa(lsa.clone()) {
                 Ok(_) => {
                     self.pending_tx
