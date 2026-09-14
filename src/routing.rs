@@ -5,6 +5,7 @@ pub(crate) mod router;
 // use tokio_with_wasm::alias as tokio;
 
 pub(crate) use linkstate::EndpointInfo;
+pub(crate) use linkstate::ForwardingTable;
 pub(crate) use linkstate::LsDb;
 #[cfg(feature = "remote")]
 pub(crate) use linkstate::LsaKey;
