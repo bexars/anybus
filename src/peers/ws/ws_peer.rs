@@ -1,7 +1,7 @@
+use crate::tokio;
 use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, sync::mpsc};
-use tokio_with_wasm::alias as tokio;
 use tracing::{debug, error, trace};
 use web_time::Instant;
 

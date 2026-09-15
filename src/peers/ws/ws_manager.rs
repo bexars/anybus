@@ -1,4 +1,4 @@
-use tokio_with_wasm::alias as tokio;
+use crate::tokio;
 
 use std::{fmt::Debug, mem::take, time::Duration};
 

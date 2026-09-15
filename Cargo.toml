@@ -37,15 +37,14 @@ members = ["anybus-macro"]
 
 
 [features]
-#tokio = ["tokio/rt-multi-thread", "tokio/time"]
-default = ["tokio"]
+default = []
 ipc = ["remote" , "dep:interprocess", "dep:async-bincode", "dep:interprocess",  "tokio/net"]
 ws = [ "remote", "dep:tokio-tungstenite", "dep:url", "dep:bytes","ws_rustls"
     ,"dep:wasm_socket_handle"
     ]
 ws_rustls = ["dep:tokio-rustls", "dep:rustls"]
 ws_server = ["ws", "dep:tokio-tungstenite"]
-remote = ["tokio", "serde", "dep:bincode", "bincode/serde"]
+remote = [ "serde", "dep:bincode", "bincode/serde"]
 dioxus = ["dep:dioxus"]
 serde = ["dep:serde", "uuid/serde", "anybus-macro/serde"]
 resume_watch = ["dep:powerwatch"]
@@ -86,13 +85,13 @@ uuid = { version = "1.18.0", default-features = false,features = [
     "js"
 ] }
 
-tokio = { version = "1", optional = true ,features = [
-    "rt",
-    # "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-] }
+# tokio = { version = "1",features = [
+#     "rt",
+#     # "rt-multi-thread",
+#     "sync",
+#     "macros",
+#     "time",
+# ] }
 # wasm_socket_handle = { git="https://github.com/bexars/wasm_socket_handle.git", branch = "fix_3", optional = true}
 wasm_socket_handle = { git="https://github.com/bexars/wasm_socket_handle.git", optional = true}
 ###############################
@@ -109,10 +108,10 @@ tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
     "sync",
-    "macros",
+    # "macros",
     "signal",
     "time",
-    "fs"
+    # "fs"
 ] }
 
 tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }
@@ -141,7 +140,7 @@ tui-textarea = "0.7.0"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2.3"
 trybuild = "1.0.111"
-anybus = { path = "./" , features = ["tokio","ipc","ws","ws_server","toml"] }
+anybus = { path = "./" , features = ["ipc","ws","ws_server","toml"] }
 console-subscriber = "0.5.0"
 uuid = { version = "1.18.0", default-features = false,features = [
     "v4",

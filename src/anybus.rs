@@ -2,7 +2,7 @@ pub(crate) mod builder;
 pub(crate) mod config;
 #[cfg(feature = "resume_watch")]
 pub(crate) mod watcher;
-
+use crate::tokio;
 use std::time::Duration;
 
 pub use config::AnyBusConfig;

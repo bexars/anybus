@@ -9,7 +9,7 @@ pub(crate) mod cli;
 
 use anybus::AnyBusConfig;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     // console_subscriber::init();
     // tracing_subscriber::fmt::fmt()

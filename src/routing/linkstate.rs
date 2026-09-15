@@ -9,16 +9,16 @@
 //! to knowing both
 
 mod db;
+use crate::tokio;
 
-use ::tokio::time::Instant;
+use crate::tokio::time::Instant;
 pub(crate) use db::ForwardingTable;
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
-use tokio_with_wasm::alias as tokio;
 
+use crate::tokio::sync::mpsc::Sender;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use crate::{
@@ -238,8 +238,8 @@ pub(crate) enum LinkError {
 // }
 
 #[cfg(feature = "remote")]
-impl From<tokio::sync::mpsc::error::TrySendError<NodeMessage>> for LinkError {
-    fn from(err: tokio::sync::mpsc::error::TrySendError<NodeMessage>) -> Self {
+impl From<crate::tokio::sync::mpsc::error::TrySendError<NodeMessage>> for LinkError {
+    fn from(err: crate::tokio::sync::mpsc::error::TrySendError<NodeMessage>) -> Self {
         LinkError::TrySendError(err)
     }
 }

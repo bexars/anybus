@@ -1,4 +1,4 @@
-// use tokio_with_wasm::alias as tokio;
+use crate::tokio;
 
 #[cfg(feature = "remote")]
 use std::collections::HashSet;
@@ -15,7 +15,6 @@ use crate::{
 };
 
 use arc_swap::ArcSwap;
-use tokio_with_wasm::alias as tokio;
 
 use tokio::{
     select,
@@ -117,7 +116,7 @@ impl State {
                             }
                         }
                     },
-                    () = ::tokio::time::sleep_until(next_tick_at) => {
+                    () = tokio::time::sleep_until(next_tick_at) => {
                         Some(RefreshLSAs)
                     }
                 }
