@@ -3,6 +3,7 @@ use futures::Stream;
 
 use tokio::sync::mpsc::{self};
 
+use crate::tokio;
 use crate::{
     errors::ReceiveError,
     messages::ClientMessage,

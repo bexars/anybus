@@ -1,9 +1,11 @@
-use tokio_with_wasm::alias as tokio;
+use crate::tokio;
 
 use std::{fmt::Debug, mem::take, time::Duration};
 
-use tokio::sync::mpsc::{self, Sender};
-// use web_time::Instant;
+use tokio::{
+    sync::mpsc::{self, Sender},
+    time::Instant,
+};
 
 #[cfg(not(target_family = "wasm"))]
 use tokio_tungstenite::connect_async;
@@ -144,7 +146,7 @@ impl WebsocketManager {
 
     fn get_next_timeout(&self) -> Option<Duration> {
         self.disconnected_peers.first().map(|p| {
-            let now = web_time::Instant::now();
+            let now = Instant::now();
             if p.when_ready() <= now {
                 Duration::from_secs(0)
             } else {
@@ -155,7 +157,7 @@ impl WebsocketManager {
 
     fn get_next_ready_peer(&mut self) -> Option<WsPendingPeer> {
         if let Some(first) = self.disconnected_peers.first() {
-            let now = web_time::Instant::now();
+            let now = Instant::now();
             if first.when_ready() <= now {
                 return self.disconnected_peers.remove(0).into();
             }

@@ -5,6 +5,7 @@ use tokio::sync::{
     mpsc::{self, Receiver},
     oneshot,
 };
+use tokio_with_wasm::alias as tokio;
 
 // The foundational trait linking requests to their specific return types
 #[cfg(feature = "remote")]

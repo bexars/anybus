@@ -4,6 +4,8 @@ use std::collections::HashSet;
 #[cfg(feature = "remote")]
 use std::iter::Peekable;
 
+use crate::tokio;
+
 #[cfg(feature = "remote")]
 use tokio::sync::mpsc::Sender;
 

@@ -1,4 +1,5 @@
 //!  Collection of [Error]s returned by various subsystems
+use crate::tokio;
 
 use thiserror::Error;
 
@@ -53,12 +54,11 @@ impl<E> From<tokio::sync::mpsc::error::SendError<E>> for ReceiveError {
 #[derive(Error, Debug)]
 pub enum AnyBusHandleError {
     /// Send failed for unknown reason.
-    #[error("Unable to send.")]
+    #[error("Unable to send: {0}")]
     // SendError(Box<dyn BusRider>),
-    SendError(SendError),
+    SendError(#[source] SendError),
     /// The destination [Uuid](uuid::Uuid) is unknown
     #[error("Route not found for that UUID")]
-    // NoRoute(Box<dyn BusRider>),
     NoRoute,
 
     /// Not implemented yet
@@ -71,8 +71,8 @@ pub enum AnyBusHandleError {
     #[error("System shutdown requested")]
     Shutdown,
     /// Error in the receive calls
-    #[error("Error in the RPC response")]
-    ReceiveError(ReceiveError),
+    #[error("Error in the RPC response: {0}")]
+    ReceiveError(#[source] ReceiveError),
     // /// Endpoint isn't keeping up with the messaging
     // #[error("The queue for that endpoint is full")]
     // QueueFull,

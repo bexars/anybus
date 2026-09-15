@@ -48,8 +48,7 @@ pub use receivers::rpc_receiver::RpcRequest;
 pub use routing::Realm;
 #[cfg(feature = "serde")]
 pub use serde;
-#[cfg(feature = "tokio")]
-pub use tokio;
+pub use tokio_with_wasm::alias as tokio;
 pub use traits::*;
 pub use uuid::Uuid;
 
