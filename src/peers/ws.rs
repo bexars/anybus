@@ -3,12 +3,11 @@ use crate::tokio;
 use std::fmt::Display;
 #[cfg(feature = "ws_server")]
 use std::net::{IpAddr, SocketAddr};
-// use tokio_with_wasm::alias as tokio;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use tokio::sync::mpsc::Sender;
+use tokio::{sync::mpsc::Sender, time::Instant};
 
 use url::Url;
 
@@ -187,7 +186,7 @@ impl PartialEq<WsUrl> for StreamDirection {
 #[derive(Debug)]
 pub(crate) struct WsPendingPeer {
     config: WebSocketPeerConfig,
-    last_attempt: web_time::Instant,
+    last_attempt: Instant,
     backoff: std::time::Duration,
     num_attempts: u32,
 }
@@ -196,7 +195,7 @@ impl From<WebSocketPeerConfig> for WsPendingPeer {
     fn from(config: WebSocketPeerConfig) -> Self {
         Self {
             config,
-            last_attempt: web_time::Instant::now(),
+            last_attempt: Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }
@@ -204,12 +203,12 @@ impl From<WebSocketPeerConfig> for WsPendingPeer {
 }
 
 impl WsPendingPeer {
-    fn when_ready(&self) -> web_time::Instant {
+    fn when_ready(&self) -> Instant {
         self.last_attempt + self.backoff
     }
 
     fn record_attempt(&mut self) {
-        self.last_attempt = web_time::Instant::now();
+        self.last_attempt = Instant::now();
         self.num_attempts += 1;
         self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
     }
@@ -226,7 +225,7 @@ impl From<&WebSocketPeerConfig> for WsPendingPeer {
     fn from(config: &WebSocketPeerConfig) -> Self {
         Self {
             config: config.clone(),
-            last_attempt: web_time::Instant::now(),
+            last_attempt: Instant::now(),
             backoff: std::time::Duration::from_secs(1),
             num_attempts: 0,
         }

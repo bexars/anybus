@@ -1,9 +1,9 @@
 use crate::tokio;
 use std::collections::VecDeque;
 use std::time::Duration;
+use tokio::time::Instant;
 use tokio::{select, sync::mpsc};
 use tracing::{debug, error, trace};
-use web_time::Instant;
 
 use crate::peers::common::{Heartbeat, Peer};
 use crate::routing::ConnectionId;

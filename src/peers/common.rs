@@ -1,8 +1,7 @@
 use crate::tokio;
 
 use std::time::Duration;
-use tokio::sync::mpsc;
-use web_time::Instant;
+use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     Handle, Realm,
