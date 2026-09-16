@@ -8,7 +8,7 @@ use tokio::sync::{
 use tokio_with_wasm::alias as tokio;
 
 // The foundational trait linking requests to their specific return types
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 
 pub(crate) trait LocalRpcRequest {
     type Reply: Send + 'static;
@@ -58,7 +58,7 @@ macro_rules! define_local_rpc {
 
 // Core operational framework errors
 #[derive(Debug, thiserror::Error)] // using standard errors, or implement Debug/Display manually
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 pub(crate) enum RpcError {
     #[error("The remote task dropped the response channel")]
     ServerDropped,
@@ -68,20 +68,19 @@ pub(crate) enum RpcError {
     Timeout(Duration),
 }
 
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 pub fn create_rpc<T>() -> (LocalRpcClient<T>, Receiver<T>) {
     let (tx, rx) = mpsc::channel(32);
     (LocalRpcClient { sender: tx }, rx)
 }
 
 #[derive(Clone, Debug)]
-#[cfg(feature = "remote")]
-
+#[cfg(feature = "ws")]
 pub struct LocalRpcClient<T> {
     sender: mpsc::Sender<T>,
 }
 
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 impl<T> LocalRpcClient<T> {
     pub async fn call<R>(&self, request: R) -> Result<R::Reply, RpcError>
     where

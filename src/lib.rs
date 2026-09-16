@@ -15,6 +15,7 @@ mod codec;
 pub mod errors;
 mod handle;
 pub mod helper;
+#[cfg(feature = "ws")]
 pub(crate) mod localrpc;
 mod messages;
 #[cfg(feature = "remote")]
@@ -50,7 +51,7 @@ pub use routing::Realm;
 pub use serde;
 pub use tokio_with_wasm::alias as tokio;
 pub use traits::*;
-pub use uuid::Uuid;
+pub use uuid;
 
 /// Common Anybus components
 pub mod prelude {
@@ -66,7 +67,6 @@ pub mod prelude {
     pub use crate::EndpointId;
     pub use crate::Handle;
     pub use crate::Realm;
-    pub use crate::Uuid;
     #[cfg(feature = "ws_server")]
     pub use crate::WsListenerOptions;
     #[cfg(feature = "ws")]
@@ -75,4 +75,5 @@ pub mod prelude {
     pub use crate::bus_uuid;
     #[cfg(feature = "serde")]
     pub use crate::serde::{Deserialize, Serialize};
+    pub use crate::uuid;
 }
