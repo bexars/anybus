@@ -3,12 +3,15 @@
 
 #[cfg(feature = "ws_server")]
 use std::net::IpAddr;
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 use std::{collections::HashMap, fmt::Display};
 
 use crate::AnyBusBuilder;
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
+#[cfg(feature = "serde")]
+#[cfg(feature = "ws")]
+use serde::Deserializer;
 #[cfg(feature = "ws")]
 use url::Url;
 
@@ -19,7 +22,7 @@ pub struct AnyBusConfig {
     #[serde(default)]
     #[cfg(feature = "ipc")]
     pub(crate) ipc: Option<IpcConfig>,
-    #[cfg(feature = "remote")]
+    #[cfg(feature = "ws")]
     #[serde(default)]
     pub(crate) peer: HashMap<String, PeerType>,
     #[serde(default)]
@@ -69,7 +72,7 @@ impl From<AnyBusBuilder> for AnyBusConfig {
             ipc: Some(IpcConfig {
                 enabled: builder.enable_ipc,
             }),
-            #[cfg(feature = "remote")]
+            #[cfg(feature = "ws")]
             peer: peers,
 
             #[cfg(feature = "ws_server")]
@@ -93,7 +96,7 @@ pub(crate) struct IpcConfig {
     pub(crate) enabled: bool,
 }
 
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 #[derive(Deserialize, Debug, Clone)]
 // #[serde(tag = "type")]
 pub(crate) enum PeerType {
@@ -120,7 +123,7 @@ impl Display for WebSocketPeerConfig {
     }
 }
 
-#[cfg(feature = "remote")]
+#[cfg(feature = "ws")]
 struct PeerMap(HashMap<String, PeerType>);
 
 #[cfg(feature = "ws")]

@@ -1,7 +1,10 @@
 use crate::tokio;
 
+#[cfg(feature = "ws")]
 use std::time::Duration;
-use tokio::{sync::mpsc, time::Instant};
+use tokio::sync::mpsc;
+#[cfg(feature = "ws")]
+use tokio::time::Instant;
 
 use crate::{
     Handle, Realm,
@@ -9,6 +12,7 @@ use crate::{
     routing::{ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
 };
 
+#[cfg(feature = "ws")]
 pub(crate) struct Heartbeat {
     interval: Duration,
     timeout: Duration,
@@ -18,6 +22,7 @@ pub(crate) struct Heartbeat {
     next_token: u64,
 }
 
+#[cfg(feature = "ws")]
 impl Heartbeat {
     pub(crate) fn new(now: Instant, interval: Duration, timeout: Duration) -> Self {
         Self {
