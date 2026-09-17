@@ -8,14 +8,13 @@ use color_eyre::eyre::Result;
 use futures::{FutureExt, StreamExt};
 use ratatui::backend::CrosstermBackend as Backend;
 use ratatui::crossterm::{
-    cursor,
+    self, cursor,
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         Event as CrosstermEvent, KeyEvent, KeyEventKind, MouseEvent,
     },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
-use serde::{Deserialize, Serialize};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
@@ -23,19 +22,22 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Event {
+#[derive(Clone, Debug)]
+pub enum AppEvent {
     Init,
-    Quit,
+    // Quit,
     Error,
-    Closed,
+    // Closed,
     Tick,
     Render,
     FocusGained,
     FocusLost,
+    #[allow(dead_code)]
     Paste(String),
     Key(KeyEvent),
+    #[allow(dead_code)]
     Mouse(MouseEvent),
+    #[allow(dead_code)]
     Resize(u16, u16),
 }
 
@@ -43,8 +45,8 @@ pub struct Tui {
     pub terminal: ratatui::Terminal<Backend<std::io::Stderr>>,
     pub task: JoinHandle<()>,
     pub cancellation_token: CancellationToken,
-    pub event_rx: UnboundedReceiver<Event>,
-    pub event_tx: UnboundedSender<Event>,
+    pub event_rx: UnboundedReceiver<AppEvent>,
+    pub event_tx: UnboundedSender<AppEvent>,
     pub frame_rate: f64,
     pub tick_rate: f64,
     pub mouse: bool,
@@ -105,7 +107,7 @@ impl Tui {
             let mut reader = crossterm::event::EventStream::new();
             let mut tick_interval = tokio::time::interval(tick_delay);
             let mut render_interval = tokio::time::interval(render_delay);
-            _event_tx.send(Event::Init).unwrap();
+            _event_tx.send(AppEvent::Init).unwrap();
             loop {
                 let tick_delay = tick_interval.tick();
                 let render_delay = render_interval.tick();
@@ -120,37 +122,38 @@ impl Tui {
                         match evt {
                           CrosstermEvent::Key(key) => {
                             if key.kind == KeyEventKind::Press {
-                              _event_tx.send(Event::Key(key)).unwrap();
+                              _event_tx.send(AppEvent::Key(key)).unwrap();
                             }
                           },
                           CrosstermEvent::Mouse(mouse) => {
-                            _event_tx.send(Event::Mouse(mouse)).unwrap();
+                            _event_tx.send(AppEvent::Mouse(mouse)).unwrap();
                           },
                           CrosstermEvent::Resize(x, y) => {
-                            _event_tx.send(Event::Resize(x, y)).unwrap();
+                            _event_tx.send(AppEvent::Resize(x, y)).unwrap();
                           },
                           CrosstermEvent::FocusLost => {
-                            _event_tx.send(Event::FocusLost).unwrap();
+                            _event_tx.send(AppEvent::FocusLost).unwrap();
                           },
                           CrosstermEvent::FocusGained => {
-                            _event_tx.send(Event::FocusGained).unwrap();
+                            _event_tx.send(AppEvent::FocusGained).unwrap();
                           },
                           CrosstermEvent::Paste(s) => {
-                            _event_tx.send(Event::Paste(s)).unwrap();
+                            _event_tx.send(AppEvent::Paste(s)).unwrap();
                           },
+
                         }
                       }
                       Some(Err(_)) => {
-                        _event_tx.send(Event::Error).unwrap();
+                        _event_tx.send(AppEvent::Error).unwrap();
                       }
                       None => {},
                     }
                   },
                   _ = tick_delay => {
-                      _event_tx.send(Event::Tick).unwrap();
+                      _event_tx.send(AppEvent::Tick).unwrap();
                   },
                   _ = render_delay => {
-                      _event_tx.send(Event::Render).unwrap();
+                      _event_tx.send(AppEvent::Render).unwrap();
                   },
                 }
             }
@@ -219,7 +222,7 @@ impl Tui {
     //     Ok(())
     // }
 
-    pub async fn next(&mut self) -> Option<Event> {
+    pub async fn next(&mut self) -> Option<AppEvent> {
         self.event_rx.recv().await
     }
 }

@@ -13,14 +13,14 @@ default = []
 serde = []
 
 [dependencies]
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
 uuid = { version = "1.18.0", default-features = false,features = [
     "v7",
     "std",
 ] }
-darling = "0.21.0"
+darling = "0.24.0"
 # heck = "0.5"
 
 
