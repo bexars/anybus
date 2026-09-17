@@ -13,13 +13,13 @@ description = "A serverless message bus for communicating between Rust applicati
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
-[[example]]
-name = "counter"
-required-features = [  "ipc"]
+# [[example]]
+# name = "counter"
+# required-features = [  "ipc"]
 
-[[example]]
-name = "bridge"
-required-features = [  "ipc","ws","ws_server"]
+# [[example]]
+# name = "bridge"
+# required-features = [  "ipc","ws","ws_server"]
 
 [[example]]
 name = "chat_tui"
@@ -54,9 +54,9 @@ config = []
 
 interprocess = { version = "2.2.3", features = ["tokio"], optional = true }
 
-serde = { version = "1.0", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 
-itertools = "0.14"
+itertools = "0.15"
 thiserror = "2"
 
 futures = { version = "0.3.28", default-features = false, features = ["std"] }
@@ -114,7 +114,7 @@ tokio = { version = "1", features = [
     # "fs"
 ] }
 
-tokio-tungstenite = { version = "0.28.0", optional = true, features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }
+tokio-tungstenite = { version = "0.30.0", optional = true, features = ["stream","tokio-rustls","rustls-tls-native-roots","rustls","rustls-native-certs"] }
 tokio-rustls = {version = "0.26.4", optional = true}
 rustls = {version = "0.23.36", optional = true }
 toml = {version = "1.1", optional = true}
@@ -127,16 +127,16 @@ uuid = { version = "1.18.0", default-features = false,features = [
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6.5"
-crossterm = { version = "0.28.0", features = ["event-stream", "serde"] }
+crossterm = { version = "0.29.0", features = ["event-stream", "serde"] }
 futures = "0.3.28"
-ratatui = "0.29.0"
+ratatui = { version = "0.30.0", features = ["crossterm"] }
 serde = "1.0"
 serde_derive = "1.0.219"
-signal-hook = "0.3.18"
+# signal-hook = "0.3.18"
 tokio = "1"
 tokio-util = "0.7.16"
-tui-scrollview = "0.5.1"
-tui-textarea = "0.7.0"
+tui-scrollview = "0.6"
+ratatui-textarea = "0.9"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2.3"
 trybuild = "1.0.111"

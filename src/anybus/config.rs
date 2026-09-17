@@ -180,12 +180,12 @@ fn default_true() -> bool {
 impl AnyBusConfig {
     #[cfg(feature = "ws")]
     /// Add websocket with the given url and a name for internal use in logging and displays
-    pub fn add_ws_peer(mut self, name: String, url: String) {
-        {
-            let url = parse_ws_url(&url).expect("Invalid websocket URL");
-            self.peer
-                .insert(name, PeerType::WebSocket { url: WsUrl(url) });
-        }
+    pub fn add_ws_peer(mut self, name: String, url: String) -> Self {
+        let url = parse_ws_url(&url).expect("Invalid websocket URL");
+        self.peer
+            .insert(name, PeerType::WebSocket { url: WsUrl(url) });
+
+        self
     }
 
     #[cfg(feature = "ws_server")]
@@ -197,7 +197,7 @@ impl AnyBusConfig {
         cert: Option<String>,
         key: Option<String>,
         enable_tls: bool,
-    ) {
+    ) -> Self {
         self.ws_server = Some(WebSocketServerConfig {
             address,
             port,
@@ -205,19 +205,22 @@ impl AnyBusConfig {
             key_path: key,
             enable_tls,
         });
+        self
     }
 
     #[cfg(feature = "ipc")]
     /// Enable or disable IPC peer discovery and messaging
-    pub fn set_ipc_enabled(mut self, enabled: bool) {
+    pub fn set_ipc_enabled(mut self, enabled: bool) -> Self {
         self.ipc = Some(IpcConfig { enabled });
+        self
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     /// Enable intercepting Ctrl-c to trigger a graceful shutdown of Anybus.  This will send a Shutdown message
     /// to all receivers, Handle, and AnyBusStatusMsg and stop accepting any new packets
-    pub fn set_ctrlc_shutdown(mut self, enabled: bool) {
+    pub fn set_ctrlc_shutdown(mut self, enabled: bool) -> Self {
         self.enable_ctrlc_shutdown = enabled;
+        self
     }
 }
 

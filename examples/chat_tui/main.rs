@@ -9,12 +9,15 @@ use anybus::prelude::*;
 use chatview::ChatViewWidget;
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
+use crossterm::event::{KeyCode, KeyModifiers};
 use futures::StreamExt;
+use ratatui_textarea::TextArea;
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tui_textarea::TextArea;
 use url::Url;
 use uuid::Uuid;
+
+use crate::tui::Tui;
 
 /// Chat TUI application with configurable networking
 #[derive(Parser)]
@@ -73,6 +76,9 @@ async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+    let mut tui = tui::Tui::new()?
+        .tick_rate(4.0) // 4 ticks per second
+        .frame_rate(30.0);
 
     let app_result = match cli.command {
         Some(Commands::Ws { url }) => {
@@ -83,7 +89,7 @@ async fn main() -> color_eyre::Result<()> {
                 .ws_remote(WsRemoteOptions { url: parsed_url })
                 .enable_ipc(cli.enable_ipc)
                 .init();
-            App::new(bus).run().await
+            App::new(bus)?.run(&mut tui).await
         }
         Some(Commands::Server {
             addr,
@@ -106,11 +112,12 @@ async fn main() -> color_eyre::Result<()> {
                 })
                 .enable_ipc(cli.enable_ipc)
                 .init();
-            App::new(bus).run().await
+            App::new(bus)?.run(&mut tui).await
         }
         Some(Commands::Ipc) | None => {
+            let bus = AnyBusConfig::default().set_ipc_enabled(true).init();
             println!("Starting in IPC-only mode");
-            App::default().run().await
+            App::new(bus)?.run(&mut tui).await
         }
     };
 
@@ -144,6 +151,7 @@ pub enum Action {
     ScrollUp,
     ScrollDown,
     AddMessage(String),
+    ClearScreen,
 }
 
 #[derive(Debug)]
@@ -158,36 +166,26 @@ struct App {
     chat_members: HashMap<String, User>,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
+impl App {
+    fn new(bus: AnyBus) -> Result<Self> {
+        let this = Self {
             should_quit: false,
             input: TextArea::default(),
             history: ChatViewWidget::default(),
             scroll_state: tui_scrollview::ScrollViewState::default(),
             id: Uuid::now_v7(),
             nickname: "Anonymous".to_string(),
-            bus: anybus::AnyBusBuilder::new().enable_ipc(true).init(),
-            chat_members: HashMap::new(),
-        }
-    }
-}
-
-impl App {
-    fn new(bus: AnyBus) -> Self {
-        Self {
             bus,
-            ..Default::default()
-        }
+            chat_members: HashMap::new(),
+        };
+        Ok(this)
     }
 
-    async fn run(&mut self) -> Result<()> {
+    async fn run(&mut self, tui: &mut Tui) -> Result<()> {
         // dbg!(&self);
-        let mut tui = tui::Tui::new()?
-            .tick_rate(4.0) // 4 ticks per second
-            .frame_rate(30.0); // 30 frames per second
 
         tui.enter()?; // Starts event handler, enters raw mode, enters alternate screen
+        tui.clear()?;
         self.bus.run();
         let handle = self.bus.handle().clone();
         let mut chat_listener = handle
@@ -219,7 +217,7 @@ impl App {
                 Some(msg) = chat_listener.next() => {
                     let mut maybe_action = self.process_anybusmsg(msg);
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action, tui);
                     }
                 }
 
@@ -227,14 +225,14 @@ impl App {
                     let dm = format!("(DM) {}: {}", msg.from.nickname, msg.message);
                     let mut maybe_action = Some(Action::AddMessage(dm));
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action, tui);
                     }
                 }
                 Some(evt) = tui.next() => {
                     // `tui.next().await` blocks till next event
                     let mut maybe_action = self.handle_event(evt);
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action, tui);
                     }
                 }
                 else => break,
@@ -251,7 +249,7 @@ impl App {
         Ok(())
     }
 
-    fn update(&mut self, action: Action) -> Option<Action> {
+    fn update(&mut self, action: Action, tui: &mut Tui) -> Option<Action> {
         match action {
             Action::Quit => {
                 self.should_quit = true;
@@ -352,6 +350,10 @@ impl App {
                 self.scroll_state.scroll_to_bottom();
                 None
             }
+            Action::ClearScreen => {
+                tui.clear().ok();
+                None
+            }
         }
     }
 
@@ -366,24 +368,36 @@ impl App {
         }
     }
 
-    fn handle_event(&mut self, evt: tui::Event) -> Option<Action> {
+    fn handle_event(&mut self, evt: tui::AppEvent) -> Option<Action> {
         match evt {
-            tui::Event::Key(key_event)
+            tui::AppEvent::Key(key_event)
                 if key_event.kind == crossterm::event::KeyEventKind::Press =>
             {
-                match key_event.code {
-                    crossterm::event::KeyCode::Esc => Some(Action::Quit),
-                    crossterm::event::KeyCode::Enter => Some(Action::ProcessInput),
-                    crossterm::event::KeyCode::Up => Some(Action::ScrollUp),
-                    crossterm::event::KeyCode::Down => Some(Action::ScrollDown),
-
+                match (key_event.code, key_event.modifiers) {
+                    (KeyCode::Esc, _) => Some(Action::Quit),
+                    (KeyCode::Enter, _) => Some(Action::ProcessInput),
+                    (KeyCode::Up, _) => Some(Action::ScrollUp),
+                    (KeyCode::Down, _) => Some(Action::ScrollDown),
+                    // Match Ctrl-L
+                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => Some(Action::ClearScreen),
                     _ => {
                         self.input.input(key_event);
                         None
                     } // _ => None,
                 }
             }
-            tui::Event::Tick => None,
+            tui::AppEvent::Tick => None,
+            tui::AppEvent::FocusGained => Some(Action::ClearScreen),
+            tui::AppEvent::Init => todo!(),
+            // tui::AppEvent::Quit => Some(Action::Quit),
+            tui::AppEvent::Error => Some(Action::Quit),
+            // tui::AppEvent::Closed => Some(Action::Quit),
+            // tui::AppEvent::Render => todo!(),
+            // tui::AppEvent::FocusLost => todo!(),
+            tui::AppEvent::Paste(_) => None,
+            // tui::AppEvent::Key(key_event) => todo!(),
+            // tui::AppEvent::Mouse(mouse_event) => todo!(),
+            tui::AppEvent::Resize(_, _) => None,
             _ => None,
         }
     }
