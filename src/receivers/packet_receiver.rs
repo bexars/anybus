@@ -33,7 +33,7 @@ impl PacketReceiver {
 
     pub(super) async fn recv(&mut self) -> Result<Packet, ReceiveError> {
         loop {
-            tracing::info!(
+            tracing::debug!(
                 "PacketReceiver waiting for message on endpoint {:?}",
                 self.endpoint_id
             );

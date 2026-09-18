@@ -22,12 +22,12 @@ use tokio::{
 use tracing::{debug, error, info};
 
 use crate::{
-    AnyBusStatusMsg, Handle, Realm, Receiver,
-    peers::{
-        common::Peer,
-        ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper, ipc_peer::IpcPeer},
+    AnyBusStatusMsg, Handle, Receiver,
+    peers::ipc::{
+        DirectoryView, IpcCommand, IpcControl, IpcMessage, IpcPeerStream, NameHelper,
+        ipc_peer::IpcPeer,
     },
-    routing::{ConnectionIdCounter, NodeId, RealmList},
+    routing::{ConnectionId, ConnectionIdCounter, NodeId},
     spawn,
 };
 
@@ -39,20 +39,20 @@ fn to_ipc_stream(stream: local_socket::tokio::Stream) -> IpcPeerStream {
     AsyncBincodeStream::from(stream).for_async()
 }
 
-const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
-const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
+const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 const DIRECTORY_IO_TIMEOUT: Duration = Duration::from_secs(2);
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const DIRECTORY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-const DIRECTORY_HEALTH_INTERVAL: Duration = Duration::from_secs(30);
+const DIRECTORY_HEALTH_INTERVAL: Duration = Duration::from_secs(15);
 const PRIMARY_TAKEOVER_MISSES: u8 = 3;
+const DIRECTORY_OVERWRITE_AFTER: u8 = 3;
 
 pub(crate) struct IpcManager {
     primary_name: String,
     backup_name: String,
     handle: Handle,
-    peers: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
+    peers: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>, ConnectionId)>>>,
     tx: mpsc::Sender<IpcCommand>,
     rx: mpsc::Receiver<IpcCommand>,
     our_nodeid: NodeId,
@@ -66,7 +66,11 @@ pub(crate) struct IpcManager {
     heartbeat_timeout: Duration,
     shutting_down: bool,
     directory_wake_at: Option<Instant>,
+    directory_wake_probe: bool,
     primary_misses: u8,
+    primary_bind_in_use: u8,
+    backup_bind_in_use: u8,
+    probe_in_flight: bool,
 }
 impl IpcManager {
     pub(crate) async fn new(
@@ -98,7 +102,11 @@ impl IpcManager {
             heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
             shutting_down: false,
             directory_wake_at: None,
+            directory_wake_probe: false,
             primary_misses: 0,
+            primary_bind_in_use: 0,
+            backup_bind_in_use: 0,
+            probe_in_flight: false,
         }
     }
 
@@ -130,7 +138,17 @@ impl IpcManager {
         ids
     }
 
-    fn bind_named(name: &str) -> Option<local_socket::tokio::Listener> {
+    async fn has_unknown_peers(&self, ids: &[NodeId]) -> bool {
+        let existing: HashSet<NodeId> = self.peers.read().await.iter().map(|p| p.0).collect();
+        ids.iter().any(|id| {
+            *id != self.our_nodeid && !existing.contains(id) && !self.pending.contains(id)
+        })
+    }
+
+    fn bind_named(
+        name: &str,
+        overwrite: bool,
+    ) -> Result<local_socket::tokio::Listener, std::io::Error> {
         let ns = name
             .to_string()
             .to_ns_name::<GenericNamespaced>()
@@ -138,19 +156,31 @@ impl IpcManager {
         let listener_opts = local_socket::ListenerOptions::new()
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(ns)
-            .reclaim_name(true);
+            .reclaim_name(true)
+            .try_overwrite(overwrite);
+        if overwrite {
+            info!("Overwriting IPC name {name}");
+        }
         match listener_opts.create_tokio() {
-            Ok(listener) => Some(listener),
+            Ok(listener) => Ok(listener),
             Err(e) => {
                 debug!("Failed to bind IPC name {name}: {e}");
-                None
+                Err(e)
             }
         }
     }
 
-    async fn query_directory(name: &str) -> Option<Vec<NodeId>> {
+    fn bind_retry_delay(err: &std::io::Error) -> Duration {
+        if err.kind() == std::io::ErrorKind::AddrInUse {
+            DIRECTORY_HEALTH_INTERVAL
+        } else {
+            DIRECTORY_RETRY_INTERVAL
+        }
+    }
+
+    async fn query_directory(name: &str) -> Option<DirectoryView> {
         match timeout(DIRECTORY_IO_TIMEOUT, Self::query_directory_inner(name)).await {
-            Ok(peers) => peers,
+            Ok(view) => view,
             Err(_) => {
                 debug!("IPC directory {name} timed out");
                 None
@@ -158,7 +188,7 @@ impl IpcManager {
         }
     }
 
-    async fn query_directory_inner(name: &str) -> Option<Vec<NodeId>> {
+    async fn query_directory_inner(name: &str) -> Option<DirectoryView> {
         let ns = name
             .to_string()
             .to_ns_name::<GenericNamespaced>()
@@ -171,36 +201,83 @@ impl IpcManager {
             }
         };
         let mut stream = to_ipc_stream(stream);
+        let owner = match stream.next().await {
+            Some(Ok(IpcMessage::Hello(id))) => id,
+            other => {
+                debug!("IPC directory {name} did not send Hello: {other:?}");
+                stream.close().await.ok();
+                return None;
+            }
+        };
         let peers = match stream.next().await {
-            Some(Ok(IpcMessage::KnownPeers(ids))) => Some(ids),
+            Some(Ok(IpcMessage::KnownPeers(ids))) => ids,
             other => {
                 debug!("IPC directory {name} did not send KnownPeers: {other:?}");
-                None
+                stream.close().await.ok();
+                return None;
             }
         };
         stream.close().await.ok();
-        peers
+        Some(DirectoryView { owner, peers })
     }
 
     async fn query_any_directory(&self) -> Option<Vec<NodeId>> {
-        if let Some(ids) = Self::query_directory(&self.primary_name).await {
-            return Some(ids);
+        if let Some(view) = Self::query_directory(&self.primary_name).await {
+            return Some(view.dial_ids());
         }
-        Self::query_directory(&self.backup_name).await
+        Self::query_directory(&self.backup_name)
+            .await
+            .map(|view| view.dial_ids())
     }
 
-    fn schedule_directory_wake(&mut self, delay: Duration) {
+    fn schedule_directory_wake(&mut self, delay: Duration, probe_primary: bool) {
         let at = Instant::now() + delay;
-        self.directory_wake_at = Some(match self.directory_wake_at {
-            Some(existing) => existing.min(at),
-            None => at,
-        });
+        match self.directory_wake_at {
+            Some(existing) if existing <= at => {
+                self.directory_wake_probe |= probe_primary;
+            }
+            _ => {
+                self.directory_wake_at = Some(at);
+                self.directory_wake_probe = probe_primary;
+            }
+        }
     }
 
     fn schedule_directory_health(&mut self) {
         if !self.shutting_down {
-            self.schedule_directory_wake(DIRECTORY_HEALTH_INTERVAL);
+            self.schedule_directory_wake(DIRECTORY_HEALTH_INTERVAL, true);
         }
+    }
+
+    /// Query directory names from a task so `Listen` can still `accept()`.
+    /// Self-connecting from `ReconcileDirectory` deadlocks: we leave Listen, so
+    /// our own `ServeDirectory` never runs and the 2s query times out.
+    fn spawn_directory_probe(&mut self) {
+        if self.probe_in_flight || self.shutting_down {
+            return;
+        }
+        self.probe_in_flight = true;
+        let tx = self.tx.clone();
+        let primary_name = self.primary_name.clone();
+        let backup_name = self.backup_name.clone();
+        let hold_primary = self.primary_listener.is_some();
+        let hold_backup = self.backup_listener.is_some();
+        spawn(async move {
+            let primary = IpcManager::query_directory(&primary_name).await;
+            let backup = if hold_backup {
+                IpcManager::query_directory(&backup_name).await
+            } else {
+                None
+            };
+            tx.send(IpcCommand::DirectoryProbe {
+                primary,
+                primary_self: hold_primary,
+                backup,
+                backup_self: hold_backup,
+            })
+            .await
+            .ok();
+        });
     }
 
     async fn connect_node(id: NodeId) -> Option<IpcPeerStream> {
@@ -223,11 +300,32 @@ impl IpcManager {
         self.primary_listener = None;
         self.backup_listener = None;
         self.directory_wake_at = None;
+        self.directory_wake_probe = false;
         self.primary_misses = 0;
+        self.primary_bind_in_use = 0;
+        self.backup_bind_in_use = 0;
     }
 
     fn drop_backup(&mut self) {
         self.backup_listener = None;
+    }
+
+    fn spawn_peer(&mut self, stream: IpcPeerStream, expected: Option<NodeId>) {
+        if let Some(id) = expected {
+            self.pending.insert(id);
+        }
+        let ipc_peer = IpcPeer::new(
+            stream,
+            self.tx.clone(),
+            self.peers.clone(),
+            expected,
+            self.our_nodeid,
+            self.handle.clone(),
+            self.connection_counter.clone(),
+            self.heartbeat_interval,
+            self.heartbeat_timeout,
+        );
+        spawn(ipc_peer.start());
     }
 }
 
@@ -302,17 +400,19 @@ impl State for BindPrimary {
             return b(Listen { shutdown: true });
         }
         if state.primary_listener.is_none() {
-            match IpcManager::bind_named(&state.primary_name) {
-                Some(listener) => state.primary_listener = Some(listener),
-                None => {
-                    if let Some(ids) = state.query_any_directory().await {
-                        return b(DialPeers {
-                            ids,
-                            from_directory: true,
-                        });
+            let overwrite = state.primary_bind_in_use >= DIRECTORY_OVERWRITE_AFTER;
+            match IpcManager::bind_named(&state.primary_name, overwrite) {
+                Ok(listener) => {
+                    state.primary_listener = Some(listener);
+                    state.primary_bind_in_use = 0;
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::AddrInUse {
+                        state.primary_bind_in_use = state.primary_bind_in_use.saturating_add(1);
                     }
                     debug!("Failed to bind IPC primary directory, retrying");
-                    state.schedule_directory_wake(DIRECTORY_RETRY_INTERVAL);
+                    state.spawn_directory_probe();
+                    state.schedule_directory_wake(IpcManager::bind_retry_delay(&err), false);
                     return b(Listen::default());
                 }
             }
@@ -335,12 +435,20 @@ impl State for BindBackup {
         }
         state.primary_listener = None;
         if state.backup_listener.is_none() {
-            state.backup_listener = IpcManager::bind_named(&state.backup_name);
-            if state.backup_listener.is_none() {
-                debug!("Failed to bind IPC backup directory, retrying");
-                state.schedule_directory_wake(DIRECTORY_RETRY_INTERVAL);
-            } else {
-                state.schedule_directory_health();
+            let overwrite = state.backup_bind_in_use >= DIRECTORY_OVERWRITE_AFTER;
+            match IpcManager::bind_named(&state.backup_name, overwrite) {
+                Ok(listener) => {
+                    state.backup_listener = Some(listener);
+                    state.backup_bind_in_use = 0;
+                    state.schedule_directory_health();
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::AddrInUse {
+                        state.backup_bind_in_use = state.backup_bind_in_use.saturating_add(1);
+                    }
+                    debug!("Failed to bind IPC backup directory, retrying");
+                    state.schedule_directory_wake(IpcManager::bind_retry_delay(&err), false);
+                }
             }
         } else {
             state.schedule_directory_health();
@@ -361,8 +469,7 @@ impl State for DialPeers {
         if state.shutting_down {
             return b(Listen { shutdown: true });
         }
-        let existing: HashSet<NodeId> =
-            state.peers.read().await.iter().map(|(id, _)| *id).collect();
+        let existing: HashSet<NodeId> = state.peers.read().await.iter().map(|p| p.0).collect();
         self.ids.retain(|id| {
             *id != state.our_nodeid
                 && !existing.contains(id)
@@ -370,89 +477,16 @@ impl State for DialPeers {
                 && (self.from_directory || *id > state.our_nodeid)
         });
 
-        let mut streams = Vec::new();
         for peer_id in self.ids {
             if let Some(stream) = IpcManager::connect_node(peer_id).await {
-                state.pending.insert(peer_id);
-                streams.push((peer_id, stream));
+                state.spawn_peer(stream, Some(peer_id));
             }
         }
-
-        match streams.pop() {
-            Some((expected, stream)) => b(HandShake {
-                stream,
-                expected: Some(expected),
-                extra_streams: streams,
-            }),
-            None => b(ReconcileDirectory::default()),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct HandShake {
-    stream: IpcPeerStream,
-    expected: Option<NodeId>,
-    extra_streams: Vec<(NodeId, IpcPeerStream)>,
-}
-
-#[async_trait]
-impl State for HandShake {
-    async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let next_extra = |this: Box<HandShake>, state: &mut IpcManager, error: IpcManagerError| {
-            if let Some(id) = this.expected {
-                state.pending.remove(&id);
-            }
-            let mut extra_streams = this.extra_streams;
-            match extra_streams.pop() {
-                Some((expected, stream)) => b(HandShake {
-                    stream,
-                    expected: Some(expected),
-                    extra_streams,
-                }),
-                None => b(HandleError::new(error)),
-            }
-        };
-
-        let our_id = state.our_nodeid;
-        let hello = match timeout(HANDSHAKE_TIMEOUT, async {
-            self.stream.send(IpcMessage::Hello(our_id)).await?;
-            Ok::<_, IpcManagerError>(self.stream.next().await)
-        })
-        .await
-        {
-            Ok(Ok(hello)) => hello,
-            Ok(Err(error)) => return next_extra(self, state, error),
-            Err(_) => return next_extra(self, state, IpcManagerError::TimedOut),
-        };
-        let peer_id = match hello {
-            Some(Ok(IpcMessage::Hello(uuid))) => uuid,
-            _ => {
-                return next_extra(
-                    self,
-                    state,
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Did not receive Hello from peer",
-                    )
-                    .into(),
-                );
-            }
-        };
-        if let Some(expected) = self.expected
-            && expected != peer_id
-        {
-            debug!("IPC hello mismatch: expected {expected}, got {peer_id}");
-            return next_extra(
-                self,
-                state,
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "IPC hello mismatch").into(),
-            );
-        }
-        b(CreateIpcPeer {
-            stream: self.stream,
-            peer_id,
-            extra_streams: self.extra_streams,
+        // Rank is wrong until SessionReady; reconciling here as rank 0 with an
+        // empty peer list busy-loops BindPrimary while Hello is still in flight.
+        state.schedule_directory_health();
+        b(Listen {
+            shutdown: state.shutting_down,
         })
     }
 }
@@ -465,11 +499,12 @@ struct ServeDirectory {
 #[async_trait]
 impl State for ServeDirectory {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let ids = state.directory_peer_list().await;
-        match timeout(
-            DIRECTORY_IO_TIMEOUT,
-            self.stream.send(IpcMessage::KnownPeers(ids)),
-        )
+        let hello = IpcMessage::Hello(state.our_nodeid);
+        let known = IpcMessage::KnownPeers(state.directory_peer_list().await);
+        match timeout(DIRECTORY_IO_TIMEOUT, async {
+            self.stream.send(hello).await?;
+            self.stream.send(known).await
+        })
         .await
         {
             Ok(Ok(())) => {}
@@ -482,10 +517,7 @@ impl State for ServeDirectory {
 }
 
 #[derive(Debug, Default)]
-struct ReconcileDirectory {
-    /// Set on the periodic health wake. PeerClosed / join only rebind by rank.
-    probe_primary: bool,
-}
+struct ReconcileDirectory {}
 
 #[async_trait]
 impl State for ReconcileDirectory {
@@ -508,24 +540,6 @@ impl State for ReconcileDirectory {
             }
             1 => {
                 info!("IPC rank 1: holding backup directory");
-                if self.probe_primary {
-                    if IpcManager::query_directory(&state.primary_name)
-                        .await
-                        .is_some()
-                    {
-                        state.primary_misses = 0;
-                    } else {
-                        state.primary_misses = state.primary_misses.saturating_add(1);
-                        debug!(
-                            primary_misses = state.primary_misses,
-                            "Primary directory unreachable"
-                        );
-                        if state.primary_misses >= PRIMARY_TAKEOVER_MISSES {
-                            info!("Primary directory still unreachable, attempting takeover");
-                            return b(BindPrimary {});
-                        }
-                    }
-                }
                 b(BindBackup {})
             }
             rank => {
@@ -548,6 +562,11 @@ impl State for Listen {
         if !self.shutdown && !state.shutting_down && state.peer_listener.is_none() {
             return b(StartPeerListener { query: false });
         }
+        // DialPeers / rank 2+ used to sit here with no timer: no logs, no bind retry,
+        // no probe, until an inbound connect happened to arrive.
+        if !self.shutdown && !state.shutting_down && state.directory_wake_at.is_none() {
+            state.schedule_directory_health();
+        }
 
         let accepting = !self.shutdown && !state.shutting_down;
         let directory_wake = state.directory_wake_at;
@@ -563,11 +582,12 @@ impl State for Listen {
                 }
             } => {
                 match result {
-                    Ok(stream) => b(HandShake {
-                        stream: to_ipc_stream(stream),
-                        expected: None,
-                        extra_streams: vec![],
-                    }),
+                    Ok(stream) => {
+                        state.spawn_peer(to_ipc_stream(stream), None);
+                        b(Listen {
+                            shutdown: self.shutdown,
+                        })
+                    }
                     Err(err) => b(HandleError::new(err)),
                 }
             }
@@ -609,10 +629,21 @@ impl State for Listen {
                     None => future::pending().await,
                 }
             }, if directory_wake.is_some() => {
+                let probe = state.directory_wake_probe;
                 state.directory_wake_at = None;
-                b(ReconcileDirectory {
-                    probe_primary: true,
-                })
+                state.directory_wake_probe = false;
+                if probe {
+                    if state.probe_in_flight {
+                        state.schedule_directory_health();
+                    } else {
+                        state.spawn_directory_probe();
+                    }
+                    b(Listen {
+                        shutdown: self.shutdown || state.shutting_down,
+                    })
+                } else {
+                    b(ReconcileDirectory {})
+                }
             }
             Some(msg) = state.rx.recv() => {
                 b(HandleIpcCommand { command: msg })
@@ -651,7 +682,14 @@ impl State for Shutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         state.peer_listener = None;
         state.drop_directory_listeners();
-        for (_id, tx) in state.peers.write().await.drain(..) {
+        let senders: Vec<_> = state
+            .peers
+            .write()
+            .await
+            .drain(..)
+            .map(|(_, tx, _)| tx)
+            .collect();
+        for tx in senders {
             tx.send(IpcControl::Shutdown).await.ok();
         }
         None
@@ -698,85 +736,159 @@ struct HandleIpcCommand {
 impl State for HandleIpcCommand {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         match self.command {
-            IpcCommand::PeerClosed(uuid) => {
-                state.peers.write().await.retain(|(id, _)| *id != uuid);
-                state.pending.remove(&uuid);
-                tracing::info!("Peer Closed: {uuid}");
+            IpcCommand::PeerClosed(uuid, connection_id) => {
+                state
+                    .peers
+                    .write()
+                    .await
+                    .retain(|(id, _, conn)| !(*id == uuid && *conn == connection_id));
+                if !state
+                    .peers
+                    .read()
+                    .await
+                    .iter()
+                    .any(|(id, _, _)| *id == uuid)
+                {
+                    state.pending.remove(&uuid);
+                }
+                tracing::info!("Peer Closed: {uuid} ({connection_id})");
                 b(ReconcileDirectory::default())
+            }
+            IpcCommand::SessionReady {
+                peer_id,
+                control,
+                connection_id,
+            } => {
+                state.pending.remove(&peer_id);
+                let mut peers = state.peers.write().await;
+                if let Some(pos) = peers.iter().position(|(id, _, _)| *id == peer_id) {
+                    let old_tx = peers[pos].1.clone();
+                    debug!("Replacing IPC session to {peer_id} with connection {connection_id}");
+                    peers[pos] = (peer_id, control.clone(), connection_id);
+                    drop(peers);
+                    old_tx.send(IpcControl::Shutdown).await.ok();
+                    control.send(IpcControl::Accepted).await.ok();
+                } else {
+                    peers.push((peer_id, control.clone(), connection_id));
+                    drop(peers);
+                    control.send(IpcControl::Accepted).await.ok();
+                }
+                b(ReconcileDirectory::default())
+            }
+            IpcCommand::HandshakeFailed(id) => {
+                if let Some(id) = id {
+                    state.pending.remove(&id);
+                }
+                if state.primary_listener.is_none() && state.peers.read().await.is_empty() {
+                    state.schedule_directory_wake(DIRECTORY_RETRY_INTERVAL, false);
+                }
+                b(Listen {
+                    shutdown: state.shutting_down,
+                })
             }
             IpcCommand::LearnedPeers(ids) => b(DialPeers {
                 ids,
                 from_directory: false,
             }),
-        }
-    }
-}
+            IpcCommand::DirectoryProbe {
+                primary,
+                primary_self,
+                backup,
+                backup_self,
+            } => {
+                state.probe_in_flight = false;
+                if state.shutting_down {
+                    return b(Listen { shutdown: true });
+                }
 
-#[derive(Debug)]
-struct CreateIpcPeer {
-    stream: IpcPeerStream,
-    peer_id: NodeId,
-    extra_streams: Vec<(NodeId, IpcPeerStream)>,
-}
+                let mut name_lost = false;
+                let mut stolen_ids = Vec::new();
+                if primary_self {
+                    match &primary {
+                        Some(view) if view.owner == state.our_nodeid => {}
+                        Some(view) => {
+                            info!(
+                                "Primary directory is owned by {}, dropping our listener",
+                                view.owner
+                            );
+                            state.primary_listener = None;
+                            name_lost = true;
+                            stolen_ids.extend(view.dial_ids());
+                        }
+                        None => {
+                            info!("Primary directory name no longer reaches us, rebinding");
+                            state.primary_listener = None;
+                            name_lost = true;
+                        }
+                    }
+                }
+                if backup_self {
+                    match &backup {
+                        Some(view) if view.owner == state.our_nodeid => {}
+                        Some(view) => {
+                            info!(
+                                "Backup directory is owned by {}, dropping our listener",
+                                view.owner
+                            );
+                            state.backup_listener = None;
+                            name_lost = true;
+                            stolen_ids.extend(view.dial_ids());
+                        }
+                        None => {
+                            info!("Backup directory name no longer reaches us, rebinding");
+                            state.backup_listener = None;
+                            name_lost = true;
+                        }
+                    }
+                }
+                if !stolen_ids.is_empty() && state.has_unknown_peers(&stolen_ids).await {
+                    state.schedule_directory_health();
+                    return b(DialPeers {
+                        ids: stolen_ids,
+                        from_directory: true,
+                    });
+                }
+                if name_lost {
+                    return b(ReconcileDirectory {});
+                }
 
-#[async_trait]
-impl State for CreateIpcPeer {
-    async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        state.pending.remove(&self.peer_id);
+                if !primary_self {
+                    match &primary {
+                        Some(_) => state.primary_misses = 0,
+                        None => {
+                            state.primary_misses = state.primary_misses.saturating_add(1);
+                            debug!(
+                                primary_misses = state.primary_misses,
+                                "Primary directory unreachable"
+                            );
+                            if state.primary_misses >= PRIMARY_TAKEOVER_MISSES {
+                                info!("Primary directory still unreachable, attempting takeover");
+                                return b(BindPrimary {});
+                            }
+                        }
+                    }
+                }
 
-        let already_connected = state
-            .peers
-            .read()
-            .await
-            .iter()
-            .any(|(id, _)| *id == self.peer_id);
-        if already_connected {
-            debug!("Dropping duplicate IPC connection to {}", self.peer_id);
-            self.stream.close().await.ok();
-            return match self.extra_streams.pop() {
-                Some((expected, stream)) => b(HandShake {
-                    stream,
-                    expected: Some(expected),
-                    extra_streams: self.extra_streams,
-                }),
-                None => b(ReconcileDirectory::default()),
-            };
-        }
+                let mut ids = Vec::new();
+                if let Some(view) = primary {
+                    ids.extend(view.dial_ids());
+                }
+                if let Some(view) = backup {
+                    ids.extend(view.dial_ids());
+                }
+                if state.has_unknown_peers(&ids).await {
+                    state.schedule_directory_health();
+                    return b(DialPeers {
+                        ids,
+                        from_directory: true,
+                    });
+                }
 
-        let connection_id = state.connection_counter.next();
-        let (tx, rx) = channel(32);
-        let mut realms: RealmList = Realm::Userspace.into();
-        realms.add(Realm::Global);
-
-        let peer = Peer::register_peer(
-            self.peer_id,
-            state.our_nodeid,
-            state.handle.clone(),
-            Realm::Userspace, // Always userspace for IPC peers
-            connection_id,
-            10.into(),
-            realms,
-        );
-        let ipc_peer = IpcPeer::new(
-            self.stream,
-            state.tx.clone(),
-            rx,
-            state.peers.clone(),
-            peer,
-            state.heartbeat_interval,
-            state.heartbeat_timeout,
-        );
-
-        state.peers.write().await.push((self.peer_id, tx));
-        _ = spawn(ipc_peer.start());
-
-        match self.extra_streams.pop() {
-            Some((expected, stream)) => b(HandShake {
-                stream,
-                expected: Some(expected),
-                extra_streams: self.extra_streams,
-            }),
-            None => b(ReconcileDirectory::default()),
+                state.schedule_directory_health();
+                b(Listen {
+                    shutdown: state.shutting_down,
+                })
+            }
         }
     }
 }

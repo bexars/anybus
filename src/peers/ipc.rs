@@ -6,7 +6,12 @@ use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 use serde::{Deserialize, Serialize};
 // use uuid::Uuid;
 
-use crate::{messages::NodeMessage, routing::NodeId};
+use tokio::sync::mpsc;
+
+use crate::{
+    messages::NodeMessage,
+    routing::{ConnectionId, NodeId},
+};
 
 pub(super) type IpcPeerStream = AsyncBincodeStream<
     interprocess::local_socket::tokio::Stream,
@@ -37,14 +42,43 @@ impl NameHelper for NodeId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct DirectoryView {
+    pub owner: NodeId,
+    pub peers: Vec<NodeId>,
+}
+
+impl DirectoryView {
+    pub(super) fn dial_ids(&self) -> Vec<NodeId> {
+        let mut ids = self.peers.clone();
+        if !ids.contains(&self.owner) {
+            ids.push(self.owner);
+        }
+        ids
+    }
+}
+
 #[derive(Debug)]
 pub(super) enum IpcCommand {
-    PeerClosed(NodeId),
+    PeerClosed(NodeId, ConnectionId),
     LearnedPeers(Vec<NodeId>),
+    SessionReady {
+        peer_id: NodeId,
+        control: mpsc::Sender<IpcControl>,
+        connection_id: ConnectionId,
+    },
+    HandshakeFailed(Option<NodeId>),
+    DirectoryProbe {
+        primary: Option<DirectoryView>,
+        primary_self: bool,
+        backup: Option<DirectoryView>,
+        backup_self: bool,
+    },
 }
 
 #[derive(Debug)]
 pub(super) enum IpcControl {
+    Accepted,
     Shutdown,
 }
 

@@ -1,5 +1,4 @@
 // Cribbed the state machine from: https://moonbench.xyz/projects/rust-event-driven-finite-state-machine
-// use tokio_with_wasm::alias as tokio;
 
 use std::{sync::Arc, time::Duration};
 
@@ -9,62 +8,83 @@ use tokio::{
     select,
     sync::{
         RwLock,
-        mpsc::{self},
+        mpsc::{self, channel},
     },
-    time::Instant,
+    time::{Instant, timeout},
 };
 use tracing::{debug, error, info};
 
 use crate::{
+    Handle, Realm,
     messages::NodeMessage,
     peers::{
         common::{Heartbeat, Peer},
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
     },
-    routing::NodeId,
+    routing::{ConnectionId, ConnectionIdCounter, NodeId, RealmList},
 };
 
 fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
     Some(Box::new(thing))
 }
 
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Debug)]
 pub(crate) struct IpcPeer {
-    // phantom: PhantomData<T>,
     stream: IpcPeerStream,
     ipc_command: mpsc::Sender<IpcCommand>,
     ipc_control: mpsc::Receiver<IpcControl>,
-    ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
-    peer: Peer,
+    control_tx: mpsc::Sender<IpcControl>,
+    ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>, ConnectionId)>>>,
+    peer: Option<Peer>,
     hb: Heartbeat,
+    expected: Option<NodeId>,
+    our_nodeid: NodeId,
+    handle: Handle,
+    connection_counter: ConnectionIdCounter,
+    established: bool,
 }
 
 impl IpcPeer {
     pub(crate) fn new(
         stream: IpcPeerStream,
         ipc_command: mpsc::Sender<IpcCommand>,
-        ipc_control: mpsc::Receiver<IpcControl>,
-        ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
-        peer: Peer,
+        ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>, ConnectionId)>>>,
+        expected: Option<NodeId>,
+        our_nodeid: NodeId,
+        handle: Handle,
+        connection_counter: ConnectionIdCounter,
         heartbeat_interval: Duration,
         heartbeat_timeout: Duration,
     ) -> IpcPeer {
+        let (control_tx, ipc_control) = channel(32);
         IpcPeer {
-            // phantom: PhantomData,
             stream,
             ipc_command,
-            peer,
             ipc_control,
+            control_tx,
             ipc_neighbors,
+            peer: None,
             hb: Heartbeat::new(Instant::now(), heartbeat_interval, heartbeat_timeout),
+            expected,
+            our_nodeid,
+            handle,
+            connection_counter,
+            established: false,
         }
     }
+
     pub(crate) async fn start(mut self) {
-        let mut next_state = Some(Box::new(NewConnection {}) as Box<dyn State>);
+        let mut next_state = Some(Box::new(Hello {}) as Box<dyn State>);
         while let Some(cur_state) = next_state.take() {
             debug!("Entering: {:?}", &cur_state);
             next_state = cur_state.next(&mut self).await;
         }
+    }
+
+    fn peer_id(&self) -> Option<NodeId> {
+        self.peer.as_ref().map(|p| p.peer_id).or(self.expected)
     }
 }
 
@@ -74,16 +94,111 @@ trait State: Send + std::fmt::Debug {
 }
 
 #[derive(Debug)]
-struct NewConnection {}
-
-// TODO Probably could elminate this state altogether
+struct Hello {}
 
 #[async_trait]
-impl State for NewConnection {
+impl State for Hello {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        info!("New connection to: {}", state_machine.peer.peer_id);
-        // We're handed a freshly created 'stream' that has already exchanged Hello's and need to drive it forward
-        Some(Box::new(SendPeers {}))
+        let our_id = state_machine.our_nodeid;
+        match timeout(
+            HANDSHAKE_TIMEOUT,
+            state_machine.stream.send(IpcMessage::Hello(our_id)),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                debug!("IPC hello send failed: {e}");
+                return b(AbortHandshake {});
+            }
+            Err(_) => {
+                debug!("IPC hello timed out");
+                return b(AbortHandshake {});
+            }
+        }
+        let hello = match timeout(HANDSHAKE_TIMEOUT, state_machine.stream.next()).await {
+            Ok(hello) => hello,
+            Err(_) => {
+                debug!("IPC hello timed out");
+                return b(AbortHandshake {});
+            }
+        };
+
+        let peer_id = match hello {
+            Some(Ok(IpcMessage::Hello(id))) => id,
+            other => {
+                debug!("IPC hello expected Hello, got {other:?}");
+                return b(AbortHandshake {});
+            }
+        };
+
+        if let Some(expected) = state_machine.expected
+            && expected != peer_id
+        {
+            debug!("IPC hello mismatch: expected {expected}, got {peer_id}");
+            return b(AbortHandshake {});
+        }
+
+        let connection_id = state_machine.connection_counter.next();
+        let mut realms: RealmList = Realm::Userspace.into();
+        realms.add(Realm::Global);
+        state_machine.peer = Some(Peer::register_peer(
+            peer_id,
+            state_machine.our_nodeid,
+            state_machine.handle.clone(),
+            Realm::Userspace,
+            connection_id,
+            10.into(),
+            realms,
+        ));
+
+        if let Err(e) = state_machine
+            .ipc_command
+            .send(IpcCommand::SessionReady {
+                peer_id,
+                control: state_machine.control_tx.clone(),
+                connection_id,
+            })
+            .await
+        {
+            debug!("Failed to send SessionReady: {e}");
+            return b(AbortHandshake {});
+        }
+
+        let accepted = match timeout(HANDSHAKE_TIMEOUT, state_machine.ipc_control.recv()).await {
+            Ok(Some(IpcControl::Accepted)) => true,
+            Ok(Some(IpcControl::Shutdown)) | Ok(None) => false,
+            Err(_) => {
+                debug!("Timed out waiting for session accept");
+                false
+            }
+        };
+        if !accepted {
+            return b(AbortHandshake {});
+        }
+
+        state_machine.established = true;
+        info!("New connection to: {peer_id}");
+        b(SendPeers {})
+    }
+}
+
+#[derive(Debug)]
+struct AbortHandshake {}
+
+#[async_trait]
+impl State for AbortHandshake {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        state_machine.stream.close().await.ok();
+        if let Some(peer) = state_machine.peer.as_mut() {
+            peer.unregister();
+        }
+        state_machine
+            .ipc_command
+            .send(IpcCommand::HandshakeFailed(state_machine.expected))
+            .await
+            .ok();
+        None
     }
 }
 
@@ -93,14 +208,16 @@ struct SendPeers {}
 #[async_trait]
 impl State for SendPeers {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        let peers = state_machine
+        let peer_id = state_machine.peer_id().expect("session established");
+        let mut peers = state_machine
             .ipc_neighbors
             .read()
             .await
             .iter()
-            .map(|(uuid, _tx)| *uuid)
-            .filter(|u| *u != state_machine.peer.peer_id)
+            .map(|(uuid, _tx, _conn)| *uuid)
+            .filter(|u| *u != peer_id)
             .collect::<Vec<_>>();
+        peers.push(state_machine.our_nodeid);
         debug!("Sending Peers: {:?}", &peers);
         if peers.is_empty() {
             return b(WaitForMessages {});
@@ -122,6 +239,7 @@ struct WaitForMessages {}
 #[async_trait]
 impl State for WaitForMessages {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        let peer = state_machine.peer.as_mut().expect("session established");
         select! {
             msg = state_machine.stream.next() => {
                 match msg {
@@ -138,15 +256,15 @@ impl State for WaitForMessages {
                     Some(control_msg) => Some(Box::new(IpcControlReceived { message: control_msg})),
                     None  => {
                         tracing::error!("control_msg returned None");
-                        Some(Box::new(Shutdown {}))}, // something important crashed, bail out
+                        Some(Box::new(Shutdown {}))},
                 }
             }
-            peer_msg = state_machine.peer.recv() => {
+            peer_msg = peer.recv() => {
                 match peer_msg {
                     Some(node_msg) => Some(Box::new(NodeMessageReceived {message: node_msg})),
                     None  => {
                         tracing::error!("peer_msg returned None");
-                        Some(Box::new(Shutdown {}))},  // something important crashed, bail out
+                        Some(Box::new(Shutdown {}))},
                 }
             }
             _ = tokio::time::sleep_until(state_machine.hb.next_deadline()) => {
@@ -165,7 +283,7 @@ impl State for HeartbeatTick {
         let now = Instant::now();
         if state_machine.hb.timed_out(now) {
             error!(
-                peer_id = %state_machine.peer.peer_id,
+                peer_id = %state_machine.peer_id().unwrap_or_default(),
                 "IPC heartbeat timed out"
             );
             return Some(Box::new(ClosePeer {}));
@@ -200,9 +318,17 @@ impl State for HandleError {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         error!(
             "Received Error in {} IPC peer handler: {:?}",
-            state_machine.peer.peer_id, self.error
+            state_machine
+                .peer_id()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "handshake".into()),
+            self.error
         );
-        Some(Box::new(ClosePeer {}))
+        if state_machine.established {
+            Some(Box::new(ClosePeer {}))
+        } else {
+            b(AbortHandshake {})
+        }
     }
 }
 
@@ -235,6 +361,7 @@ impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
+            IpcControl::Accepted => b(WaitForMessages {}),
         }
     }
 }
@@ -258,30 +385,17 @@ impl State for IpcMessageReceived {
                     .ok();
             }
             IpcMessage::NeighborRemoved(_uuid) => {}
-            // IpcMessage::Packet(wire_packet) => {
-            //     state_machine.peer.send_packet(wire_packet);
-            // }
-            // IpcMessage::BusRider(endpoint_id, items) => {
-            //     _ = state_machine
-            //         .peer
-            //         .handle
-            //         .send_to_address(endpoint_id, items);
-            // }
             IpcMessage::CloseConnection => return Some(Box::new(ClosePeer {})),
-            // IpcMessage::Advertise(ads) => {
-            //     state_machine.peer.add_endpoints(ads);
-            // }
             IpcMessage::Ping(token) => {
                 if let Err(e) = state_machine.stream.send(IpcMessage::Pong(token)).await {
                     return Some(Box::new(HandleError { error: e.into() }));
                 }
             }
             IpcMessage::Pong(_token) => {}
-            // IpcMessage::Withdraw(uuids) => {
-            //     state_machine.peer.remove_endpoints(uuids);
-            // }
             IpcMessage::NodeMsg(node_message) => {
-                state_machine.peer.handle_node_message(node_message);
+                if let Some(peer) = state_machine.peer.as_mut() {
+                    peer.handle_node_message(node_message);
+                }
             }
         }
         Some(Box::new(WaitForMessages {}))
@@ -295,12 +409,29 @@ struct ClosePeer {}
 impl State for ClosePeer {
     async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         state_machine.stream.close().await.ok();
-        state_machine
-            .ipc_command
-            .send(IpcCommand::PeerClosed(state_machine.peer.peer_id))
-            .await
-            .ok();
-        state_machine.peer.unregister();
+        if state_machine.established {
+            if let Some(peer_id) = state_machine.peer_id() {
+                let connection_id = state_machine
+                    .peer
+                    .as_ref()
+                    .expect("established")
+                    .connection_id;
+                state_machine
+                    .ipc_command
+                    .send(IpcCommand::PeerClosed(peer_id, connection_id))
+                    .await
+                    .ok();
+            }
+            if let Some(peer) = state_machine.peer.as_mut() {
+                peer.unregister();
+            }
+        } else {
+            state_machine
+                .ipc_command
+                .send(IpcCommand::HandshakeFailed(state_machine.expected))
+                .await
+                .ok();
+        }
         state_machine.ipc_control.close();
         state_machine.stream.close().await.ok();
 
@@ -308,8 +439,6 @@ impl State for ClosePeer {
     }
 }
 
-// Received an explicit Shutdown order
-// or internal queues are dying and we're just bailing out gracefully
 #[derive(Debug)]
 struct Shutdown {}
 
@@ -321,14 +450,6 @@ impl State for Shutdown {
             .send(IpcMessage::CloseConnection)
             .await
             .ok();
-        state_machine.stream.close().await.ok();
-        state_machine
-            .ipc_command
-            .send(IpcCommand::PeerClosed(state_machine.peer.peer_id))
-            .await
-            .ok();
-        state_machine.peer.unregister();
-        state_machine.ipc_control.close();
-        None
+        b(ClosePeer {})
     }
 }
