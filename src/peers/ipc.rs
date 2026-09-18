@@ -42,6 +42,7 @@ pub(super) enum IpcCommand {
     // AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
     PeerClosed(NodeId, bool),
     LearnedPeers(Vec<NodeId>),
+    LearnedMaster(NodeId),
 }
 
 #[derive(Debug)]

@@ -222,7 +222,7 @@ impl LsDb {
 
                 self.request_rebuild();
             } else {
-                tracing::warn!(
+                tracing::trace!(
                     "Received dead LSA with seq {} which is not newer than current seq {} for key {:?}",
                     lsa.seq,
                     current_lsa_record.lsa.seq,
@@ -251,7 +251,7 @@ impl LsDb {
                 current_lsa.updated_at = Instant::now();
                 self.request_rebuild();
             } else {
-                tracing::warn!(
+                tracing::trace!(
                     "Received LSA with seq {} which is not newer than current seq {} for key {:?}",
                     lsa.seq,
                     current_lsa.lsa.seq,
@@ -335,7 +335,7 @@ impl LsDb {
         self.send_ack(in_connection_id, lsa.key, lsa.seq); // Regardless we let them know we got it
 
         if lsa.key.origin == self.self_id {
-            tracing::warn!(
+            tracing::trace!(
                 "Ignoring LSA from self with seq {} for key {:?}",
                 lsa.seq,
                 lsa.key
@@ -539,7 +539,7 @@ impl LsDb {
                     if matches!(e, LinkError::RealmMismatch) {
                         continue;
                     }
-                    tracing::error!(
+                    tracing::trace!(
                         "Failed to send LSA to peer {:?} over connection {:?}: {:?}",
                         link.peer_id,
                         connection_id,
@@ -663,7 +663,7 @@ impl LsDb {
                     );
                 }
                 Err(e) => {
-                    tracing::error!(
+                    tracing::trace!(
                         "Failed to forward LSA with key {:?} and seq {} to peer {:?} over connection {:?}: {:?}",
                         lsa.key,
                         lsa.seq,

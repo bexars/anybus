@@ -248,6 +248,12 @@ impl State for IpcMessageReceived {
             // }
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
+                state_machine
+                    .ipc_command
+                    .send(IpcCommand::LearnedMaster(state_machine.peer.peer_id))
+                    .await
+                    .map_err(|e| debug!("Failed to send LearnedMaster: {}", e))
+                    .ok();
             }
             // IpcMessage::Withdraw(uuids) => {
             //     state_machine.peer.remove_endpoints(uuids);

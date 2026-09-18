@@ -1,5 +1,5 @@
 use crate::tokio;
-use std::{collections::HashSet, panic::Location, sync::Arc};
+use std::{collections::HashSet, panic::Location, sync::Arc, time::Duration};
 
 use async_bincode::tokio::AsyncBincodeStream;
 use async_trait::async_trait;
@@ -8,6 +8,7 @@ use interprocess::local_socket::{
     self, GenericNamespaced, ToNsName as _,
     traits::tokio::{Listener, Stream as _},
 };
+use itertools::Itertools;
 use thiserror::Error;
 use tokio::{
     select,
@@ -15,6 +16,7 @@ use tokio::{
         RwLock,
         mpsc::{self, channel},
     },
+    time::Instant,
 };
 
 use tracing::{debug, error};
@@ -44,6 +46,7 @@ pub(crate) struct IpcManager {
     peer_listener: Option<local_socket::tokio::Listener>,
     anybus_status: Receiver<AnyBusStatusMsg>,
     connection_counter: ConnectionIdCounter,
+    create_rendezvous_wait: Option<Instant>,
 }
 impl IpcManager {
     pub(crate) async fn new(
@@ -68,6 +71,7 @@ impl IpcManager {
             peer_listener: None,
             anybus_status,
             connection_counter,
+            create_rendezvous_wait: None,
         }
     }
 
@@ -77,6 +81,21 @@ impl IpcManager {
             debug!("Entering: {:?}", &old_state);
             state = old_state.next(&mut self).await;
         }
+    }
+
+    /// Returns what position we are relative to other peers UUID
+    /// Assumed UUID are v7 and can be compared to find oldest
+    async fn get_relative_peer_age(&mut self) -> usize {
+        self.peers
+            .read()
+            .await
+            .iter()
+            .map(|p| p.0)
+            .chain(Some(self.our_nodeid))
+            .sorted_unstable()
+            .find_position(|u| *u == self.our_nodeid)
+            .map(|(p, _)| p)
+            .unwrap()
     }
 }
 
@@ -182,12 +201,12 @@ impl State for StartRendezvous {
             .to_ns_name::<GenericNamespaced>()
             .unwrap();
 
-        debug!("Tmp directory {:?}", std::env::temp_dir());
+        // debug!("Tmp directory {:?}", std::env::temp_dir());
 
         let listener_opts = local_socket::ListenerOptions::new()
             .nonblocking(local_socket::ListenerNonblockingMode::Neither)
             .name(name)
-            .try_overwrite(true)
+            // .try_overwrite(true)
             .reclaim_name(true);
 
         state.rendezvous_listener = match listener_opts.create_tokio() {
@@ -257,7 +276,22 @@ impl State for Listen {
             future::select_all(ipc_listeners)
         };
 
+        let sleeper = state
+            .create_rendezvous_wait
+            .map(|i| tokio::time::sleep_until(i));
+
         select! {
+                    Some(_) = async {
+                        match sleeper {
+                            Some(sleeper) => Some(sleeper.await),
+                            None => None,
+                        }
+
+                    }, if sleeper.is_some() => {
+                            state.create_rendezvous_wait = None;
+                            // tracing::info!("")
+                            b(StartRendezvous{})
+                        }
                     (stream, _idx, _vec) = ipc_listeners => {
                         match stream {
                             Ok(stream) => b(HandShake {
@@ -382,12 +416,31 @@ impl State for HandleIpcCommand {
         match self.command {
             IpcCommand::PeerClosed(uuid, was_master) => {
                 state.peers.write().await.retain(|(id, _)| *id != uuid);
+                tracing::info!("Peer Closed: {}", uuid);
                 if was_master {
-                    b(StartRendezvous {})
+                    let pos = state.get_relative_peer_age().await;
+                    if pos == 0 {
+                        tracing::info!("Closed Peer was master, starting rendezvous");
+                        b(StartRendezvous {})
+                    } else {
+                        let wait_duration = Duration::from_millis(100) * pos as u32;
+                        state.create_rendezvous_wait = Some(Instant::now() + wait_duration);
+                        b(Listen::default())
+                    }
                 } else {
                     b(Listen::default())
                 }
             }
+            IpcCommand::LearnedMaster(peer_id) => {
+                // if we were about to try to be master while waiting, cancel it
+
+                if state.create_rendezvous_wait.is_none() {
+                    tracing::info!("Master is now {}, canceling timer", peer_id);
+                    state.create_rendezvous_wait = None;
+                };
+                b(Listen { shutdown: false })
+            }
+
             IpcCommand::LearnedPeers(mut peer_ids) => {
                 let mut streams = Vec::new();
                 let existing_peers = state

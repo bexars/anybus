@@ -57,8 +57,8 @@ impl AnyBus {
     }
 
     pub(crate) fn init_from_config(config: AnyBusConfig) -> AnyBus {
-        tracing::info!("Initializing AnyBus");
         let id = NodeId::new();
+        tracing::info!("Initializing AnyBus (id: {})", id);
         let router = Router::new(id);
 
         let handle = router.get_handle();
