@@ -16,6 +16,8 @@ use tokio::select;
 use url::Url;
 use uuid::Uuid;
 
+use crate::tui::Tui;
+
 /// Chat TUI application with configurable networking
 #[derive(Parser)]
 #[command(name = "chat_tui")]
@@ -144,6 +146,7 @@ pub enum Action {
     ScrollUp,
     ScrollDown,
     AddMessage(String),
+    ClearScreen,
 }
 
 #[derive(Debug)]
@@ -219,7 +222,7 @@ impl App {
                 Some(msg) = chat_listener.next() => {
                     let mut maybe_action = self.process_anybusmsg(msg);
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action,&mut tui);
                     }
                 }
 
@@ -227,14 +230,14 @@ impl App {
                     let dm = format!("(DM) {}: {}", msg.from.nickname, msg.message);
                     let mut maybe_action = Some(Action::AddMessage(dm));
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action,&mut tui);
                     }
                 }
                 Some(evt) = tui.next() => {
                     // `tui.next().await` blocks till next event
                     let mut maybe_action = self.handle_event(evt);
                     while let Some(action) = maybe_action {
-                        maybe_action = self.update(action);
+                        maybe_action = self.update(action,&mut tui);
                     }
                 }
                 else => break,
@@ -251,7 +254,7 @@ impl App {
         Ok(())
     }
 
-    fn update(&mut self, action: Action) -> Option<Action> {
+    fn update(&mut self, action: Action, tui: &mut Tui) -> Option<Action> {
         match action {
             Action::Quit => {
                 self.should_quit = true;
@@ -352,6 +355,10 @@ impl App {
                 self.scroll_state.scroll_to_bottom();
                 None
             }
+            Action::ClearScreen => {
+                tui.clear().ok();
+                None
+            }
         }
     }
 
@@ -371,11 +378,15 @@ impl App {
             tui::Event::Key(key_event)
                 if key_event.kind == crossterm::event::KeyEventKind::Press =>
             {
-                match key_event.code {
-                    crossterm::event::KeyCode::Esc => Some(Action::Quit),
-                    crossterm::event::KeyCode::Enter => Some(Action::ProcessInput),
-                    crossterm::event::KeyCode::Up => Some(Action::ScrollUp),
-                    crossterm::event::KeyCode::Down => Some(Action::ScrollDown),
+                match (key_event.code, key_event.modifiers) {
+                    (crossterm::event::KeyCode::Esc, _) => Some(Action::Quit),
+                    (crossterm::event::KeyCode::Enter, _) => Some(Action::ProcessInput),
+                    (crossterm::event::KeyCode::Up, _) => Some(Action::ScrollUp),
+                    (crossterm::event::KeyCode::Down, _) => Some(Action::ScrollDown),
+                    (
+                        crossterm::event::KeyCode::Char('l'),
+                        crossterm::event::KeyModifiers::CONTROL,
+                    ) => Some(Action::ClearScreen),
 
                     _ => {
                         self.input.input(key_event);
@@ -384,6 +395,7 @@ impl App {
                 }
             }
             tui::Event::Tick => None,
+            tui::Event::FocusGained => Some(Action::ClearScreen),
             _ => None,
         }
     }
