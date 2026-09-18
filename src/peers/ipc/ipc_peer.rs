@@ -1,7 +1,7 @@
 // Cribbed the state machine from: https://moonbench.xyz/projects/rust-event-driven-finite-state-machine
 // use tokio_with_wasm::alias as tokio;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
@@ -11,13 +11,14 @@ use tokio::{
         RwLock,
         mpsc::{self},
     },
+    time::Instant,
 };
 use tracing::{debug, error, info};
 
 use crate::{
     messages::NodeMessage,
     peers::{
-        common::Peer,
+        common::{Heartbeat, Peer},
         ipc::{IpcCommand, IpcControl, IpcMessage, IpcPeerStream},
     },
     routing::NodeId,
@@ -36,6 +37,7 @@ pub(crate) struct IpcPeer {
     ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
     peer: Peer,
     is_master: bool,
+    hb: Heartbeat,
 }
 
 impl IpcPeer {
@@ -46,6 +48,8 @@ impl IpcPeer {
         ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
         peer: Peer,
         is_master: bool,
+        heartbeat_interval: Duration,
+        heartbeat_timeout: Duration,
     ) -> IpcPeer {
         IpcPeer {
             // phantom: PhantomData,
@@ -55,6 +59,7 @@ impl IpcPeer {
             ipc_control,
             ipc_neighbors,
             is_master,
+            hb: Heartbeat::new(Instant::now(), heartbeat_interval, heartbeat_timeout),
         }
     }
     pub(crate) async fn start(mut self) {
@@ -123,7 +128,10 @@ impl State for WaitForMessages {
         select! {
             msg = state_machine.stream.next() => {
                 match msg {
-                    Some(Ok(ipc_message)) => Some(Box::new(IpcMessageReceived { message: ipc_message})),
+                    Some(Ok(ipc_message)) => {
+                        state_machine.hb.on_rx(Instant::now());
+                        Some(Box::new(IpcMessageReceived { message: ipc_message}))
+                    },
                     Some(Err(e)) => Some(Box::new(HandleError { error: e.into()})),
                     None => Some(Box::new(ClosePeer {})),
                 }
@@ -144,6 +152,44 @@ impl State for WaitForMessages {
                         Some(Box::new(Shutdown {}))},  // something important crashed, bail out
                 }
             }
+            _ = tokio::time::sleep_until(state_machine.hb.next_deadline()) => {
+                Some(Box::new(HeartbeatTick {}))
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct HeartbeatTick {}
+
+#[async_trait]
+impl State for HeartbeatTick {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        let now = Instant::now();
+        if state_machine.hb.timed_out(now) {
+            error!(
+                peer_id = %state_machine.peer.peer_id,
+                "IPC heartbeat timed out"
+            );
+            return Some(Box::new(ClosePeer {}));
+        }
+        if state_machine.hb.ping_due(now) {
+            return b(SendPing {});
+        }
+        b(WaitForMessages {})
+    }
+}
+
+#[derive(Debug)]
+struct SendPing {}
+
+#[async_trait]
+impl State for SendPing {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+        let token = state_machine.hb.take_ping_token(Instant::now());
+        match state_machine.stream.send(IpcMessage::Ping(token)).await {
+            Ok(_) => Some(Box::new(WaitForMessages {})),
+            Err(e) => Some(Box::new(HandleError { error: e.into() })),
         }
     }
 }
@@ -246,6 +292,12 @@ impl State for IpcMessageReceived {
             // IpcMessage::Advertise(ads) => {
             //     state_machine.peer.add_endpoints(ads);
             // }
+            IpcMessage::Ping(token) => {
+                if let Err(e) = state_machine.stream.send(IpcMessage::Pong(token)).await {
+                    return Some(Box::new(HandleError { error: e.into() }));
+                }
+            }
+            IpcMessage::Pong(_token) => {}
             IpcMessage::IAmMaster => {
                 state_machine.is_master = true;
                 state_machine
@@ -303,6 +355,16 @@ impl State for Shutdown {
             .await
             .ok();
         state_machine.stream.close().await.ok();
+        state_machine
+            .ipc_command
+            .send(IpcCommand::PeerClosed(
+                state_machine.peer.peer_id,
+                state_machine.is_master,
+            ))
+            .await
+            .ok();
+        state_machine.peer.unregister();
+        state_machine.ipc_control.close();
         None
     }
 }

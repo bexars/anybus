@@ -65,6 +65,8 @@ pub(super) enum IpcMessage {
     // Packet(WirePacket),
     NodeMsg(NodeMessage),
     IAmMaster,
+    Ping(u64),
+    Pong(u64),
 }
 
 impl std::fmt::Debug for IpcMessage {
@@ -87,6 +89,8 @@ impl std::fmt::Debug for IpcMessage {
             // IpcMessage::Withdraw(uuids) => write!(f, "Withdraw ({:?})", uuids),
             // IpcMessage::Packet(_wire_packet) => write!(f, "Packet(..)"),
             IpcMessage::NodeMsg(node_msg) => write!(f, "NodeMsg({:?})", node_msg),
+            IpcMessage::Ping(token) => write!(f, "Ping({token})"),
+            IpcMessage::Pong(token) => write!(f, "Pong({token})"),
         }
     }
 }

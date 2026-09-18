@@ -35,6 +35,9 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
     Some(Box::new(thing))
 }
 
+const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
+
 pub(crate) struct IpcManager {
     rendezvous: String,
     handle: Handle,
@@ -47,6 +50,8 @@ pub(crate) struct IpcManager {
     anybus_status: Receiver<AnyBusStatusMsg>,
     connection_counter: ConnectionIdCounter,
     create_rendezvous_wait: Option<Instant>,
+    heartbeat_interval: Duration,
+    heartbeat_timeout: Duration,
 }
 impl IpcManager {
     pub(crate) async fn new(
@@ -72,6 +77,8 @@ impl IpcManager {
             anybus_status,
             connection_counter,
             create_rendezvous_wait: None,
+            heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
         }
     }
 
@@ -434,7 +441,7 @@ impl State for HandleIpcCommand {
             IpcCommand::LearnedMaster(peer_id) => {
                 // if we were about to try to be master while waiting, cancel it
 
-                if state.create_rendezvous_wait.is_none() {
+                if state.create_rendezvous_wait.is_some() {
                     tracing::info!("Master is now {}, canceling timer", peer_id);
                     state.create_rendezvous_wait = None;
                 };
@@ -512,6 +519,8 @@ impl State for CreateIpcPeer {
             state.peers.clone(),
             peer,
             self.peer_is_master,
+            state.heartbeat_interval,
+            state.heartbeat_timeout,
         );
 
         state.peers.write().await.push((self.peer_id, tx));
