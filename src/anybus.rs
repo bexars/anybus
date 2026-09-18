@@ -57,8 +57,8 @@ impl AnyBus {
     }
 
     pub(crate) fn init_from_config(config: AnyBusConfig) -> AnyBus {
-        tracing::info!("Initializing AnyBus");
         let id = NodeId::new();
+        tracing::info!("Initializing AnyBus (id: {})", id);
         let router = Router::new(id);
 
         let handle = router.get_handle();
@@ -178,7 +178,7 @@ impl AnyBus {
         #[cfg(feature = "resume_watch")]
         watcher::Watcher::new(self.handle.clone()).start();
 
-        //TODO allow ipc rendezvous filename to be configured by user
+        // TODO allow ipc directory basename to be configured (`{base}.primary` / `{base}.backup`)
         #[cfg(feature = "ipc")]
         if let Some(ipc) = &self.config.ipc
             && ipc.enabled
