@@ -36,7 +36,6 @@ pub(crate) struct IpcPeer {
     ipc_control: mpsc::Receiver<IpcControl>,
     ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
     peer: Peer,
-    is_master: bool,
     hb: Heartbeat,
 }
 
@@ -47,7 +46,6 @@ impl IpcPeer {
         ipc_control: mpsc::Receiver<IpcControl>,
         ipc_neighbors: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
         peer: Peer,
-        is_master: bool,
         heartbeat_interval: Duration,
         heartbeat_timeout: Duration,
     ) -> IpcPeer {
@@ -58,7 +56,6 @@ impl IpcPeer {
             peer,
             ipc_control,
             ipc_neighbors,
-            is_master,
             hb: Heartbeat::new(Instant::now(), heartbeat_interval, heartbeat_timeout),
         }
     }
@@ -237,25 +234,7 @@ struct IpcControlReceived {
 impl State for IpcControlReceived {
     async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
-            IpcControl::SendPeers => b(SendPeers {}),
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
-            IpcControl::IAmMaster => b(SendMaster {}),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SendMaster {}
-
-#[async_trait]
-impl State for SendMaster {
-    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
-        match state_machine.stream.send(IpcMessage::IAmMaster).await {
-            Ok(_) => Some(Box::new(WaitForMessages {})),
-            Err(_) => b(HandleError {
-                // TODO Make this a deadlink announcement
-                error: "Failed to send IAmMaster".into(),
-            }),
         }
     }
 }
@@ -298,15 +277,6 @@ impl State for IpcMessageReceived {
                 }
             }
             IpcMessage::Pong(_token) => {}
-            IpcMessage::IAmMaster => {
-                state_machine.is_master = true;
-                state_machine
-                    .ipc_command
-                    .send(IpcCommand::LearnedMaster(state_machine.peer.peer_id))
-                    .await
-                    .map_err(|e| debug!("Failed to send LearnedMaster: {}", e))
-                    .ok();
-            }
             // IpcMessage::Withdraw(uuids) => {
             //     state_machine.peer.remove_endpoints(uuids);
             // }
@@ -327,10 +297,7 @@ impl State for ClosePeer {
         state_machine.stream.close().await.ok();
         state_machine
             .ipc_command
-            .send(IpcCommand::PeerClosed(
-                state_machine.peer.peer_id,
-                state_machine.is_master,
-            ))
+            .send(IpcCommand::PeerClosed(state_machine.peer.peer_id))
             .await
             .ok();
         state_machine.peer.unregister();
@@ -357,10 +324,7 @@ impl State for Shutdown {
         state_machine.stream.close().await.ok();
         state_machine
             .ipc_command
-            .send(IpcCommand::PeerClosed(
-                state_machine.peer.peer_id,
-                state_machine.is_master,
-            ))
+            .send(IpcCommand::PeerClosed(state_machine.peer.peer_id))
             .await
             .ok();
         state_machine.peer.unregister();

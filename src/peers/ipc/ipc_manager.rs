@@ -16,10 +16,9 @@ use tokio::{
         RwLock,
         mpsc::{self, channel},
     },
-    time::Instant,
 };
 
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::{
     AnyBusStatusMsg, Handle, Realm, Receiver,
@@ -35,23 +34,30 @@ fn b<T: State + 'static>(thing: T) -> Option<Box<dyn State>> {
     Some(Box::new(thing))
 }
 
+fn to_ipc_stream(stream: local_socket::tokio::Stream) -> IpcPeerStream {
+    AsyncBincodeStream::from(stream).for_async()
+}
+
 const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub(crate) struct IpcManager {
-    rendezvous: String,
+    primary_name: String,
+    backup_name: String,
     handle: Handle,
     peers: Arc<RwLock<Vec<(NodeId, mpsc::Sender<IpcControl>)>>>,
     tx: mpsc::Sender<IpcCommand>,
     rx: mpsc::Receiver<IpcCommand>,
     our_nodeid: NodeId,
-    rendezvous_listener: Option<local_socket::tokio::Listener>,
+    primary_listener: Option<local_socket::tokio::Listener>,
+    backup_listener: Option<local_socket::tokio::Listener>,
     peer_listener: Option<local_socket::tokio::Listener>,
+    pending: HashSet<NodeId>,
     anybus_status: Receiver<AnyBusStatusMsg>,
     connection_counter: ConnectionIdCounter,
-    create_rendezvous_wait: Option<Instant>,
     heartbeat_interval: Duration,
     heartbeat_timeout: Duration,
+    shutting_down: bool,
 }
 impl IpcManager {
     pub(crate) async fn new(
@@ -66,19 +72,22 @@ impl IpcManager {
             .await
             .expect("Unable to create anybus status receiver");
         IpcManager {
-            rendezvous,
+            primary_name: format!("{rendezvous}.primary"),
+            backup_name: format!("{rendezvous}.backup"),
             handle,
             peers: Default::default(),
             tx,
             rx,
             our_nodeid,
-            rendezvous_listener: None,
+            primary_listener: None,
+            backup_listener: None,
             peer_listener: None,
+            pending: HashSet::new(),
             anybus_status,
             connection_counter,
-            create_rendezvous_wait: None,
             heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
             heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            shutting_down: false,
         }
     }
 
@@ -90,9 +99,8 @@ impl IpcManager {
         }
     }
 
-    /// Returns what position we are relative to other peers UUID
-    /// Assumed UUID are v7 and can be compared to find oldest
-    async fn get_relative_peer_age(&mut self) -> usize {
+    /// Position among live IPC nodes by NodeId (v7 ids: older = smaller).
+    async fn rank(&self) -> usize {
         self.peers
             .read()
             .await
@@ -103,6 +111,70 @@ impl IpcManager {
             .find_position(|u| *u == self.our_nodeid)
             .map(|(p, _)| p)
             .unwrap()
+    }
+
+    async fn directory_peer_list(&self) -> Vec<NodeId> {
+        let mut ids: Vec<NodeId> = self.peers.read().await.iter().map(|p| p.0).collect();
+        ids.push(self.our_nodeid);
+        ids
+    }
+
+    fn bind_named(name: &str) -> Option<local_socket::tokio::Listener> {
+        let ns = name
+            .to_string()
+            .to_ns_name::<GenericNamespaced>()
+            .expect("IPC directory name is hardcoded and tested so shouldn't cause a failure");
+        let listener_opts = local_socket::ListenerOptions::new()
+            .nonblocking(local_socket::ListenerNonblockingMode::Neither)
+            .name(ns)
+            .reclaim_name(true);
+        match listener_opts.create_tokio() {
+            Ok(listener) => Some(listener),
+            Err(e) => {
+                debug!("Failed to bind IPC name {name}: {e}");
+                None
+            }
+        }
+    }
+
+    async fn query_directory(name: &str) -> Option<Vec<NodeId>> {
+        let ns = name
+            .to_string()
+            .to_ns_name::<GenericNamespaced>()
+            .expect("IPC directory name is hardcoded and tested so shouldn't cause a failure");
+        let stream = match local_socket::tokio::Stream::connect(ns).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                debug!("Failed to connect to IPC directory {name}: {e}");
+                return None;
+            }
+        };
+        let mut stream = to_ipc_stream(stream);
+        let peers = match stream.next().await {
+            Some(Ok(IpcMessage::KnownPeers(ids))) => Some(ids),
+            other => {
+                debug!("IPC directory {name} did not send KnownPeers: {other:?}");
+                None
+            }
+        };
+        stream.close().await.ok();
+        peers
+    }
+
+    async fn connect_node(id: NodeId) -> Option<IpcPeerStream> {
+        let stream = match local_socket::tokio::Stream::connect(id.to_name()).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                tracing::error!("Failed to connect to IPC peer {id}: {e}");
+                return None;
+            }
+        };
+        Some(to_ipc_stream(stream))
+    }
+
+    fn drop_directory_listeners(&mut self) {
+        self.primary_listener = None;
+        self.backup_listener = None;
     }
 }
 
@@ -117,48 +189,150 @@ struct Creation {}
 #[async_trait]
 impl State for Creation {
     async fn next(self: Box<Self>, _state: &mut IpcManager) -> Option<Box<dyn State>> {
-        b(ConnectToRendezvous::default())
+        b(StartPeerListener { query: true })
     }
 }
 
-#[derive(Debug, Default)]
-struct ConnectToRendezvous {
-    create_failed: bool,
+#[derive(Debug)]
+struct StartPeerListener {
+    query: bool,
 }
 
 #[async_trait]
-impl State for ConnectToRendezvous {
+impl State for StartPeerListener {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let name = state
-            .rendezvous
-            .clone()
-            .to_ns_name::<GenericNamespaced>()
-            .expect("IPC rendezvous name is hardcoded and tested so shouldn't cause a failure");
-        match local_socket::tokio::Stream::connect(name).await {
-            Ok(stream) => {
-                let stream: AsyncBincodeStream<
-                    local_socket::tokio::Stream,
-                    IpcMessage,
-                    IpcMessage,
-                    async_bincode::AsyncDestination,
-                > = AsyncBincodeStream::from(stream).for_async();
-                b(HandShake {
-                    stream,
-                    peer_is_master: true,
-                    extra_streams: vec![],
-                })
-            }
-            Err(e) => {
-                tracing::debug!("Failed to connect to IPC rendezvous: {}", e);
-                if self.create_failed {
-                    tracing::error!(
-                        "Unable connect or create rendezvous point.  Closing IPC manager"
-                    );
-                    b(Shutdown {})
-                } else {
-                    b(StartRendezvous {})
+        if state.peer_listener.is_none() {
+            let name = state.our_nodeid.to_name();
+            let listener_opts = local_socket::ListenerOptions::new()
+                .nonblocking(local_socket::ListenerNonblockingMode::Neither)
+                .name(name)
+                .reclaim_name(true);
+            match listener_opts.create_tokio() {
+                Ok(listener) => state.peer_listener = Some(listener),
+                Err(e) => {
+                    error!("Failed to bind IPC peer listener: {e}");
+                    return b(Shutdown {});
                 }
             }
+        }
+        if self.query {
+            b(QueryDirectory {
+                last_bind_failed: false,
+            })
+        } else {
+            b(Listen::default())
+        }
+    }
+}
+
+#[derive(Debug)]
+struct QueryDirectory {
+    last_bind_failed: bool,
+}
+
+#[async_trait]
+impl State for QueryDirectory {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        if let Some(ids) = IpcManager::query_directory(&state.primary_name).await {
+            return b(DialPeers {
+                ids,
+                from_directory: true,
+            });
+        }
+        if let Some(ids) = IpcManager::query_directory(&state.backup_name).await {
+            return b(DialPeers {
+                ids,
+                from_directory: true,
+            });
+        }
+        if self.last_bind_failed {
+            error!("Unable to connect or create IPC directory. Closing IPC manager");
+            return b(Shutdown {});
+        }
+        b(BindPrimary {})
+    }
+}
+
+#[derive(Debug)]
+struct BindPrimary {}
+
+#[async_trait]
+impl State for BindPrimary {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        if state.shutting_down {
+            return b(Listen { shutdown: true });
+        }
+        if state.primary_listener.is_none() {
+            match IpcManager::bind_named(&state.primary_name) {
+                Some(listener) => state.primary_listener = Some(listener),
+                None => {
+                    return b(QueryDirectory {
+                        last_bind_failed: true,
+                    });
+                }
+            }
+        }
+        state.backup_listener = None;
+        b(Listen::default())
+    }
+}
+
+#[derive(Debug)]
+struct BindBackup {}
+
+#[async_trait]
+impl State for BindBackup {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        if state.shutting_down {
+            return b(Listen { shutdown: true });
+        }
+        state.primary_listener = None;
+        if state.backup_listener.is_none() {
+            state.backup_listener = IpcManager::bind_named(&state.backup_name);
+            if state.backup_listener.is_none() {
+                debug!("Failed to bind IPC backup directory");
+            }
+        }
+        b(Listen::default())
+    }
+}
+
+#[derive(Debug)]
+struct DialPeers {
+    ids: Vec<NodeId>,
+    from_directory: bool,
+}
+
+#[async_trait]
+impl State for DialPeers {
+    async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        if state.shutting_down {
+            return b(Listen { shutdown: true });
+        }
+        let existing: HashSet<NodeId> =
+            state.peers.read().await.iter().map(|(id, _)| *id).collect();
+        self.ids.retain(|id| {
+            *id != state.our_nodeid
+                && !existing.contains(id)
+                && !state.pending.contains(id)
+                && (self.from_directory || *id > state.our_nodeid)
+        });
+
+        let mut streams = Vec::new();
+        for peer_id in self.ids {
+            if let Some(stream) = IpcManager::connect_node(peer_id).await {
+                state.pending.insert(peer_id);
+                streams.push((peer_id, stream));
+            }
+        }
+
+        match streams.pop() {
+            Some((expected, stream)) => b(HandShake {
+                stream,
+                expected: Some(expected),
+                extra_streams: streams,
+            }),
+            None => b(ReconcileDirectory {}),
         }
     }
 }
@@ -166,90 +340,111 @@ impl State for ConnectToRendezvous {
 #[derive(Debug)]
 struct HandShake {
     stream: IpcPeerStream,
-    peer_is_master: bool,
-    extra_streams: Vec<IpcPeerStream>,
+    expected: Option<NodeId>,
+    extra_streams: Vec<(NodeId, IpcPeerStream)>,
 }
 
 #[async_trait]
 impl State for HandShake {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        // let mut stream = AsyncBincodeStream::from(self.stream).for_async();
-        if let Err(error) = self.stream.send(IpcMessage::Hello(state.our_nodeid)).await {
-            return b(HandleError::new(error));
+        let next_extra = |this: Box<HandShake>, state: &mut IpcManager, error: IpcManagerError| {
+            if let Some(id) = this.expected {
+                state.pending.remove(&id);
+            }
+            let mut extra_streams = this.extra_streams;
+            match extra_streams.pop() {
+                Some((expected, stream)) => b(HandShake {
+                    stream,
+                    expected: Some(expected),
+                    extra_streams,
+                }),
+                None => b(HandleError::new(error)),
+            }
         };
+
+        if let Err(error) = self.stream.send(IpcMessage::Hello(state.our_nodeid)).await {
+            return next_extra(self, state, error.into());
+        }
         let hello = self.stream.next().await;
         let peer_id = match hello {
             Some(Ok(IpcMessage::Hello(uuid))) => uuid,
             _ => {
-                return b(HandleError::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Did not receive Hello from peer",
-                )));
+                return next_extra(
+                    self,
+                    state,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Did not receive Hello from peer",
+                    )
+                    .into(),
+                );
             }
         };
+        if let Some(expected) = self.expected
+            && expected != peer_id
+        {
+            debug!("IPC hello mismatch: expected {expected}, got {peer_id}");
+            return next_extra(
+                self,
+                state,
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "IPC hello mismatch").into(),
+            );
+        }
         b(CreateIpcPeer {
             stream: self.stream,
             peer_id,
-            peer_is_master: self.peer_is_master,
             extra_streams: self.extra_streams,
         })
     }
 }
 
 #[derive(Debug)]
-struct StartRendezvous {}
+struct ServeDirectory {
+    stream: IpcPeerStream,
+}
 
 #[async_trait]
-impl State for StartRendezvous {
-    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let name = state
-            .rendezvous
-            .clone()
-            .to_ns_name::<GenericNamespaced>()
-            .unwrap();
-
-        // debug!("Tmp directory {:?}", std::env::temp_dir());
-
-        let listener_opts = local_socket::ListenerOptions::new()
-            .nonblocking(local_socket::ListenerNonblockingMode::Neither)
-            .name(name)
-            // .try_overwrite(true)
-            .reclaim_name(true);
-
-        state.rendezvous_listener = match listener_opts.create_tokio() {
-            Ok(rl) => Some(rl),
-            Err(e) => {
-                debug!("Failed to create rendezvous listener: {}", e);
-                // #[cfg(unix)]
-                // let _ = {
-                //     // use std::path::PathBuf;
-                //     let path = std::env::temp_dir().join(&state.rendezvous);
-                //     _ = std::fs::remove_file(path);
-                // };
-                return b(ConnectToRendezvous {
-                    create_failed: true,
-                });
-            }
-        };
-        b(AnnounceMaster {})
+impl State for ServeDirectory {
+    async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        let ids = state.directory_peer_list().await;
+        if let Err(error) = self.stream.send(IpcMessage::KnownPeers(ids)).await {
+            return b(HandleError::new(error));
+        }
+        self.stream.close().await.ok();
+        b(Listen::default())
     }
 }
 
 #[derive(Debug)]
-struct AnnounceMaster {}
+struct ReconcileDirectory {}
 
 #[async_trait]
-impl State for AnnounceMaster {
+impl State for ReconcileDirectory {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let _dead_peers = state
-            .peers
-            .read()
-            .await
-            .iter()
-            .map(|(id, tx)| (id, tx.try_send(IpcControl::IAmMaster))) // FIX need to handle full case correctly
-            .filter_map(|(id, res)| if res.is_err() { Some(id) } else { None });
-
-        b(Listen::default())
+        if state.shutting_down {
+            return b(Listen { shutdown: true });
+        }
+        match state.rank().await {
+            0 => {
+                let need_bind = state.primary_listener.is_none();
+                info!("IPC rank 0: holding primary directory");
+                if need_bind {
+                    b(BindPrimary {})
+                } else {
+                    state.backup_listener = None;
+                    b(Listen::default())
+                }
+            }
+            1 => {
+                info!("IPC rank 1: holding backup directory");
+                b(BindBackup {})
+            }
+            rank => {
+                debug!("IPC rank {rank}: no directory sockets");
+                state.drop_directory_listeners();
+                b(Listen::default())
+            }
+        }
     }
 }
 
@@ -261,66 +456,76 @@ struct Listen {
 #[async_trait]
 impl State for Listen {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        if state.peer_listener.is_none() {
-            return b(StartListener {});
+        if !self.shutdown && !state.shutting_down && state.peer_listener.is_none() {
+            return b(StartPeerListener { query: false });
         }
 
-        let ipc_listeners = state
-            .peer_listener
-            .as_ref()
-            .map(|l| Box::pin(l.accept()))
-            .into_iter()
-            .chain(
-                state
-                    .rendezvous_listener
-                    .as_ref()
-                    .map(|l| Box::pin(l.accept())),
-            );
-
-        let ipc_listeners = if self.shutdown {
-            future::select_all(None)
-        } else {
-            future::select_all(ipc_listeners)
-        };
-
-        let sleeper = state
-            .create_rendezvous_wait
-            .map(|i| tokio::time::sleep_until(i));
+        let accepting = !self.shutdown && !state.shutting_down;
 
         select! {
-                    Some(_) = async {
-                        match sleeper {
-                            Some(sleeper) => Some(sleeper.await),
-                            None => None,
-                        }
-
-                    }, if sleeper.is_some() => {
-                            state.create_rendezvous_wait = None;
-                            // tracing::info!("")
-                            b(StartRendezvous{})
-                        }
-                    (stream, _idx, _vec) = ipc_listeners => {
-                        match stream {
-                            Ok(stream) => b(HandShake {
-                               stream: AsyncBincodeStream::from(stream).for_async(),
-                               peer_is_master: false,
-                               extra_streams: vec![],
-        }),
-                            Err(err) => b(HandleError::new(err)),
-                        }
-                    }
-                    Some(msg) = state.rx.recv() => {
-                        b(HandleIpcCommand { command: msg } )
-                    }
-                    status = state.anybus_status.recv() => {
-                        match status {
-                            Ok(AnyBusStatusMsg::ShuttingDown) => b(SoftShutdown{}),
-                            Err(_) => b(Shutdown{}),
-                            _ => b(Listen::default())
-                        }
-                    }
-
+            result = async {
+                if !accepting {
+                    return future::pending::<std::io::Result<local_socket::tokio::Stream>>().await;
                 }
+                match state.peer_listener.as_ref() {
+                    Some(listener) => listener.accept().await,
+                    None => future::pending().await,
+                }
+            } => {
+                match result {
+                    Ok(stream) => b(HandShake {
+                        stream: to_ipc_stream(stream),
+                        expected: None,
+                        extra_streams: vec![],
+                    }),
+                    Err(err) => b(HandleError::new(err)),
+                }
+            }
+            result = async {
+                if !accepting {
+                    return future::pending::<std::io::Result<local_socket::tokio::Stream>>().await;
+                }
+                match state.primary_listener.as_ref() {
+                    Some(listener) => listener.accept().await,
+                    None => future::pending().await,
+                }
+            } => {
+                match result {
+                    Ok(stream) => b(ServeDirectory {
+                        stream: to_ipc_stream(stream),
+                    }),
+                    Err(err) => b(HandleError::new(err)),
+                }
+            }
+            result = async {
+                if !accepting {
+                    return future::pending::<std::io::Result<local_socket::tokio::Stream>>().await;
+                }
+                match state.backup_listener.as_ref() {
+                    Some(listener) => listener.accept().await,
+                    None => future::pending().await,
+                }
+            } => {
+                match result {
+                    Ok(stream) => b(ServeDirectory {
+                        stream: to_ipc_stream(stream),
+                    }),
+                    Err(err) => b(HandleError::new(err)),
+                }
+            }
+            Some(msg) = state.rx.recv() => {
+                b(HandleIpcCommand { command: msg })
+            }
+            status = state.anybus_status.recv() => {
+                match status {
+                    Ok(AnyBusStatusMsg::ShuttingDown) => b(SoftShutdown {}),
+                    Err(_) => b(Shutdown {}),
+                    _ => b(Listen {
+                        shutdown: self.shutdown || state.shutting_down,
+                    }),
+                }
+            }
+        }
     }
 }
 
@@ -330,9 +535,9 @@ struct SoftShutdown {}
 #[async_trait]
 impl State for SoftShutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        state.shutting_down = true;
         state.peer_listener = None;
-        //TODO shutdown the rendezvous listener.  Need to stop peering on that connection and have it just
-        // return a list of node IPCs to connect to and drop
+        state.drop_directory_listeners();
         b(Listen { shutdown: true })
     }
 }
@@ -343,43 +548,12 @@ struct Shutdown {}
 #[async_trait]
 impl State for Shutdown {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        state.peer_listener = None;
+        state.drop_directory_listeners();
         for (_id, tx) in state.peers.write().await.drain(..) {
             tx.send(IpcControl::Shutdown).await.ok();
-            // state.handle.unregister_peer(id);
         }
         None
-    }
-}
-
-#[derive(Debug)]
-struct SendNewPeersControl {}
-
-#[async_trait]
-impl State for SendNewPeersControl {
-    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        for (_id, tx) in state.peers.read().await.iter() {
-            tx.send(IpcControl::SendPeers).await.ok();
-            // state.handle.unregister_peer(id);
-        }
-        b(Listen::default())
-    }
-}
-
-#[derive(Debug)]
-struct StartListener {}
-
-#[async_trait]
-impl State for StartListener {
-    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
-        let name = state.our_nodeid.to_name();
-
-        let listener_opts = local_socket::ListenerOptions::new()
-            .nonblocking(local_socket::ListenerNonblockingMode::Neither)
-            .name(name)
-            .reclaim_name(true);
-
-        state.peer_listener = listener_opts.create_tokio().ok(); // If it failed we just won't listen and hope someone else is listening
-        b(Listen::default())
     }
 }
 
@@ -401,14 +575,16 @@ impl HandleError {
 
 #[async_trait]
 impl State for HandleError {
-    async fn next(self: Box<Self>, _state: &mut IpcManager) -> Option<Box<dyn State>> {
+    async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         error!(
             "IPC Manager error: {:?} {}:{}",
             self.error,
             self.location.file(),
             self.location.line()
         );
-        b(Listen::default())
+        b(Listen {
+            shutdown: state.shutting_down,
+        })
     }
 }
 
@@ -421,68 +597,16 @@ struct HandleIpcCommand {
 impl State for HandleIpcCommand {
     async fn next(self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
         match self.command {
-            IpcCommand::PeerClosed(uuid, was_master) => {
+            IpcCommand::PeerClosed(uuid) => {
                 state.peers.write().await.retain(|(id, _)| *id != uuid);
-                tracing::info!("Peer Closed: {}", uuid);
-                if was_master {
-                    let pos = state.get_relative_peer_age().await;
-                    if pos == 0 {
-                        tracing::info!("Closed Peer was master, starting rendezvous");
-                        b(StartRendezvous {})
-                    } else {
-                        let wait_duration = Duration::from_millis(100) * pos as u32;
-                        state.create_rendezvous_wait = Some(Instant::now() + wait_duration);
-                        b(Listen::default())
-                    }
-                } else {
-                    b(Listen::default())
-                }
+                state.pending.remove(&uuid);
+                tracing::info!("Peer Closed: {uuid}");
+                b(ReconcileDirectory {})
             }
-            IpcCommand::LearnedMaster(peer_id) => {
-                // if we were about to try to be master while waiting, cancel it
-
-                if state.create_rendezvous_wait.is_some() {
-                    tracing::info!("Master is now {}, canceling timer", peer_id);
-                    state.create_rendezvous_wait = None;
-                };
-                b(Listen { shutdown: false })
-            }
-
-            IpcCommand::LearnedPeers(mut peer_ids) => {
-                let mut streams = Vec::new();
-                let existing_peers = state
-                    .peers
-                    .read()
-                    .await
-                    .iter()
-                    .map(|(id, _)| *id)
-                    .collect::<HashSet<_>>();
-
-                peer_ids.retain(|id| !existing_peers.contains(id));
-
-                for peer_id in peer_ids {
-                    let name = peer_id.to_name();
-                    let stream = local_socket::tokio::Stream::connect(name).await;
-                    let stream = match stream {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            tracing::error!("Failed to connect to IPC peer: {}", e);
-                            continue;
-                        }
-                    };
-
-                    streams.push(AsyncBincodeStream::from(stream).for_async())
-                }
-
-                match streams.pop() {
-                    Some(stream) => b(HandShake {
-                        stream,
-                        peer_is_master: false,
-                        extra_streams: streams,
-                    }),
-                    None => b(Listen::default()),
-                }
-            }
+            IpcCommand::LearnedPeers(ids) => b(DialPeers {
+                ids,
+                from_directory: false,
+            }),
         }
     }
 }
@@ -491,13 +615,33 @@ impl State for HandleIpcCommand {
 struct CreateIpcPeer {
     stream: IpcPeerStream,
     peer_id: NodeId,
-    peer_is_master: bool,
-    extra_streams: Vec<IpcPeerStream>,
+    extra_streams: Vec<(NodeId, IpcPeerStream)>,
 }
 
 #[async_trait]
 impl State for CreateIpcPeer {
     async fn next(mut self: Box<Self>, state: &mut IpcManager) -> Option<Box<dyn State>> {
+        state.pending.remove(&self.peer_id);
+
+        let already_connected = state
+            .peers
+            .read()
+            .await
+            .iter()
+            .any(|(id, _)| *id == self.peer_id);
+        if already_connected {
+            debug!("Dropping duplicate IPC connection to {}", self.peer_id);
+            self.stream.close().await.ok();
+            return match self.extra_streams.pop() {
+                Some((expected, stream)) => b(HandShake {
+                    stream,
+                    expected: Some(expected),
+                    extra_streams: self.extra_streams,
+                }),
+                None => b(ReconcileDirectory {}),
+            };
+        }
+
         let connection_id = state.connection_counter.next();
         let (tx, rx) = channel(32);
         let mut realms: RealmList = Realm::Userspace.into();
@@ -518,7 +662,6 @@ impl State for CreateIpcPeer {
             rx,
             state.peers.clone(),
             peer,
-            self.peer_is_master,
             state.heartbeat_interval,
             state.heartbeat_timeout,
         );
@@ -526,14 +669,13 @@ impl State for CreateIpcPeer {
         state.peers.write().await.push((self.peer_id, tx));
         _ = spawn(ipc_peer.start());
 
-        let s = self.extra_streams.pop(); // Handle learning multiple peers at once
-        match s {
-            Some(stream) => b(HandShake {
+        match self.extra_streams.pop() {
+            Some((expected, stream)) => b(HandShake {
                 stream,
-                peer_is_master: false,
+                expected: Some(expected),
                 extra_streams: self.extra_streams,
             }),
-            None => b(SendNewPeersControl {}),
+            None => b(ReconcileDirectory {}),
         }
     }
 }
@@ -544,5 +686,4 @@ pub enum IpcManagerError {
     Io(#[from] std::io::Error),
     #[error("Error encoding IPC message")]
     EncodeError(#[from] bincode::error::EncodeError),
-    // EncodeError,
 }

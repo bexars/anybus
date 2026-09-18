@@ -39,16 +39,12 @@ impl NameHelper for NodeId {
 
 #[derive(Debug)]
 pub(super) enum IpcCommand {
-    // AddPeer(Uuid, PeerTx, PeerRx, bool), // bool is if the peer was found by the discovery agent
-    PeerClosed(NodeId, bool),
+    PeerClosed(NodeId),
     LearnedPeers(Vec<NodeId>),
-    LearnedMaster(NodeId),
 }
 
 #[derive(Debug)]
 pub(super) enum IpcControl {
-    IAmMaster,
-    SendPeers,
     Shutdown,
 }
 
@@ -64,7 +60,6 @@ pub(super) enum IpcMessage {
     // Withdraw(HashSet<Advertisement>),
     // Packet(WirePacket),
     NodeMsg(NodeMessage),
-    IAmMaster,
     Ping(u64),
     Pong(u64),
 }
@@ -85,7 +80,6 @@ impl std::fmt::Debug for IpcMessage {
             // }
             IpcMessage::CloseConnection => write!(f, "CloseConnection"),
             // IpcMessage::Advertise(ads) => write!(f, "Advertise({:?})", ads),
-            IpcMessage::IAmMaster => write!(f, "IAmMaster"),
             // IpcMessage::Withdraw(uuids) => write!(f, "Withdraw ({:?})", uuids),
             // IpcMessage::Packet(_wire_packet) => write!(f, "Packet(..)"),
             IpcMessage::NodeMsg(node_msg) => write!(f, "NodeMsg({:?})", node_msg),
