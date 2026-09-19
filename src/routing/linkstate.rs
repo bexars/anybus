@@ -11,10 +11,10 @@
 mod db;
 use crate::tokio;
 
-use crate::tokio::time::Instant;
 pub(crate) use db::ForwardingTable;
 pub(crate) use db::LsDb;
 use std::fmt::Debug;
+use tokio::time::Instant;
 
 use crate::tokio::sync::mpsc::Sender;
 #[cfg(feature = "serde")]

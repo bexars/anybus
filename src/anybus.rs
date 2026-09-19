@@ -1,5 +1,6 @@
 pub(crate) mod builder;
 pub(crate) mod config;
+pub(crate) mod suspend;
 #[cfg(feature = "resume_watch")]
 pub(crate) mod watcher;
 use crate::tokio;
@@ -175,8 +176,7 @@ impl AnyBus {
             tracing::info!("Starting WebSocket Manager");
             self.start_ws_manager();
         }
-        #[cfg(feature = "resume_watch")]
-        watcher::Watcher::new(self.handle.clone()).start();
+        suspend::start(self.handle.clone());
 
         // TODO allow ipc directory basename to be configured (`{base}.primary` / `{base}.backup`)
         #[cfg(feature = "ipc")]

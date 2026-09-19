@@ -37,6 +37,7 @@ pub use websys_websock::WebSockStream;
 #[derive(Debug)]
 pub(crate) enum WsControl {
     Shutdown,
+    Resume,
 }
 
 // #[derive(Debug)]
@@ -211,6 +212,12 @@ impl WsPendingPeer {
         self.last_attempt = Instant::now();
         self.num_attempts += 1;
         self.backoff = std::time::Duration::from_secs(2u64.pow(self.num_attempts.min(8)));
+    }
+
+    fn ready_now(&mut self) {
+        self.last_attempt = Instant::now();
+        self.backoff = std::time::Duration::ZERO;
+        self.num_attempts = 0;
     }
 }
 

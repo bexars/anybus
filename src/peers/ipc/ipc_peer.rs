@@ -1,5 +1,5 @@
 // Cribbed the state machine from: https://moonbench.xyz/projects/rust-event-driven-finite-state-machine
-
+use crate::tokio;
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -167,7 +167,7 @@ impl State for Hello {
 
         let accepted = match timeout(HANDSHAKE_TIMEOUT, state_machine.ipc_control.recv()).await {
             Ok(Some(IpcControl::Accepted)) => true,
-            Ok(Some(IpcControl::Shutdown)) | Ok(None) => false,
+            Ok(Some(IpcControl::Shutdown | IpcControl::Resume)) | Ok(None) => false,
             Err(_) => {
                 debug!("Timed out waiting for session accept");
                 false
@@ -358,10 +358,15 @@ struct IpcControlReceived {
 
 #[async_trait]
 impl State for IpcControlReceived {
-    async fn next(self: Box<Self>, _state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
+    async fn next(self: Box<Self>, state_machine: &mut IpcPeer) -> Option<Box<dyn State>> {
         match self.message {
             IpcControl::Shutdown => Some(Box::new(Shutdown {})),
             IpcControl::Accepted => b(WaitForMessages {}),
+            IpcControl::Resume => {
+                let now = Instant::now();
+                state_machine.hb.note_resume(now);
+                b(SendPing {})
+            }
         }
     }
 }

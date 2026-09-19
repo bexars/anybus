@@ -1,3 +1,4 @@
+use crate::tokio;
 pub(super) mod ipc_manager;
 mod ipc_peer;
 
@@ -80,6 +81,7 @@ pub(super) enum IpcCommand {
 pub(super) enum IpcControl {
     Accepted,
     Shutdown,
+    Resume,
 }
 
 /// Protocol messages for the IPC bus.

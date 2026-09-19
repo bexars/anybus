@@ -165,6 +165,18 @@ impl WebsocketManager {
         None
     }
 
+    async fn on_resume(&mut self) -> ManagerState {
+        info!("WebSocket manager handling resume");
+        for peer in &self.current_peers {
+            peer.ws_control.try_send(ws::WsControl::Resume).ok();
+        }
+        for pending in &mut self.disconnected_peers {
+            pending.ready_now();
+        }
+        self.disconnected_peers.sort_by_key(|p| p.when_ready());
+        ManagerState::Listen
+    }
+
     async fn init(&mut self) -> ManagerState {
         #[cfg(feature = "ws_server")]
         if let Some(ws_options) = self.ws_listener_options.take() {
@@ -236,11 +248,9 @@ impl WebsocketManager {
 
             status = self.anybus_status.recv() => {
                 match status {
-                    Ok(AnyBusStatusMsg::ShuttingDown) | Err(_) => {
-
-                        ManagerState::Shutdown}
-                    // Err(_) => ManagerState::Shutdown,
-                    _ => ManagerState::Listen
+                    Ok(AnyBusStatusMsg::ShuttingDown) | Err(_) => ManagerState::Shutdown,
+                    Ok(AnyBusStatusMsg::Resuming) => self.on_resume().await,
+                    _ => ManagerState::Listen,
                 }
             }
             else => {

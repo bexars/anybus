@@ -154,6 +154,12 @@ impl WsPeer {
 
         match event {
             Event::Control(WsControl::Shutdown) => self.close(CloseReason::Local),
+            Event::Control(WsControl::Resume) => {
+                let now = Instant::now();
+                self.hb.note_resume(now);
+                let token = self.hb.take_ping_token(now);
+                self.emit(Effect::Send(WsMessage::Ping(token)));
+            }
 
             Event::FromWire(msg) => self.on_wire(msg),
 
