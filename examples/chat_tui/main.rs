@@ -1,3 +1,4 @@
+use anybus::tokio;
 mod chatview;
 use std::{collections::HashMap, net::IpAddr};
 
@@ -269,8 +270,11 @@ impl App {
             }
             Action::ProcessInput => {
                 let lines = self.input.lines();
+
                 let message = lines.join("\n");
                 let message = message.trim();
+                self.input = TextArea::default();
+
                 if message.is_empty() {
                     return None;
                 }
@@ -283,13 +287,17 @@ impl App {
                         "/nick" => {
                             if !argument.is_empty() {
                                 self.nickname = argument.to_string();
-                                self.history
-                                    .content
-                                    .push(format!("* You are now known as {}", self.nickname));
+                                return Some(Action::AddMessage(format!(
+                                    "* You are now known as {}",
+                                    self.nickname
+                                )));
+                                // self.history
+                                //     .content
+                                //     .push();
                             } else {
-                                self.history
-                                    .content
-                                    .push("* Usage: /nick <new_nickname>".to_string());
+                                return Some(Action::AddMessage(
+                                    "* Usage: /nick <new_nickname>".to_string(),
+                                ));
                             }
                         }
                         "/dm" => {
@@ -297,9 +305,9 @@ impl App {
                             let target_nick = arg_parts.next().unwrap_or("");
                             let dm_message = arg_parts.next().unwrap_or("");
                             if target_nick.is_empty() || dm_message.is_empty() {
-                                self.history
-                                    .content
-                                    .push("* Usage: /dm <nickname> <message>".to_string());
+                                return Some(Action::AddMessage(
+                                    "* Usage: /dm <nickname> <message>".to_string(),
+                                ));
                             } else if let Some(target_user) = self.chat_members.get(target_nick) {
                                 let dm = DirectMessage {
                                     from: User {
@@ -311,24 +319,24 @@ impl App {
                                 if self.bus.handle().send_to_uuid(target_user.id, dm).is_err() {
                                     return Action::Quit.into();
                                 };
-                                self.history.content.push(format!(
+                                return Some(Action::AddMessage(format!(
                                     "* (DM to {}): {}",
                                     target_user.nickname, dm_message
-                                ));
+                                )));
                             } else {
-                                self.history
-                                    .content
-                                    .push(format!("* No such user: {}", target_nick));
+                                return Some(Action::AddMessage(format!(
+                                    "* No such user: {}",
+                                    target_nick
+                                )));
                             }
                         }
                         _ => {
-                            self.history
-                                .content
-                                .push(format!("* Unknown command: {}", command));
+                            return Some(Action::AddMessage(format!(
+                                "* Unknown command: {}",
+                                command
+                            )));
                         }
                     }
-                    self.input = TextArea::default();
-                    return None;
                 }
 
                 if self
