@@ -1,4 +1,5 @@
 //! Helper functions:  Currently a platform agnost spawn() for creating tasks and the ctrl-c shutdown helper
+use crate::tokio;
 
 // use tokio_with_wasm::alias as tokio;
 #[cfg(feature = "dioxus")]
@@ -18,7 +19,7 @@ pub fn spawn(fut: impl Future<Output = ()> + 'static) -> Task {
 #[track_caller]
 pub fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
-    F: Future + Send + 'static,
+    F: Future + 'static,
     F::Output: Send + 'static,
 {
     tokio::spawn(future)

@@ -61,9 +61,10 @@ pub(crate) enum ClientMessage {
 pub enum AnyBusStatusMsg {
     /// The bus is shutting down.  Error, ctrl-c or commanded by AnyBus::shutdown()
     ShuttingDown,
-    /// Not implemented yet, will be sent when the bus senses a resume from suspension.  Example: Laptop opening and resuming
+    /// Process or tab is coming back from suspend / background freeze.
+    /// Debounced: duplicate Resuming within a few seconds is dropped.
     Resuming,
-    /// Sent when a suspend is imminent
+    /// Suspend is imminent (OS power event) or the page became hidden (WASM).
     Suspending,
     /// When a network change has been detected
     #[cfg(feature = "remote")]

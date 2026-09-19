@@ -1,10 +1,7 @@
 use crate::tokio;
-
-#[cfg(any(feature = "ws", feature = "ipc"))]
+use crate::tokio::sync::mpsc;
+use crate::tokio::time::Instant;
 use std::time::Duration;
-use tokio::sync::mpsc;
-#[cfg(any(feature = "ws", feature = "ipc"))]
-use tokio::time::Instant;
 
 use crate::{
     Handle, Realm,
@@ -12,7 +9,6 @@ use crate::{
     routing::{ConnectionId, Cost, NodeId, PeerEntry, RealmList, WirePacket},
 };
 
-#[cfg(any(feature = "ws", feature = "ipc"))]
 #[derive(Debug)]
 pub(crate) struct Heartbeat {
     interval: Duration,
@@ -23,7 +19,6 @@ pub(crate) struct Heartbeat {
     next_token: u64,
 }
 
-#[cfg(any(feature = "ws", feature = "ipc"))]
 impl Heartbeat {
     pub(crate) fn new(now: Instant, interval: Duration, timeout: Duration) -> Self {
         Self {
@@ -40,6 +35,11 @@ impl Heartbeat {
         self.last_rx = now;
         self.last_ping = None;
         self.outstanding = None;
+    }
+
+    /// Local clock jumped (suspend/resume). Do not treat the gap as peer silence.
+    pub(crate) fn note_resume(&mut self, now: Instant) {
+        self.on_rx(now);
     }
 
     /// When the driver should next call `Tick`.

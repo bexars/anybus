@@ -1,13 +1,19 @@
-use crate::{AnyBusStatusMsg, Handle, tokio};
+use std::sync::Arc;
+
 use powerwatch::PowerWatch;
+
+use crate::{AnyBusStatusMsg, Handle, tokio};
+
+use super::suspend::{self, LifecycleDebounce};
 
 pub(crate) struct Watcher {
     handle: Handle,
+    debounce: Arc<LifecycleDebounce>,
 }
 
 impl Watcher {
-    pub(crate) fn new(handle: Handle) -> Self {
-        Self { handle }
+    pub(crate) fn new(handle: Handle, debounce: Arc<LifecycleDebounce>) -> Self {
+        Self { handle, debounce }
     }
     pub(crate) fn start(self) {
         tokio::spawn(async move {
@@ -58,7 +64,7 @@ impl Watcher {
                         }
                     };
                     if let Some(msg) = msg {
-                        self.handle.send(msg).ok();
+                        suspend::emit(&self.handle, &self.debounce, msg);
                     }
                 }
                 status = status_rx.recv() => {

@@ -71,7 +71,11 @@ Uses Dioxus’s `spawn` instead of Tokio’s. Does **not** enable `serde` or `re
 ## `resume_watch`
 
 Uses power monitoring software to listen to the OS's message bus for suspend/resume/shutdown notifications.
-Only supported on Windows, Mac and Linux
+Only supported on Windows, Mac and Linux.
+
+AnyBus always runs a stall detector as well (clock jump after freeze). WASM uses `visibilitychange`.
+`Suspending` / `Resuming` are debounced so OS + stall + page events do not emit duplicates within 3s.
+WebSocket and IPC reset heartbeats and reconnect on `Resuming`.
 
 ## Message types
 

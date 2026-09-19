@@ -651,6 +651,21 @@ impl State for Listen {
             status = state.anybus_status.recv() => {
                 match status {
                     Ok(AnyBusStatusMsg::ShuttingDown) => b(SoftShutdown {}),
+                    Ok(AnyBusStatusMsg::Resuming) => {
+                        let senders: Vec<_> = state
+                            .peers
+                            .read()
+                            .await
+                            .iter()
+                            .map(|(_, tx, _)| tx.clone())
+                            .collect();
+                        for tx in senders {
+                            tx.try_send(IpcControl::Resume).ok();
+                        }
+                        b(Listen {
+                            shutdown: self.shutdown || state.shutting_down,
+                        })
+                    }
                     Err(_) => b(Shutdown {}),
                     _ => b(Listen {
                         shutdown: self.shutdown || state.shutting_down,
