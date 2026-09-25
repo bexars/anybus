@@ -45,7 +45,7 @@ pub use peers::dummy::{DummyPeerKill, DummyPeerStop};
 pub use peers::ws::WsListenerOptions;
 #[cfg(feature = "ws")]
 pub use peers::ws::WsRemoteOptions;
-pub use receivers::RpcReceiver;
+pub use receivers::{AnycastRpcReceiver, RpcReceiver};
 pub use receivers::rpc_receiver::RpcRequest;
 pub use receivers::{AnycastReceiver, Receiver};
 pub use routing::Realm;

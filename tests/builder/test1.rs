@@ -29,11 +29,6 @@ fn main() {
         .register::<NumberMessage>();
     handle
         .listener()
-        .anycast()
-        .rpc()
-        .register::<NumberMessage>();
-    handle
-        .listener()
         .rpc()
         .anycast()
         .register::<NumberMessage>();

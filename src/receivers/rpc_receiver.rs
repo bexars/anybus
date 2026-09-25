@@ -6,7 +6,7 @@ use crate::{
     BusDeserialize, BusRiderRpc, Handle, ReceiveError,
     errors::AnyBusHandleError,
     messages::ClientMessage,
-    receivers::packet_receiver::PacketReceiver,
+    receivers::{anycast_cost::AnycastCost, packet_receiver::PacketReceiver},
     routing::{Address, EndpointId},
 };
 
@@ -32,17 +32,55 @@ impl<T: crate::BusRiderRpc + BusDeserialize> RpcReceiver<T> {
     /// Receives the next packet sent to this endpoint.
 
     pub async fn recv(&mut self) -> Result<RpcRequest<T>, crate::errors::ReceiveError> {
-        let packet = self.packet_receiver.recv().await?;
-        let reply_to = packet.reply_to.ok_or(ReceiveError::RpcNoReplyTo)?;
-        let payload = packet
-            .payload
-            .reveal()
-            .map_err(|p| ReceiveError::DeserializationError(p))?;
-        let handle = self.packet_receiver.handle.clone();
-        let rpc_request = RpcRequest::new(reply_to, payload, handle);
-
-        Ok(rpc_request)
+        recv_rpc(&mut self.packet_receiver).await
     }
+}
+
+/// An anycast RPC listener. Several may share an endpoint, and [`Self::set_cost`]
+/// changes which one receives the next request.
+#[derive(Debug)]
+pub struct AnycastRpcReceiver<T: BusRiderRpc> {
+    packet_receiver: PacketReceiver,
+    cost: AnycastCost,
+    _pd: std::marker::PhantomData<T>,
+}
+
+impl<T: BusRiderRpc + BusDeserialize> AnycastRpcReceiver<T> {
+    pub(crate) fn new(
+        endpoint_id: EndpointId,
+        rx: mpsc::Receiver<ClientMessage>,
+        sender: mpsc::Sender<ClientMessage>,
+        handle: Handle,
+    ) -> Self {
+        Self {
+            packet_receiver: PacketReceiver::new(endpoint_id, rx, handle.clone()),
+            cost: AnycastCost::new(endpoint_id, sender, handle),
+            _pd: std::marker::PhantomData,
+        }
+    }
+
+    /// Receives the next RPC request sent to this endpoint.
+    pub async fn recv(&mut self) -> Result<RpcRequest<T>, ReceiveError> {
+        recv_rpc(&mut self.packet_receiver).await
+    }
+
+    /// Set this listener's cost. Completes when the route table records it.
+    pub async fn set_cost(&self, cost: u16) -> Result<(), AnyBusHandleError> {
+        self.cost.set_cost(cost).await
+    }
+}
+
+async fn recv_rpc<T: BusRiderRpc + BusDeserialize>(
+    packet_receiver: &mut PacketReceiver,
+) -> Result<RpcRequest<T>, ReceiveError> {
+    let packet = packet_receiver.recv().await?;
+    let reply_to = packet.reply_to.ok_or(ReceiveError::RpcNoReplyTo)?;
+    let payload = packet
+        .payload
+        .reveal()
+        .map_err(|p| ReceiveError::DeserializationError(p))?;
+    let handle = packet_receiver.handle.clone();
+    Ok(RpcRequest::new(reply_to, payload, handle))
 }
 
 /// An RpcRequest is returned by an RpcReceiver when an RPC message is received.  It contains the payload
