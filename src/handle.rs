@@ -168,53 +168,105 @@ impl Handle {
         Ok(Receiver::new(endpoint_id, rx, self.clone()))
     }
 
-    /// Register a RPC service with the broker.
+    /// Register a unicast RPC service with the broker.
     pub async fn register_rpc<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
         &self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
         let endpoint_id = T::ANYBUS_UUID.into();
-        self.register_rpc_inner(endpoint_id).await
+        let (endpoint_id, rx, _sender) = self
+            .register_rpc_channel(
+                endpoint_id,
+                crate::routing::RouteKind::Unicast,
+                Realm::default(),
+                0,
+            )
+            .await?;
+        Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
     }
 
-    /// Register a RPC service with the given Uuid as the endpoint
+    /// Register a unicast RPC service with the given Uuid as the endpoint.
     pub async fn register_rpc_uuid<T: BusRiderRpc + BusDeserialize>(
         &self,
         endpoint_id: impl Into<EndpointId>,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
-        let endpoint_id = endpoint_id.into();
-        self.register_rpc_inner(endpoint_id).await
+        let (endpoint_id, rx, _sender) = self
+            .register_rpc_channel(
+                endpoint_id.into(),
+                crate::routing::RouteKind::Unicast,
+                Realm::default(),
+                0,
+            )
+            .await?;
+        Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
     }
 
-    async fn register_rpc_inner<T: BusRiderRpc + BusDeserialize>(
+    /// Register an anycast RPC service. Several listeners may share the endpoint.
+    pub async fn register_anycast_rpc<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
+        &self,
+    ) -> Result<crate::AnycastRpcReceiver<T>, ReceiveError> {
+        self.register_anycast_rpc_inner::<T>(T::ANYBUS_UUID.into(), Realm::default(), 0)
+            .await
+    }
+
+    /// Register an anycast RPC service on the given endpoint.
+    pub async fn register_anycast_rpc_uuid<T: BusRiderRpc + BusDeserialize>(
+        &self,
+        endpoint_id: impl Into<EndpointId>,
+    ) -> Result<crate::AnycastRpcReceiver<T>, ReceiveError> {
+        self.register_anycast_rpc_inner::<T>(endpoint_id.into(), Realm::default(), 0)
+            .await
+    }
+
+    async fn register_anycast_rpc_inner<T: BusRiderRpc + BusDeserialize>(
         &self,
         endpoint_id: EndpointId,
-    ) -> Result<RpcReceiver<T>, ReceiveError> {
+        realm: Realm,
+        cost: u16,
+    ) -> Result<crate::AnycastRpcReceiver<T>, ReceiveError> {
+        let (endpoint_id, rx, sender) = self
+            .register_rpc_channel(endpoint_id, crate::routing::RouteKind::Anycast, realm, cost)
+            .await?;
+        Ok(crate::AnycastRpcReceiver::<T>::new(
+            endpoint_id,
+            rx,
+            sender,
+            self.clone(),
+        ))
+    }
+
+    async fn register_rpc_channel(
+        &self,
+        endpoint_id: EndpointId,
+        kind: crate::routing::RouteKind,
+        realm: Realm,
+        cost: u16,
+    ) -> Result<
+        (
+            EndpointId,
+            tokio::sync::mpsc::Receiver<crate::messages::ClientMessage>,
+            tokio::sync::mpsc::Sender<crate::messages::ClientMessage>,
+        ),
+        ReceiveError,
+    > {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-
-        // let mut receiver = Receiver::<T>::new(endpoint_id, rx, self.clone());
-
         let route = Route {
-            kind: crate::routing::RouteKind::Unicast,
-            realm: Realm::default(),
+            kind,
+            realm,
             _via: crate::routing::ForwardTo::Local(tx.clone()),
-            cost: 0.into(),
+            cost: cost.into(),
             #[cfg(feature = "remote")]
             _learned_from: 0.into(),
         };
-
         let ei = (&route).into();
         let request = RegistrationRequest {
             endpoint_id,
             endpoint_info: ei,
-            sender: tx,
+            sender: tx.clone(),
         };
-        let register_msg = RouterMsg::RegisterEndpoint(request);
-
-        info!("Send register_msg {:?}", register_msg);
-
-        self.tx.send(register_msg).await?;
+        info!("Send register_msg {:?}", request.endpoint_id);
+        self.tx.send(RouterMsg::RegisterEndpoint(request)).await?;
         self.wait_for_registration(&mut rx, endpoint_id).await?;
-        Ok(RpcReceiver::new(endpoint_id, rx, self.clone()))
+        Ok((endpoint_id, rx, tx))
     }
 
     /// Broadcast registration, all receivers will get a copy of the message
@@ -619,6 +671,20 @@ impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
     }
 }
 
+impl<EP> RegistrationBuilder<EP, AnycastSet, NoRpc> {
+    /// Continue this anycast registration as an RPC service.
+    pub fn rpc(self) -> RegistrationBuilder<EP, AnycastSet, RpcSet> {
+        RegistrationBuilder {
+            endpoint_id: self.endpoint_id,
+            realm: self.realm,
+            cast: AnycastSet,
+            rpc_flag: RpcSet,
+            handle: self.handle,
+            cost: self.cost,
+        }
+    }
+}
+
 impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
     pub fn rpc(self) -> RegistrationBuilder<EP, NoCast, RpcSet> {
         RegistrationBuilder {
@@ -677,23 +743,42 @@ impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
     }
 }
 
-impl<CAST> RegistrationBuilder<NoEndpointId, CAST, RpcSet> {
+impl RegistrationBuilder<NoEndpointId, NoCast, RpcSet> {
     /// Finalize the registration and get a [RpcReceiver] for the messages.
     pub async fn register<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
         self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
-        let ep = T::ANYBUS_UUID.into();
-        self.handle.register_rpc_inner::<T>(ep).await
+        self.handle.register_rpc::<T>().await
     }
 }
 
-impl<CAST> RegistrationBuilder<EndpointSet, CAST, RpcSet> {
+impl RegistrationBuilder<EndpointSet, NoCast, RpcSet> {
     /// Finalize the registration and get a [RpcReceiver] for the messages
     pub async fn register<T: BusRiderRpc + BusDeserialize>(
         self,
     ) -> Result<RpcReceiver<T>, ReceiveError> {
+        self.handle.register_rpc_uuid::<T>(self.endpoint_id.0).await
+    }
+}
+
+impl RegistrationBuilder<NoEndpointId, AnycastSet, RpcSet> {
+    /// Finalize the registration and get an [`AnycastRpcReceiver`] for the messages.
+    pub async fn register<T: BusRiderRpc + BusDeserialize + BusRiderWithUuid>(
+        self,
+    ) -> Result<crate::AnycastRpcReceiver<T>, ReceiveError> {
         self.handle
-            .register_rpc_inner::<T>(self.endpoint_id.0.into())
+            .register_anycast_rpc_inner::<T>(T::ANYBUS_UUID.into(), self.realm, self.cost)
+            .await
+    }
+}
+
+impl RegistrationBuilder<EndpointSet, AnycastSet, RpcSet> {
+    /// Finalize the registration and get an [`AnycastRpcReceiver`] for the messages.
+    pub async fn register<T: BusRiderRpc + BusDeserialize>(
+        self,
+    ) -> Result<crate::AnycastRpcReceiver<T>, ReceiveError> {
+        self.handle
+            .register_anycast_rpc_inner::<T>(self.endpoint_id.0.into(), self.realm, self.cost)
             .await
     }
 }

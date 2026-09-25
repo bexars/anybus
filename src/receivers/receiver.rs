@@ -3,11 +3,9 @@ use futures::Stream;
 use tokio::sync::mpsc::{self};
 
 use crate::{
-    BusDeserialize, BusRider, Handle, ReceiveError,
-    errors::AnyBusHandleError,
-    messages::{ClientMessage, RouterMsg, SetAnycastCostError},
-    receivers::packet_receiver::PacketReceiver,
-    routing::EndpointId,
+    BusDeserialize, BusRider, Handle, ReceiveError, errors::AnyBusHandleError,
+    messages::ClientMessage, receivers::anycast_cost::AnycastCost,
+    receivers::packet_receiver::PacketReceiver, routing::EndpointId,
 };
 
 /// A Receiver receives messages sent to the registered endpoint.
@@ -77,9 +75,7 @@ impl<T: BusRider + BusDeserialize + Unpin> Stream for Receiver<T> {
 #[derive(Debug)]
 pub struct AnycastReceiver<T: BusRider> {
     receiver: Receiver<T>,
-    endpoint_id: EndpointId,
-    sender: mpsc::Sender<ClientMessage>,
-    handle: Handle,
+    cost: AnycastCost,
 }
 
 impl<T: BusRider> AnycastReceiver<T> {
@@ -91,33 +87,13 @@ impl<T: BusRider> AnycastReceiver<T> {
     ) -> Self {
         Self {
             receiver,
-            endpoint_id,
-            sender,
-            handle,
+            cost: AnycastCost::new(endpoint_id, sender, handle),
         }
     }
 
     /// Set this listener's cost. Completes when the route table records it.
     pub async fn set_cost(&self, cost: u16) -> Result<(), AnyBusHandleError> {
-        let (reply, result) = tokio::sync::oneshot::channel();
-        self.handle
-            .tx
-            .send(RouterMsg::SetAnycastCost {
-                endpoint_id: self.endpoint_id,
-                sender: self.sender.clone(),
-                cost,
-                reply,
-            })
-            .await
-            .map_err(|_| AnyBusHandleError::Shutdown)?;
-        match result.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(SetAnycastCostError::NotAnycast)) => Err(AnyBusHandleError::NotAnycast),
-            Ok(Err(SetAnycastCostError::NotRegistered)) => {
-                Err(AnyBusHandleError::ListenerNotRegistered)
-            }
-            Err(_) => Err(AnyBusHandleError::Shutdown),
-        }
+        self.cost.set_cost(cost).await
     }
 }
 
