@@ -66,25 +66,14 @@ impl ForwardingTable {
                 FibForwardTo::Local(sender) => {
                     sender
                         .try_send(ClientMessage::Message(packet.into()))
-                        .map_err(|e| {
-                            let ClientMessage::Message(p) = e.into_inner() else {
-                                unreachable!()
-                            };
-                            SendError::NoRoute(Some(p.payload))
-                        })?;
+                        .map_err(SendError::from)?;
                 }
                 #[cfg(feature = "remote")]
                 FibForwardTo::Remote(next_hop) => {
                     next_hop
                         .tx
-                        .try_send(crate::messages::NodeMessage::WirePacket(packet.into()))
-                        .map_err(|e| {
-                            let NodeMessage::WirePacket(wp) = e.into_inner().into() else {
-                                unreachable!()
-                            };
-                            let payload = Payload::from(wp.payload);
-                            SendError::NoRoute(Some(payload))
-                        })?;
+                        .try_send(NodeMessage::WirePacket(packet.into()))
+                        .map_err(send_error_from_node)?;
                 }
             },
             FibEntry::MultiCast(fib_forward_tos) => {
@@ -92,18 +81,24 @@ impl ForwardingTable {
                     match fib_forward {
                         FibForwardTo::Local(sender) => {
                             let packet = packet.clone();
-                            sender.try_send(ClientMessage::Message(packet.into())).ok();
-                            // .map_err(|e| SendError::SendFailed(e.to_string()))?;
+                            if let Err(err) = sender.try_send(ClientMessage::Message(packet.into()))
+                            {
+                                tracing::warn!(
+                                    "Broadcast to local listener for {endpoint_id} failed: {err}"
+                                );
+                            }
                         }
                         #[cfg(feature = "remote")]
                         FibForwardTo::Remote(next_hop) => {
-                            next_hop
+                            if let Err(err) = next_hop
                                 .tx
-                                .try_send(crate::messages::NodeMessage::WirePacket(
-                                    packet.clone().into(),
-                                ))
-                                .ok();
-                            // .map_err(|e| SendError::SendFailed(e.to_string()))?;
+                                .try_send(NodeMessage::WirePacket(packet.clone().into()))
+                            {
+                                tracing::warn!(
+                                    "Broadcast to {} for {endpoint_id} failed: {err}",
+                                    next_hop.peer_id
+                                );
+                            }
                         }
                     }
                 }
@@ -341,5 +336,26 @@ impl FibEntry {
             FibForwardTo::Remote(link) => Some(link),
             _ => None,
         })
+    }
+}
+
+#[cfg(feature = "remote")]
+fn send_error_from_node(
+    err: crate::tokio::sync::mpsc::error::TrySendError<NodeMessage>,
+) -> SendError {
+    use crate::tokio::sync::mpsc::error::TrySendError;
+
+    let (full, message) = match err {
+        TrySendError::Full(message) => (true, message),
+        TrySendError::Closed(message) => (false, message),
+    };
+    let payload = match message {
+        NodeMessage::WirePacket(packet) => Some(Payload::from(packet.payload)),
+        _ => None,
+    };
+    if full {
+        SendError::Full(payload)
+    } else {
+        SendError::Closed(payload)
     }
 }
