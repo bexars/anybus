@@ -1,12 +1,11 @@
 #![cfg(feature = "ipc")]
 
 mod common;
+use anybus::tokio;
 use anybus::{AnyBusBuilder, spawn};
 
 use crate::common::NumberMessage;
 
-
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_two_buses() {
     // tracing_subscriber::fmt::init();
@@ -123,7 +122,6 @@ async fn test_rpc_two_busses() {
 
 /// This test verifies that anycast messages are delivered to local listeners first,
 /// and if no local listeners are available, they are sent to remote listeners after the local ones are dropped.
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_anycast_two_busses_local_then_remote() {
     use tokio::time;
