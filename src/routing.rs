@@ -503,7 +503,7 @@ impl std::ops::Add<u16> for Cost {
 
 impl std::ops::AddAssign<u16> for Cost {
     fn add_assign(&mut self, rhs: u16) {
-        self.0 += rhs;
+        self.0 = self.0.saturating_add(rhs);
     }
 }
 
