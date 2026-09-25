@@ -172,6 +172,18 @@ impl RouteTable {
         if route_entry.kind != info.kind {
             return Err(RouteTableError::MismatchedRouteKind);
         }
+        if let Some(existing) = route_entry
+            .routes
+            .iter_mut()
+            .find(|r| matches!(r.via, LsForwardTo::Remote(node_id) if node_id == origin))
+        {
+            if existing.cost != info.cost || existing.realm != info.realm {
+                existing.cost = info.cost;
+                existing.realm = info.realm;
+                return Ok(Effects::RebuildFib);
+            }
+            return Ok(Effects::Noop);
+        }
         if route_entry.kind == RouteKind::Unicast && !route_entry.routes.is_empty() {
             return Err(RouteTableError::DuplicateUnicast);
         }
