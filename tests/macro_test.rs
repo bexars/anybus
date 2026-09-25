@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod macro_test {
     use anybus::anybus_rpc;
-
+    use anybus::tokio;
     use anybus::{AnyBus, BusRiderWithUuid};
     use serde::Serialize;
     use uuid::Uuid;

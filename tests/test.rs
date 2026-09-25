@@ -1,7 +1,7 @@
 mod common;
 use anybus::BusRiderRpc;
-
 use anybus::bus_uuid;
+use anybus::tokio;
 use serde::{Deserialize, Serialize};
 use tokio::join;
 // use std::time::Duration;
@@ -35,7 +35,6 @@ struct RpcResponse {
     pub value: i32,
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_message_sending() {
     let mb1 = anybus::AnyBus::new();
@@ -47,7 +46,6 @@ async fn test_unicast_local_message_sending() {
     assert_eq!(msg.value, 100);
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 #[should_panic]
 
@@ -62,7 +60,6 @@ async fn test_unicast_local_one_registration_allowed() {
     assert_eq!(msg.value, 100);
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_two_handles() {
     let mb1 = anybus::AnyBus::new();
@@ -71,7 +68,6 @@ async fn test_unicast_local_two_handles() {
     let _handle2 = mb1.handle().clone();
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_unicast_local_two_message_types_one_handle() {
     let mb1 = anybus::AnyBus::new();
@@ -93,7 +89,6 @@ async fn test_unicast_local_two_message_types_one_handle() {
     assert_eq!(msg.value, "Hello World");
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_anycast_local_two_registration_allowed() {
     use tokio::select;
@@ -113,7 +108,6 @@ async fn test_anycast_local_two_registration_allowed() {
     assert_eq!(msg.value, 100);
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn test_rpc_local() {
     // tracing_subscriber::fmt::init();
@@ -142,7 +136,7 @@ async fn test_rpc_local() {
     let handle2 = mb1.handle().clone();
     let response = tokio::spawn(async move {
         let handle2 = handle2.clone();
-    
+
         let res = handle2.rpc_once(RpcMessage { value: 5 }).await.unwrap();
         res
     });
