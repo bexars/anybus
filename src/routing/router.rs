@@ -20,7 +20,7 @@ use tokio::{
 use tracing::{info, trace};
 
 use crate::{
-    messages::{ClientMessage, RouterMsg},
+    messages::{ClientMessage, RouterMsg, SetAnycastCostError, SetAnycastCostOutcome},
     routing::NodeId,
 };
 
@@ -167,6 +167,53 @@ impl State {
                         Some(Listen)
                     }
 
+                    RouterMsg::SetAnycastCost {
+                        endpoint_id,
+                        sender,
+                        cost,
+                        reply,
+                    } => {
+                        match router
+                            .lsdb
+                            .set_anycast_cost(endpoint_id, &sender, cost.into())
+                        {
+                            Ok(SetAnycastCostOutcome::Unchanged) => {
+                                reply.send(Ok(())).ok();
+                                Some(Listen)
+                            }
+                            Ok(SetAnycastCostOutcome::Changed {
+                                previous,
+                                new,
+                                advertise,
+                            }) => {
+                                info!(
+                                    "anycast cost for {endpoint_id} changed from {previous:?} to {new:?}"
+                                );
+                                reply.send(Ok(())).ok();
+                                #[cfg(feature = "remote")]
+                                if let Some(min_cost) = advertise {
+                                    router.lsdb.update_endpoint_cost(endpoint_id, min_cost);
+                                }
+                                #[cfg(not(feature = "remote"))]
+                                let _ = advertise;
+                                Some(RouteChange { notify: None })
+                            }
+                            Err(SetAnycastCostError::NotAnycast) => {
+                                tracing::warn!(
+                                    "rejected anycast cost change for non-anycast endpoint {endpoint_id}"
+                                );
+                                reply.send(Err(SetAnycastCostError::NotAnycast)).ok();
+                                Some(Listen)
+                            }
+                            Err(SetAnycastCostError::NotRegistered) => {
+                                tracing::warn!(
+                                    "rejected anycast cost change for missing listener on {endpoint_id}"
+                                );
+                                reply.send(Err(SetAnycastCostError::NotRegistered)).ok();
+                                Some(Listen)
+                            }
+                        }
+                    }
                     RouterMsg::Shutdown => {
                         info!("Router shutting down");
                         return Some(Shutdown);

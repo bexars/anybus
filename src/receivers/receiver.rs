@@ -3,8 +3,11 @@ use futures::Stream;
 use tokio::sync::mpsc::{self};
 
 use crate::{
-    BusDeserialize, BusRider, ReceiveError, messages::ClientMessage,
-    receivers::packet_receiver::PacketReceiver, routing::EndpointId,
+    BusDeserialize, BusRider, Handle, ReceiveError,
+    errors::AnyBusHandleError,
+    messages::{ClientMessage, RouterMsg, SetAnycastCostError},
+    receivers::packet_receiver::PacketReceiver,
+    routing::EndpointId,
 };
 
 /// A Receiver receives messages sent to the registered endpoint.
@@ -67,5 +70,76 @@ impl<T: BusRider + BusDeserialize + Unpin> Stream for Receiver<T> {
             Some(ClientMessage::SuccessfulRegistration(_)) => std::task::Poll::Pending,
             None => std::task::Poll::Ready(None),
         }
+    }
+}
+
+/// An anycast [`Receiver`] whose registration cost can be changed.
+#[derive(Debug)]
+pub struct AnycastReceiver<T: BusRider> {
+    receiver: Receiver<T>,
+    endpoint_id: EndpointId,
+    sender: mpsc::Sender<ClientMessage>,
+    handle: Handle,
+}
+
+impl<T: BusRider> AnycastReceiver<T> {
+    pub(crate) fn new(
+        receiver: Receiver<T>,
+        endpoint_id: EndpointId,
+        sender: mpsc::Sender<ClientMessage>,
+        handle: Handle,
+    ) -> Self {
+        Self {
+            receiver,
+            endpoint_id,
+            sender,
+            handle,
+        }
+    }
+
+    /// Set this listener's cost. Completes when the route table records it.
+    pub async fn set_cost(&self, cost: u16) -> Result<(), AnyBusHandleError> {
+        let (reply, result) = tokio::sync::oneshot::channel();
+        self.handle
+            .tx
+            .send(RouterMsg::SetAnycastCost {
+                endpoint_id: self.endpoint_id,
+                sender: self.sender.clone(),
+                cost,
+                reply,
+            })
+            .await
+            .map_err(|_| AnyBusHandleError::Shutdown)?;
+        match result.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(SetAnycastCostError::NotAnycast)) => Err(AnyBusHandleError::NotAnycast),
+            Ok(Err(SetAnycastCostError::NotRegistered)) => {
+                Err(AnyBusHandleError::ListenerNotRegistered)
+            }
+            Err(_) => Err(AnyBusHandleError::Shutdown),
+        }
+    }
+}
+
+impl<T: BusRider + BusDeserialize> AnycastReceiver<T> {
+    /// Receives the next packet sent to this endpoint.
+    pub async fn recv(&mut self) -> Result<T, ReceiveError> {
+        self.receiver.recv().await
+    }
+
+    /// Polls for an available packet. `None` means no message is waiting.
+    pub fn try_recv(&mut self) -> Option<Result<T, ReceiveError>> {
+        self.receiver.try_recv()
+    }
+}
+
+impl<T: BusRider + BusDeserialize + Unpin> Stream for AnycastReceiver<T> {
+    type Item = T;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.get_mut().receiver).poll_next(cx)
     }
 }

@@ -57,3 +57,92 @@ async fn dummy_link_rpc_round_trip() {
     server.shutdown(None);
     client.shutdown(None);
 }
+
+/// Raising an anycast listener's cost moves the next message to the other bus.
+#[tokio::test]
+async fn dummy_link_anycast_set_cost() {
+    let mut hub = AnyBus::new();
+    let mut left = AnyBus::new();
+    let mut right = AnyBus::new();
+    hub.run();
+    left.run();
+    right.run();
+
+    let (hub_left, left_end) = duplex(8 * 1024);
+    let (hub_right, right_end) = duplex(8 * 1024);
+    let _hub_left_link = hub.new_dummy_peer(hub_left);
+    let _left_link = left.new_dummy_peer(left_end);
+    let _hub_right_link = hub.new_dummy_peer(hub_right);
+    let _right_link = right.new_dummy_peer(right_end);
+
+    let mut left_listener = left
+        .handle()
+        .clone()
+        .listener()
+        .cost(1)
+        .anycast()
+        .register::<common::NumberMessage>()
+        .await
+        .unwrap();
+    let mut right_listener = right
+        .handle()
+        .clone()
+        .listener()
+        .cost(10)
+        .anycast()
+        .register::<common::NumberMessage>()
+        .await
+        .unwrap();
+
+    let hub_handle = hub.handle().clone();
+    let first = timeout(Duration::from_secs(3), async {
+        loop {
+            if hub_handle.send(common::NumberMessage { value: 1 }).is_err() {
+                sleep(Duration::from_millis(20)).await;
+                continue;
+            }
+            tokio::select! {
+                message = left_listener.recv() => {
+                    assert_eq!(message.unwrap().value, 1);
+                    return "left";
+                }
+                message = right_listener.recv() => {
+                    assert_eq!(message.unwrap().value, 1);
+                    return "right";
+                }
+                _ = sleep(Duration::from_millis(50)) => {}
+            }
+        }
+    })
+    .await
+    .expect("first anycast delivery");
+    assert_eq!(first, "left");
+
+    left_listener.set_cost(100).await.unwrap();
+
+    let second = timeout(Duration::from_secs(3), async {
+        loop {
+            if hub_handle.send(common::NumberMessage { value: 2 }).is_err() {
+                sleep(Duration::from_millis(20)).await;
+                continue;
+            }
+            tokio::select! {
+                message = left_listener.recv() => {
+                    let _ = message.unwrap();
+                }
+                message = right_listener.recv() => {
+                    assert_eq!(message.unwrap().value, 2);
+                    return "right";
+                }
+                _ = sleep(Duration::from_millis(50)) => {}
+            }
+        }
+    })
+    .await
+    .expect("anycast delivery after set_cost");
+    assert_eq!(second, "right");
+
+    hub.shutdown(None);
+    left.shutdown(None);
+    right.shutdown(None);
+}

@@ -1,3 +1,5 @@
+use crate::tokio::sync::{mpsc::Sender, oneshot};
+
 use crate::routing::RegistrationRequest;
 #[cfg(feature = "remote")]
 use serde::{Deserialize, Serialize};
@@ -33,7 +35,29 @@ pub(crate) enum RouterMsg {
         key: LsaKey,
         seq: u64,
     },
+    SetAnycastCost {
+        endpoint_id: EndpointId,
+        sender: Sender<ClientMessage>,
+        cost: u16,
+        reply: oneshot::Sender<Result<(), SetAnycastCostError>>,
+    },
     Shutdown,
+}
+
+#[derive(Debug)]
+pub(crate) enum SetAnycastCostError {
+    NotAnycast,
+    NotRegistered,
+}
+
+#[derive(Debug)]
+pub(crate) enum SetAnycastCostOutcome {
+    Unchanged,
+    Changed {
+        previous: crate::routing::Cost,
+        new: crate::routing::Cost,
+        advertise: Option<crate::routing::Cost>,
+    },
 }
 
 #[derive(Debug)]

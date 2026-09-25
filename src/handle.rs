@@ -70,7 +70,7 @@ impl Handle {
     /// be used to deliver the message.
     pub async fn register_anycast<T: BusRiderWithUuid + BusDeserialize>(
         &self,
-    ) -> Result<Receiver<T>, ReceiveError> {
+    ) -> Result<crate::AnycastReceiver<T>, ReceiveError> {
         self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global, 0)
             .await
     }
@@ -79,7 +79,7 @@ impl Handle {
     pub async fn register_anycast_uuid<T: BusRider + BusDeserialize>(
         &self,
         endpoint_id: impl Into<EndpointId>,
-    ) -> Result<Receiver<T>, ReceiveError> {
+    ) -> Result<crate::AnycastReceiver<T>, ReceiveError> {
         self.register_anycast_inner(endpoint_id.into(), Realm::Global, 0)
             .await
     }
@@ -90,7 +90,7 @@ impl Handle {
         endpoint_id: EndpointId,
         realm: Realm,
         cost: u16,
-    ) -> Result<Receiver<T>, ReceiveError> {
+    ) -> Result<crate::AnycastReceiver<T>, ReceiveError> {
         // let endpoint_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
@@ -107,16 +107,17 @@ impl Handle {
         let request = RegistrationRequest {
             endpoint_id,
             endpoint_info: ei,
-            sender: tx,
+            sender: tx.clone(),
         };
         let register_msg = RouterMsg::RegisterEndpoint(request);
         info!("About to send register_msg");
         self.tx.send(register_msg).await?;
         info!("Sent register_msg");
         self.wait_for_registration(&mut rx, endpoint_id).await?;
-        return Ok(crate::receivers::Receiver::new(
+        return Ok(crate::AnycastReceiver::new(
+            crate::receivers::Receiver::new(endpoint_id, rx, self.clone()),
             endpoint_id,
-            rx,
+            tx,
             self.clone(),
         ));
     }
@@ -543,6 +544,7 @@ pub struct NoEndpointId;
 pub struct NoCast;
 pub struct EndpointSet(EndpointId);
 pub struct CastSet(crate::routing::RouteKind);
+pub struct AnycastSet;
 pub struct NoRpc;
 pub struct RpcSet;
 
@@ -582,11 +584,11 @@ impl<EP, CAST, RPC> RegistrationBuilder<EP, CAST, RPC> {
     }
 }
 impl<EP, RPC> RegistrationBuilder<EP, NoCast, RPC> {
-    pub fn anycast(self) -> RegistrationBuilder<EP, CastSet, RPC> {
+    pub fn anycast(self) -> RegistrationBuilder<EP, AnycastSet, RPC> {
         RegistrationBuilder {
             endpoint_id: self.endpoint_id,
             realm: self.realm,
-            cast: CastSet(crate::routing::RouteKind::Anycast),
+            cast: AnycastSet,
             rpc_flag: self.rpc_flag,
             handle: self.handle,
             cost: self.cost,
@@ -630,14 +632,34 @@ impl<EP> RegistrationBuilder<EP, NoCast, NoRpc> {
     }
 }
 
+impl RegistrationBuilder<EndpointSet, AnycastSet, NoRpc> {
+    /// Finalize the registration and get an [`AnycastReceiver`] for the messages.
+    pub async fn register<T: BusRider + BusDeserialize>(
+        self,
+    ) -> Result<crate::AnycastReceiver<T>, ReceiveError> {
+        self.handle
+            .register_anycast_inner::<T>(self.endpoint_id.0.into(), self.realm, self.cost)
+            .await
+    }
+}
+
+impl RegistrationBuilder<NoEndpointId, AnycastSet, NoRpc> {
+    /// Finalize the registration and get an [`AnycastReceiver`] for the messages.
+    pub async fn register<T: BusRider + BusDeserialize + BusRiderWithUuid>(
+        self,
+    ) -> Result<crate::AnycastReceiver<T>, ReceiveError> {
+        self.handle
+            .register_anycast_inner::<T>(T::ANYBUS_UUID.into(), self.realm, self.cost)
+            .await
+    }
+}
+
 impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
     /// Finalize the registration and get a [Receiver] for the messages
     pub async fn register<T: BusRider + BusDeserialize>(self) -> Result<Receiver<T>, ReceiveError> {
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
-                self.handle
-                    .register_anycast_inner::<T>(self.endpoint_id.0.into(), self.realm, self.cost)
-                    .await
+                unreachable!("anycast registration uses AnycastSet");
             }
             crate::routing::RouteKind::Unicast => {
                 self.handle
@@ -685,9 +707,7 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
         let _config = self.create_config(&self, ep);
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
-                self.handle
-                    .register_anycast_inner::<T>(ep, self.realm, self.cost)
-                    .await
+                unreachable!("anycast registration uses AnycastSet");
             }
             crate::routing::RouteKind::Unicast => {
                 self.handle
