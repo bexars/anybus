@@ -20,7 +20,7 @@ use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use crate::{
     EndpointId,
-    messages::ClientMessage,
+    messages::{ClientMessage, SetAnycastCostError},
     routing::{
         NodeId,
         linkstate::{EndpointInfo, LsaKey, LsaRecord, db::route_table::RouteTable},
@@ -736,7 +736,7 @@ impl LsDb {
         }
     }
     #[cfg(feature = "remote")]
-    fn update_endpoint_cost(&mut self, endpoint_id: EndpointId, cost: Cost) {
+    pub(crate) fn update_endpoint_cost(&mut self, endpoint_id: EndpointId, cost: Cost) {
         let key = LsaKey {
             origin: self.self_id,
             endpoint_id: endpoint_id.0,
@@ -760,6 +760,15 @@ impl LsDb {
         let lsa = record.lsa.clone();
         self.flood_all_neighbors(lsa, None);
         self.request_rebuild();
+    }
+
+    pub(crate) fn set_anycast_cost(
+        &mut self,
+        endpoint_id: EndpointId,
+        sender: &crate::tokio::sync::mpsc::Sender<ClientMessage>,
+        cost: crate::routing::Cost,
+    ) -> Result<crate::messages::SetAnycastCostOutcome, SetAnycastCostError> {
+        self.routes.set_anycast_cost(endpoint_id, sender, cost)
     }
 
     pub(crate) fn remove_endpoint(&mut self, endpoint_id: EndpointId) {

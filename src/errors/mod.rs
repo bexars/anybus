@@ -73,6 +73,12 @@ pub enum AnyBusHandleError {
     /// Error in the receive calls
     #[error("Error in the RPC response: {0}")]
     ReceiveError(#[source] ReceiveError),
+    /// Cost was set on a listener that is not anycast.
+    #[error("Cost can only be changed on an anycast listener")]
+    NotAnycast,
+    /// The anycast listener is no longer registered.
+    #[error("Anycast listener is not registered")]
+    ListenerNotRegistered,
 }
 
 #[derive(Error, Debug)]

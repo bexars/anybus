@@ -7,7 +7,7 @@ use crate::routing::linkstate::db::route_table::RouteTableError::MismatchedRoute
 use crate::routing::{Cost, RouteKind, linkstate::LsRoute};
 use crate::{
     EndpointId,
-    messages::ClientMessage,
+    messages::{ClientMessage, SetAnycastCostError, SetAnycastCostOutcome},
     routing::{
         EndpointInfo,
         linkstate::{LsForwardTo, LsRouteEntry},
@@ -138,6 +138,41 @@ impl RouteTable {
         }
 
         Ok(effect)
+    }
+
+    pub(crate) fn set_anycast_cost(
+        &mut self,
+        endpoint_id: EndpointId,
+        sender: &Sender<ClientMessage>,
+        cost: Cost,
+    ) -> Result<SetAnycastCostOutcome, SetAnycastCostError> {
+        let Some(entry) = self.table.get_mut(&endpoint_id) else {
+            return Err(SetAnycastCostError::NotRegistered);
+        };
+        if entry.kind != RouteKind::Anycast {
+            return Err(SetAnycastCostError::NotAnycast);
+        }
+        let previous_min = min_local_cost(&entry.routes);
+        let Some(route) = entry.routes.iter_mut().find(|route| {
+            matches!(&route.via, LsForwardTo::Local(existing) if existing.same_channel(sender))
+        }) else {
+            return Err(SetAnycastCostError::NotRegistered);
+        };
+        if route.cost == cost {
+            return Ok(SetAnycastCostOutcome::Unchanged);
+        }
+        let previous = route.cost;
+        route.cost = cost;
+        let new_min = min_local_cost(&entry.routes);
+        let advertise = match (previous_min, new_min) {
+            (Some(old), Some(new_min)) if old != new_min => Some(new_min),
+            _ => None,
+        };
+        Ok(SetAnycastCostOutcome::Changed {
+            previous,
+            new: cost,
+            advertise,
+        })
     }
 
     pub(crate) fn remove_endpoint(&mut self, endpoint_id: EndpointId) -> Effects {
