@@ -8,11 +8,8 @@ use std::sync::Arc;
 #[cfg(feature = "remote")]
 use crate::routing::{Advertisement, ConnectionId, PeerEntry};
 
-use crate::routing::LsDb;
-use crate::{
-    Handle,
-    routing::linkstate::{EndpointInfo, ForwardingTable},
-};
+use crate::routing::{LsDb, RegistrationRequest};
+use crate::{Handle, routing::linkstate::ForwardingTable};
 
 use arc_swap::ArcSwap;
 
@@ -24,7 +21,7 @@ use tracing::{info, trace};
 
 use crate::{
     messages::{ClientMessage, RouterMsg},
-    routing::{EndpointId, NodeId},
+    routing::NodeId,
 };
 
 #[derive(Debug)]
@@ -77,13 +74,9 @@ enum State {
     Start,
     Listen,
     HandleBrokerMsg(RouterMsg),
-    RegisterEndpoint(
-        EndpointId,
-        EndpointInfo,
-        tokio::sync::mpsc::Sender<ClientMessage>,
-    ),
-    RouteChange, // Update the Fib
-    RefreshLSAs,
+    RegisterEndpoint(RegistrationRequest),
+    RouteChange { notify: Option<RegistrationRequest> }, // Update the Fib
+    Tick,
     Shutdown,
 }
 
@@ -117,7 +110,7 @@ impl State {
                         }
                     },
                     () = tokio::time::sleep_until(next_tick_at) => {
-                        Some(RefreshLSAs)
+                        Some(Tick)
                     }
                 }
             }
@@ -126,13 +119,13 @@ impl State {
             HandleBrokerMsg(broker_msg) => {
                 //
                 match broker_msg {
-                    RouterMsg::RegisterEndpoint(endpoint_id, endpoint_info, tx) => {
-                        return Some(RegisterEndpoint(endpoint_id, endpoint_info, tx));
+                    RouterMsg::RegisterEndpoint(request) => {
+                        return Some(RegisterEndpoint(request));
                     }
                     RouterMsg::DeadLink(endpoint_id) => {
                         router.lsdb.remove_endpoint(endpoint_id);
 
-                        Some(RouteChange)
+                        Some(RouteChange { notify: None })
                     }
                     #[cfg(feature = "remote")]
                     RouterMsg::RegisterPeer(peer_id, connection_id, peer_entry, cost, realms) => {
@@ -148,14 +141,14 @@ impl State {
                         router.lsdb.add_peer(link);
                         // dbg!(&router.lsadb);
 
-                        return Some(RouteChange);
+                        Some(RouteChange { notify: None })
                     }
                     #[cfg(feature = "remote")]
                     RouterMsg::UnRegisterPeer(connection_id) => {
                         router.lsdb.remove_peer(connection_id);
                         // dbg!(&router.lsadb);
 
-                        return Some(RouteChange);
+                        Some(RouteChange { notify: None })
                     }
 
                     #[cfg(feature = "remote")]
@@ -163,7 +156,8 @@ impl State {
                         // dbg!(&from, &lsa);
                         router.lsdb.handle_lsa(lsa, from);
                         // dbg!(&router.lsadb);
-                        Some(RouteChange)
+                        // Some(Listen)
+                        Some(RouteChange { notify: None })
                     }
 
                     #[cfg(feature = "remote")]
@@ -181,11 +175,12 @@ impl State {
             }
 
             // ####### RegisterRoute ##################################################
-            RegisterEndpoint(endpoint_id, endpoint_info, sender) => {
-                router.lsdb.add_endpoint(endpoint_id, endpoint_info, sender);
-
-                Some(RouteChange)
-            }
+            RegisterEndpoint(request) => match router.lsdb.add_endpoint(&request) {
+                Ok(_) => Some(RouteChange {
+                    notify: Some(request),
+                }),
+                Err(_) => Some(Listen),
+            },
 
             // ####### Shutdown ##################################################
             Shutdown => {
@@ -196,15 +191,33 @@ impl State {
             }
 
             // ####### RouteChange ##################################################
-            RouteChange => {
+            RouteChange { notify } => {
                 let fib_table = Arc::new(router.lsdb.build_fib());
                 router.fib.swap(fib_table);
+                if let Some(RegistrationRequest {
+                    sender,
+                    endpoint_id,
+                    ..
+                }) = notify
+                {
+                    sender
+                        .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                        .inspect_err(|_e| {
+                            tracing::error!(
+                                "Failed to send successful registration message to endpoint"
+                            );
+                        })
+                        .ok();
+                }
                 return Some(Listen);
             }
 
-            RefreshLSAs => {
-                router.lsdb.tick();
-                return Some(Listen);
+            Tick => {
+                if router.lsdb.tick() {
+                    Some(RouteChange { notify: None })
+                } else {
+                    Some(Listen)
+                }
             }
         }
     }

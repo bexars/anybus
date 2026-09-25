@@ -1,3 +1,4 @@
+use crate::routing::RegistrationRequest;
 use crate::tokio;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
@@ -102,8 +103,12 @@ impl Handle {
         };
 
         let ei = (&route).into();
-
-        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+        let request = RegistrationRequest {
+            endpoint_id,
+            endpoint_info: ei,
+            sender: tx,
+        };
+        let register_msg = RouterMsg::RegisterEndpoint(request);
         info!("About to send register_msg");
         self.tx.send(register_msg).await?;
         info!("Sent register_msg");
@@ -147,8 +152,12 @@ impl Handle {
             _learned_from: 0.into(),
         };
         let ei = (&route).into();
-
-        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+        let request = RegistrationRequest {
+            endpoint_id,
+            endpoint_info: ei,
+            sender: tx,
+        };
+        let register_msg = RouterMsg::RegisterEndpoint(request);
 
         info!("Send register_msg {:?}", register_msg);
 
@@ -192,7 +201,12 @@ impl Handle {
         };
 
         let ei = (&route).into();
-        let register_msg = RouterMsg::RegisterEndpoint(endpoint_id, ei, tx);
+        let request = RegistrationRequest {
+            endpoint_id,
+            endpoint_info: ei,
+            sender: tx,
+        };
+        let register_msg = RouterMsg::RegisterEndpoint(request);
 
         info!("Send register_msg {:?}", register_msg);
 
@@ -237,8 +251,12 @@ impl Handle {
             _learned_from: 0.into(),
         };
         let ei = (&route).into();
-
-        let broadcast_msg = RegisterEndpoint(broadcast_id, ei, tx);
+        let request = RegistrationRequest {
+            endpoint_id: broadcast_id,
+            endpoint_info: ei,
+            sender: tx,
+        };
+        let broadcast_msg = RegisterEndpoint(request);
         self.tx.send(broadcast_msg).await?;
         self.wait_for_registration(&mut rx, broadcast_id).await?;
 
@@ -343,7 +361,13 @@ impl Handle {
 
         let ei = (&route).into();
 
-        let register_msg = RouterMsg::RegisterEndpoint(response_uuid, ei, tx);
+        let request = RegistrationRequest {
+            endpoint_id: response_uuid,
+            endpoint_info: ei,
+            sender: tx,
+        };
+
+        let register_msg = RouterMsg::RegisterEndpoint(request);
         self.send_broker(register_msg);
         // .map_err(|_| AnyBusHandleError::SubscriptionFailed)?;
         let returned_uuid =
@@ -456,6 +480,7 @@ impl RequestHelper {
             Some(ClientMessage::Message(val)) => val.payload.reveal().map_err(|p| {
                 AnyBusHandleError::ReceiveError(ReceiveError::DeserializationError(p))
             }),
+            Some(ClientMessage::Shutdown) => Err(AnyBusHandleError::Shutdown),
             None => Err(AnyBusHandleError::Shutdown),
             _ => {
                 unreachable!()
@@ -494,6 +519,12 @@ impl RequestHelper {
             Some(ClientMessage::Shutdown) => Err(AnyBusHandleError::Shutdown),
             _ => todo!(),
         }
+    }
+}
+
+impl Drop for RequestHelper {
+    fn drop(&mut self) {
+        self.handle.unregister_endpoint(self.response_endpoint_id);
     }
 }
 

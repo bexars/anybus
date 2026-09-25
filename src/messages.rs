@@ -1,8 +1,6 @@
-use crate::tokio;
+use crate::routing::RegistrationRequest;
 #[cfg(feature = "remote")]
 use serde::{Deserialize, Serialize};
-
-use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "remote")]
 use crate::routing::{ConnectionId, Cost, Lsa, LsaKey, NodeId, PeerEntry, RealmList, WirePacket};
@@ -11,11 +9,10 @@ use crate::{
     routing::{EndpointId, Packet},
 };
 
-use crate::routing::EndpointInfo;
-
 #[derive(Debug)]
 pub(crate) enum RouterMsg {
-    RegisterEndpoint(EndpointId, EndpointInfo, Sender<ClientMessage>),
+    // RegisterEndpoint(EndpointId, EndpointInfo, Sender<ClientMessage>),
+    RegisterEndpoint(RegistrationRequest),
     DeadLink(EndpointId),
     #[cfg(feature = "remote")]
     RegisterPeer(NodeId, ConnectionId, PeerEntry, Cost, RealmList),

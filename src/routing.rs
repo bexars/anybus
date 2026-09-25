@@ -563,3 +563,10 @@ impl ConnectionIdCounter {
         self.current.fetch_add(1, Ordering::Relaxed).into()
     }
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct RegistrationRequest {
+    pub(crate) endpoint_id: EndpointId,
+    pub(crate) endpoint_info: EndpointInfo,
+    pub(crate) sender: tokio::sync::mpsc::Sender<ClientMessage>,
+}

@@ -1,7 +1,7 @@
 mod forward_table;
 mod route_table;
 
-use crate::tokio::sync::mpsc::Sender;
+use crate::routing::RegistrationRequest;
 use crate::tokio::time::Instant;
 pub(crate) use forward_table::ForwardingTable;
 #[cfg(feature = "remote")]
@@ -135,7 +135,7 @@ impl LsDb {
         self.last_tick + Duration::from_millis(50)
     }
 
-    pub(crate) fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) -> bool {
         let now = Instant::now();
         self.last_tick = now;
 
@@ -144,8 +144,9 @@ impl LsDb {
         }
         if self.rebuild_requested.is_some() {
             self.rebuild_requested = None;
-            self.build_fib();
+            return true;
         }
+        false
     }
 
     pub(crate) fn refresh_and_purge_lsas(&mut self) {
@@ -676,21 +677,21 @@ impl LsDb {
         }
     }
 
-    pub(crate) fn add_endpoint(
-        &mut self,
-        endpoint_id: EndpointId,
-        endpoint_info: EndpointInfo,
-        sender: Sender<ClientMessage>,
-    ) {
+    pub(crate) fn add_endpoint(&mut self, request: &RegistrationRequest) -> Result<(), ()> {
+        let RegistrationRequest {
+            endpoint_id,
+            endpoint_info,
+            sender,
+        } = request;
         match self
             .routes
-            .add_endpoint(endpoint_id, endpoint_info, sender.clone())
+            .add_endpoint(endpoint_id.clone(), endpoint_info.clone(), sender.clone())
         {
             #[cfg_attr(not(feature = "remote"), allow(unused))]
             Ok(effect) => {
-                sender
-                    .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                    .ok();
+                // sender
+                //     .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                //     .ok();
                 #[cfg(feature = "remote")]
                 match effect {
                     Effects::AddLsa(endpoint_id, endpoint_info) => {
@@ -738,11 +739,16 @@ impl LsDb {
                         self.request_rebuild();
                     }
                 }
+                Ok(())
             }
             Err(_e) => {
                 sender
-                    .try_send(ClientMessage::FailedRegistration(endpoint_id, "".into()))
+                    .try_send(ClientMessage::FailedRegistration(
+                        endpoint_id.clone(),
+                        "".into(), // TODO - Put a real message here with a real reason
+                    ))
                     .ok();
+                Err(())
             }
         }
     }
@@ -780,7 +786,7 @@ impl LsDb {
         // self.purge_unreachable();
         // tracing::debug!("After SPF {:#?}", self.next_hop);
         // tracing::debug!("After SPF {:#?}", self.cost);
-
+        self.rebuild_requested = None;
         ForwardingTable::build_from_db(self)
     }
 }
