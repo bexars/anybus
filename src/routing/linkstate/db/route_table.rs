@@ -4,7 +4,7 @@ use std::collections::HashMap;
 #[cfg(feature = "remote")]
 use crate::routing::NodeId;
 use crate::routing::linkstate::db::route_table::RouteTableError::MismatchedRouteKind;
-use crate::routing::{RouteKind, linkstate::LsRoute};
+use crate::routing::{Cost, RouteKind, linkstate::LsRoute};
 use crate::{
     EndpointId,
     messages::ClientMessage,
@@ -50,12 +50,21 @@ impl RouteTable {
 pub(crate) enum Effects {
     #[cfg_attr(not(feature = "remote"), allow(unused))]
     AddLsa(EndpointId, EndpointInfo),
-    // _UpdateLsa(EndpointId, EndpointInfo),
+    #[cfg_attr(not(feature = "remote"), allow(unused))]
+    UpdateLsa(EndpointId, Cost),
     #[cfg_attr(not(feature = "remote"), allow(unused))]
     RemoveLsa(EndpointId),
     RebuildFib,
     Noop,
     // UnicastAlreadyExists,
+}
+
+fn min_local_cost(routes: &[LsRoute]) -> Option<Cost> {
+    routes
+        .iter()
+        .filter(|route| matches!(&route.via, LsForwardTo::Local(_)))
+        .map(|route| route.cost)
+        .min()
 }
 
 #[derive(Debug)]
@@ -103,8 +112,17 @@ impl RouteTable {
                     return Err(RouteTableError::DuplicateUnicast);
                 }
             }
-            RouteKind::Anycast | RouteKind::Broadcast | RouteKind::Multicast => {
-                // TODO update with anycast cost changes
+            RouteKind::Anycast => {
+                let previous_min = min_local_cost(&route_entry.routes);
+                let cost = endpoint_info.cost;
+                route_entry.routes.push(ls_route);
+                effect = match previous_min {
+                    None => Effects::AddLsa(endpoint_id, endpoint_info),
+                    Some(previous) if cost < previous => Effects::UpdateLsa(endpoint_id, cost),
+                    Some(_) => Effects::Noop,
+                };
+            }
+            RouteKind::Broadcast | RouteKind::Multicast => {
                 if route_entry
                     .routes
                     .iter()
@@ -126,6 +144,7 @@ impl RouteTable {
         let Some(entry) = self.table.get_mut(&endpoint_id) else {
             return Effects::Noop;
         };
+        let previous_min = min_local_cost(&entry.routes);
         let mut delete = true;
         let len = entry.routes.len();
         entry.routes.retain(|r| match r.via {
@@ -146,6 +165,13 @@ impl RouteTable {
         if delete {
             self.table.remove(&endpoint_id);
             return Effects::RemoveLsa(endpoint_id);
+        }
+        if entry.kind == RouteKind::Anycast {
+            if let Some(cost) = min_local_cost(&entry.routes) {
+                if previous_min != Some(cost) {
+                    return Effects::UpdateLsa(endpoint_id, cost);
+                }
+            }
         }
         if len != entry.routes.len() {
             return Effects::RebuildFib;
@@ -171,6 +197,18 @@ impl RouteTable {
             });
         if route_entry.kind != info.kind {
             return Err(RouteTableError::MismatchedRouteKind);
+        }
+        if let Some(existing) = route_entry
+            .routes
+            .iter_mut()
+            .find(|r| matches!(r.via, LsForwardTo::Remote(node_id) if node_id == origin))
+        {
+            if existing.cost != info.cost || existing.realm != info.realm {
+                existing.cost = info.cost;
+                existing.realm = info.realm;
+                return Ok(Effects::RebuildFib);
+            }
+            return Ok(Effects::Noop);
         }
         if route_entry.kind == RouteKind::Unicast && !route_entry.routes.is_empty() {
             return Err(RouteTableError::DuplicateUnicast);

@@ -73,9 +73,6 @@ pub enum AnyBusHandleError {
     /// Error in the receive calls
     #[error("Error in the RPC response: {0}")]
     ReceiveError(#[source] ReceiveError),
-    // /// Endpoint isn't keeping up with the messaging
-    // #[error("The queue for that endpoint is full")]
-    // QueueFull,
 }
 
 #[derive(Error, Debug)]
@@ -91,6 +88,17 @@ pub enum SendError {
     /// The destination queue is closed
     #[error("Queue closed")]
     Closed(Option<Payload>),
+}
+
+impl SendError {
+    /// The message that was not sent, when this error kept it.
+    pub fn payload(self) -> Option<Payload> {
+        match self {
+            SendError::NoRoute(payload) | SendError::Full(payload) | SendError::Closed(payload) => {
+                payload
+            }
+        }
+    }
 }
 
 impl From<tokio::sync::mpsc::error::TrySendError<ClientMessage>> for SendError {

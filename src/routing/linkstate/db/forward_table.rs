@@ -16,8 +16,8 @@ use crate::{
     errors::SendError,
     messages::ClientMessage,
     routing::{
-        LsDb, NodeId, Packet, RouteKind,
-        linkstate::{FibForwardTo, LsForwardTo},
+        Cost, LsDb, NodeId, Packet, RouteKind,
+        linkstate::{FibForwardTo, LsForwardTo, LsRoute},
     },
 };
 #[cfg(feature = "remote")]
@@ -66,25 +66,14 @@ impl ForwardingTable {
                 FibForwardTo::Local(sender) => {
                     sender
                         .try_send(ClientMessage::Message(packet.into()))
-                        .map_err(|e| {
-                            let ClientMessage::Message(p) = e.into_inner() else {
-                                unreachable!()
-                            };
-                            SendError::NoRoute(Some(p.payload))
-                        })?;
+                        .map_err(SendError::from)?;
                 }
                 #[cfg(feature = "remote")]
                 FibForwardTo::Remote(next_hop) => {
                     next_hop
                         .tx
-                        .try_send(crate::messages::NodeMessage::WirePacket(packet.into()))
-                        .map_err(|e| {
-                            let NodeMessage::WirePacket(wp) = e.into_inner().into() else {
-                                unreachable!()
-                            };
-                            let payload = Payload::from(wp.payload);
-                            SendError::NoRoute(Some(payload))
-                        })?;
+                        .try_send(NodeMessage::WirePacket(packet.into()))
+                        .map_err(send_error_from_node)?;
                 }
             },
             FibEntry::MultiCast(fib_forward_tos) => {
@@ -92,18 +81,24 @@ impl ForwardingTable {
                     match fib_forward {
                         FibForwardTo::Local(sender) => {
                             let packet = packet.clone();
-                            sender.try_send(ClientMessage::Message(packet.into())).ok();
-                            // .map_err(|e| SendError::SendFailed(e.to_string()))?;
+                            if let Err(err) = sender.try_send(ClientMessage::Message(packet.into()))
+                            {
+                                tracing::warn!(
+                                    "Broadcast to local listener for {endpoint_id} failed: {err}"
+                                );
+                            }
                         }
                         #[cfg(feature = "remote")]
                         FibForwardTo::Remote(next_hop) => {
-                            next_hop
+                            if let Err(err) = next_hop
                                 .tx
-                                .try_send(crate::messages::NodeMessage::WirePacket(
-                                    packet.clone().into(),
-                                ))
-                                .ok();
-                            // .map_err(|e| SendError::SendFailed(e.to_string()))?;
+                                .try_send(NodeMessage::WirePacket(packet.clone().into()))
+                            {
+                                tracing::warn!(
+                                    "Broadcast to {} for {endpoint_id} failed: {err}",
+                                    next_hop.peer_id
+                                );
+                            }
                         }
                     }
                 }
@@ -209,7 +204,22 @@ impl ForwardingTable {
         // fib.parent = lsdb.parent.clone();
         for (endpoint_id, route_entry) in lsdb.routes.routes().iter() {
             let fib_entry = match route_entry.kind {
-                RouteKind::Unicast | RouteKind::Anycast | RouteKind::Node => {
+                RouteKind::Anycast => {
+                    let Some(route) = route_entry
+                        .routes
+                        .iter()
+                        .filter_map(|route| anycast_total(lsdb, route).map(|total| (total, route)))
+                        .min_by_key(|(total, _)| *total)
+                        .map(|(_, route)| route)
+                    else {
+                        continue;
+                    };
+                    let Some(fib_forward) = fib_forward(lsdb, route) else {
+                        continue;
+                    };
+                    FibEntry::Single(fib_forward)
+                }
+                RouteKind::Unicast | RouteKind::Node => {
                     if route_entry.routes.is_empty() {
                         continue;
                     }
@@ -272,6 +282,34 @@ impl ForwardingTable {
     }
 }
 
+#[cfg_attr(not(feature = "remote"), allow(unused_variables))]
+fn anycast_total(lsdb: &LsDb, route: &LsRoute) -> Option<Cost> {
+    match &route.via {
+        LsForwardTo::Local(_) => Some(route.cost),
+        #[cfg(feature = "remote")]
+        LsForwardTo::Remote(node_id) => {
+            let path = lsdb.cost.get(node_id)?;
+            if *path == Cost(u16::MAX) {
+                return None;
+            }
+            lsdb.next_hop.get(node_id)?;
+            Some(route.cost + *path)
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "remote"), allow(unused_variables))]
+fn fib_forward(lsdb: &LsDb, route: &LsRoute) -> Option<FibForwardTo> {
+    match &route.via {
+        LsForwardTo::Local(sender) => Some(FibForwardTo::Local(sender.clone())),
+        #[cfg(feature = "remote")]
+        LsForwardTo::Remote(node_id) => lsdb
+            .next_hop
+            .get(node_id)
+            .map(|next_hop| FibForwardTo::Remote(next_hop.clone())),
+    }
+}
+
 #[derive(Debug, Clone)]
 enum FibEntry {
     Single(FibForwardTo),         // node, unicast and anycast only have one FibEntry
@@ -298,5 +336,26 @@ impl FibEntry {
             FibForwardTo::Remote(link) => Some(link),
             _ => None,
         })
+    }
+}
+
+#[cfg(feature = "remote")]
+fn send_error_from_node(
+    err: crate::tokio::sync::mpsc::error::TrySendError<NodeMessage>,
+) -> SendError {
+    use crate::tokio::sync::mpsc::error::TrySendError;
+
+    let (full, message) = match err {
+        TrySendError::Full(message) => (true, message),
+        TrySendError::Closed(message) => (false, message),
+    };
+    let payload = match message {
+        NodeMessage::WirePacket(packet) => Some(Payload::from(packet.payload)),
+        _ => None,
+    };
+    if full {
+        SendError::Full(payload)
+    } else {
+        SendError::Closed(payload)
     }
 }

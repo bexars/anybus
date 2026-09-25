@@ -1,7 +1,7 @@
 mod forward_table;
 mod route_table;
 
-use crate::tokio::sync::mpsc::Sender;
+use crate::routing::RegistrationRequest;
 use crate::tokio::time::Instant;
 pub(crate) use forward_table::ForwardingTable;
 #[cfg(feature = "remote")]
@@ -135,7 +135,7 @@ impl LsDb {
         self.last_tick + Duration::from_millis(50)
     }
 
-    pub(crate) fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) -> bool {
         let now = Instant::now();
         self.last_tick = now;
 
@@ -144,8 +144,9 @@ impl LsDb {
         }
         if self.rebuild_requested.is_some() {
             self.rebuild_requested = None;
-            self.build_fib();
+            return true;
         }
+        false
     }
 
     pub(crate) fn refresh_and_purge_lsas(&mut self) {
@@ -676,21 +677,21 @@ impl LsDb {
         }
     }
 
-    pub(crate) fn add_endpoint(
-        &mut self,
-        endpoint_id: EndpointId,
-        endpoint_info: EndpointInfo,
-        sender: Sender<ClientMessage>,
-    ) {
+    pub(crate) fn add_endpoint(&mut self, request: &RegistrationRequest) -> Result<(), ()> {
+        let RegistrationRequest {
+            endpoint_id,
+            endpoint_info,
+            sender,
+        } = request;
         match self
             .routes
-            .add_endpoint(endpoint_id, endpoint_info, sender.clone())
+            .add_endpoint(endpoint_id.clone(), endpoint_info.clone(), sender.clone())
         {
             #[cfg_attr(not(feature = "remote"), allow(unused))]
             Ok(effect) => {
-                sender
-                    .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
-                    .ok();
+                // sender
+                //     .try_send(ClientMessage::SuccessfulRegistration(endpoint_id))
+                //     .ok();
                 #[cfg(feature = "remote")]
                 match effect {
                     Effects::AddLsa(endpoint_id, endpoint_info) => {
@@ -714,44 +715,62 @@ impl LsDb {
 
                         self.db.insert(key, record);
                     }
-                    // Effects::UpdateLsa(endpoint_id, endpoint_info) => {
-                    //     let record = self.db.get_mut(&LsaKey {
-                    //         origin: self.self_id,
-                    //         endpoint_id: endpoint_id.0,
-                    //     });
-
-                    //     if let Some(record) = record {
-                    //         record.lsa.seq += 1;
-                    //         record.lsa.body = LsaBody::Endpoint(endpoint_info);
-                    //         record.updated_at = Instant::now();
-                    //         let lsa = record.lsa.clone();
-                    //         self.flood_all_neighbors(lsa, None);
-                    //         self.request_rebuild();
-                    //     } else {
-                    //         tracing::error!(
-                    //             "Failed to update LSA for endpoint {:?}: LSA not found",
-                    //             endpoint_id
-                    //         );
-                    //     }
-                    // }
+                    Effects::UpdateLsa(endpoint_id, cost) => {
+                        self.update_endpoint_cost(endpoint_id, cost);
+                    }
                     _ => {
                         self.request_rebuild();
                     }
                 }
+                Ok(())
             }
             Err(_e) => {
                 sender
-                    .try_send(ClientMessage::FailedRegistration(endpoint_id, "".into()))
+                    .try_send(ClientMessage::FailedRegistration(
+                        endpoint_id.clone(),
+                        "".into(), // TODO - Put a real message here with a real reason
+                    ))
                     .ok();
+                Err(())
             }
         }
     }
+    #[cfg(feature = "remote")]
+    fn update_endpoint_cost(&mut self, endpoint_id: EndpointId, cost: Cost) {
+        let key = LsaKey {
+            origin: self.self_id,
+            endpoint_id: endpoint_id.0,
+        };
+        let Some(record) = self.db.get_mut(&key) else {
+            tracing::error!(
+                "Failed to update LSA for endpoint {:?}: LSA not found",
+                endpoint_id
+            );
+            return;
+        };
+        let LsaBody::Endpoint(body) = &mut record.lsa.body else {
+            return;
+        };
+        if body.cost == cost {
+            return;
+        }
+        body.cost = cost;
+        record.lsa.seq += 1;
+        record.updated_at = Instant::now();
+        let lsa = record.lsa.clone();
+        self.flood_all_neighbors(lsa, None);
+        self.request_rebuild();
+    }
+
     pub(crate) fn remove_endpoint(&mut self, endpoint_id: EndpointId) {
         #[cfg_attr(not(feature = "remote"), allow(unused))]
         let effects = self.routes.remove_endpoint(endpoint_id);
         self.request_rebuild();
         #[cfg(feature = "remote")]
         match effects {
+            Effects::UpdateLsa(endpoint_id, cost) => {
+                self.update_endpoint_cost(endpoint_id, cost);
+            }
             Effects::RemoveLsa(endpoint_id) => {
                 let key = LsaKey {
                     origin: self.self_id,
@@ -777,10 +796,7 @@ impl LsDb {
         #[cfg(feature = "remote")]
         self.compute_spf(self.self_id);
 
-        // self.purge_unreachable();
-        // tracing::debug!("After SPF {:#?}", self.next_hop);
-        // tracing::debug!("After SPF {:#?}", self.cost);
-
+        self.rebuild_requested = None;
         ForwardingTable::build_from_db(self)
     }
 }

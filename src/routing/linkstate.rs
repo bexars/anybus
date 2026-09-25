@@ -250,30 +250,36 @@ struct Entry(Cost, NodeId);
 #[cfg(feature = "remote")]
 
 impl Entry {
+    /// Lower cost wins. Equal cost: the lower node id wins.
     pub(crate) fn better(&self, other: &Self) -> bool {
-        self < other
+        self.0 < other.0 || (self.0 == other.0 && self.1 < other.1)
     }
 }
 #[cfg(feature = "remote")]
 
 impl PartialOrd for Entry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.cmp(&self))
+        Some(self.cmp(other))
     }
 }
 #[cfg(feature = "remote")]
 
-// We want the lowest cost and the lowest UUID to win
 impl Ord for Entry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.0.cmp(&self.0).then(self.1.cmp(&other.1))
+        if self.better(other) {
+            std::cmp::Ordering::Less
+        } else if other.better(self) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
     }
 }
 #[cfg(feature = "remote")]
 
 impl PartialEq for Entry {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.cmp(other) == std::cmp::Ordering::Equal
     }
 }
 
@@ -292,7 +298,12 @@ mod test {
         let entry3 = Entry(2.into(), uuid1.into());
         assert!(entry1 == entry1);
         assert!(entry1 < entry3);
-        assert!(entry1 > entry2);
+        assert!(entry1 < entry2);
+        assert!(entry1.better(&entry3));
+        assert!(entry1.better(&entry2));
+        assert!(!entry2.better(&entry1));
+        assert!(!entry3.better(&entry1));
+        assert!(!entry1.better(&entry1));
     }
 
     #[test]
@@ -302,6 +313,7 @@ mod test {
         let entry1 = Entry(1.into(), uuid1.into());
         let entry2 = Entry(1.into(), uuid2.into());
 
-        assert!(entry1 > entry2);
+        assert!(entry1.better(&entry2));
+        assert!(entry1 < entry2);
     }
 }

@@ -503,7 +503,7 @@ impl std::ops::Add<u16> for Cost {
 
 impl std::ops::AddAssign<u16> for Cost {
     fn add_assign(&mut self, rhs: u16) {
-        self.0 += rhs;
+        self.0 = self.0.saturating_add(rhs);
     }
 }
 
@@ -562,4 +562,11 @@ impl ConnectionIdCounter {
         // Fetch the current value and increment it by 1 atomically
         self.current.fetch_add(1, Ordering::Relaxed).into()
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RegistrationRequest {
+    pub(crate) endpoint_id: EndpointId,
+    pub(crate) endpoint_info: EndpointInfo,
+    pub(crate) sender: tokio::sync::mpsc::Sender<ClientMessage>,
 }
