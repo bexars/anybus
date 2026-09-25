@@ -71,7 +71,7 @@ impl Handle {
     pub async fn register_anycast<T: BusRiderWithUuid + BusDeserialize>(
         &self,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global)
+        self.register_anycast_inner(T::ANYBUS_UUID.into(), Realm::Global, 0)
             .await
     }
 
@@ -80,7 +80,7 @@ impl Handle {
         &self,
         endpoint_id: impl Into<EndpointId>,
     ) -> Result<Receiver<T>, ReceiveError> {
-        self.register_anycast_inner(endpoint_id.into(), Realm::Global)
+        self.register_anycast_inner(endpoint_id.into(), Realm::Global, 0)
             .await
     }
 
@@ -89,6 +89,7 @@ impl Handle {
         &self,
         endpoint_id: EndpointId,
         realm: Realm,
+        cost: u16,
     ) -> Result<Receiver<T>, ReceiveError> {
         // let endpoint_id = T::ANYBUS_UUID.into();
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
@@ -97,7 +98,7 @@ impl Handle {
             kind: crate::routing::RouteKind::Anycast,
             realm,
             _via: crate::routing::ForwardTo::Local(tx.clone()),
-            cost: 0.into(),
+            cost: cost.into(),
             #[cfg(feature = "remote")]
             _learned_from: 0.into(),
         };
@@ -563,6 +564,12 @@ impl<EP, CAST, RPC> RegistrationBuilder<EP, CAST, RPC> {
         self
     }
 
+    /// Registration cost. Anycast prefers the lower cost.
+    pub fn cost(mut self, cost: u16) -> Self {
+        self.cost = cost;
+        self
+    }
+
     pub fn endpoint(self, ep: EndpointId) -> RegistrationBuilder<EndpointSet, CAST, RPC> {
         RegistrationBuilder {
             endpoint_id: EndpointSet(ep),
@@ -629,7 +636,7 @@ impl RegistrationBuilder<EndpointSet, CastSet, NoRpc> {
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
                 self.handle
-                    .register_anycast_inner::<T>(self.endpoint_id.0.into(), self.realm)
+                    .register_anycast_inner::<T>(self.endpoint_id.0.into(), self.realm, self.cost)
                     .await
             }
             crate::routing::RouteKind::Unicast => {
@@ -679,7 +686,7 @@ impl RegistrationBuilder<NoEndpointId, CastSet, NoRpc> {
         match self.cast.0 {
             crate::routing::RouteKind::Anycast => {
                 self.handle
-                    .register_anycast_inner::<T>(ep, self.realm)
+                    .register_anycast_inner::<T>(ep, self.realm, self.cost)
                     .await
             }
             crate::routing::RouteKind::Unicast => {
