@@ -715,26 +715,9 @@ impl LsDb {
 
                         self.db.insert(key, record);
                     }
-                    // Effects::UpdateLsa(endpoint_id, endpoint_info) => {
-                    //     let record = self.db.get_mut(&LsaKey {
-                    //         origin: self.self_id,
-                    //         endpoint_id: endpoint_id.0,
-                    //     });
-
-                    //     if let Some(record) = record {
-                    //         record.lsa.seq += 1;
-                    //         record.lsa.body = LsaBody::Endpoint(endpoint_info);
-                    //         record.updated_at = Instant::now();
-                    //         let lsa = record.lsa.clone();
-                    //         self.flood_all_neighbors(lsa, None);
-                    //         self.request_rebuild();
-                    //     } else {
-                    //         tracing::error!(
-                    //             "Failed to update LSA for endpoint {:?}: LSA not found",
-                    //             endpoint_id
-                    //         );
-                    //     }
-                    // }
+                    Effects::UpdateLsa(endpoint_id, cost) => {
+                        self.update_endpoint_cost(endpoint_id, cost);
+                    }
                     _ => {
                         self.request_rebuild();
                     }
@@ -752,12 +735,42 @@ impl LsDb {
             }
         }
     }
+    #[cfg(feature = "remote")]
+    fn update_endpoint_cost(&mut self, endpoint_id: EndpointId, cost: Cost) {
+        let key = LsaKey {
+            origin: self.self_id,
+            endpoint_id: endpoint_id.0,
+        };
+        let Some(record) = self.db.get_mut(&key) else {
+            tracing::error!(
+                "Failed to update LSA for endpoint {:?}: LSA not found",
+                endpoint_id
+            );
+            return;
+        };
+        let LsaBody::Endpoint(body) = &mut record.lsa.body else {
+            return;
+        };
+        if body.cost == cost {
+            return;
+        }
+        body.cost = cost;
+        record.lsa.seq += 1;
+        record.updated_at = Instant::now();
+        let lsa = record.lsa.clone();
+        self.flood_all_neighbors(lsa, None);
+        self.request_rebuild();
+    }
+
     pub(crate) fn remove_endpoint(&mut self, endpoint_id: EndpointId) {
         #[cfg_attr(not(feature = "remote"), allow(unused))]
         let effects = self.routes.remove_endpoint(endpoint_id);
         self.request_rebuild();
         #[cfg(feature = "remote")]
         match effects {
+            Effects::UpdateLsa(endpoint_id, cost) => {
+                self.update_endpoint_cost(endpoint_id, cost);
+            }
             Effects::RemoveLsa(endpoint_id) => {
                 let key = LsaKey {
                     origin: self.self_id,
@@ -783,9 +796,6 @@ impl LsDb {
         #[cfg(feature = "remote")]
         self.compute_spf(self.self_id);
 
-        // self.purge_unreachable();
-        // tracing::debug!("After SPF {:#?}", self.next_hop);
-        // tracing::debug!("After SPF {:#?}", self.cost);
         self.rebuild_requested = None;
         ForwardingTable::build_from_db(self)
     }

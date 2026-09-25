@@ -16,8 +16,8 @@ use crate::{
     errors::SendError,
     messages::ClientMessage,
     routing::{
-        LsDb, NodeId, Packet, RouteKind,
-        linkstate::{FibForwardTo, LsForwardTo},
+        Cost, LsDb, NodeId, Packet, RouteKind,
+        linkstate::{FibForwardTo, LsForwardTo, LsRoute},
     },
 };
 #[cfg(feature = "remote")]
@@ -209,7 +209,22 @@ impl ForwardingTable {
         // fib.parent = lsdb.parent.clone();
         for (endpoint_id, route_entry) in lsdb.routes.routes().iter() {
             let fib_entry = match route_entry.kind {
-                RouteKind::Unicast | RouteKind::Anycast | RouteKind::Node => {
+                RouteKind::Anycast => {
+                    let Some(route) = route_entry
+                        .routes
+                        .iter()
+                        .filter_map(|route| anycast_total(lsdb, route).map(|total| (total, route)))
+                        .min_by_key(|(total, _)| *total)
+                        .map(|(_, route)| route)
+                    else {
+                        continue;
+                    };
+                    let Some(fib_forward) = fib_forward(lsdb, route) else {
+                        continue;
+                    };
+                    FibEntry::Single(fib_forward)
+                }
+                RouteKind::Unicast | RouteKind::Node => {
                     if route_entry.routes.is_empty() {
                         continue;
                     }
@@ -269,6 +284,34 @@ impl ForwardingTable {
             fib.table.insert(*endpoint_id, fib_entry);
         }
         fib
+    }
+}
+
+#[cfg_attr(not(feature = "remote"), allow(unused_variables))]
+fn anycast_total(lsdb: &LsDb, route: &LsRoute) -> Option<Cost> {
+    match &route.via {
+        LsForwardTo::Local(_) => Some(route.cost),
+        #[cfg(feature = "remote")]
+        LsForwardTo::Remote(node_id) => {
+            let path = lsdb.cost.get(node_id)?;
+            if *path == Cost(u16::MAX) {
+                return None;
+            }
+            lsdb.next_hop.get(node_id)?;
+            Some(route.cost + *path)
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "remote"), allow(unused_variables))]
+fn fib_forward(lsdb: &LsDb, route: &LsRoute) -> Option<FibForwardTo> {
+    match &route.via {
+        LsForwardTo::Local(sender) => Some(FibForwardTo::Local(sender.clone())),
+        #[cfg(feature = "remote")]
+        LsForwardTo::Remote(node_id) => lsdb
+            .next_hop
+            .get(node_id)
+            .map(|next_hop| FibForwardTo::Remote(next_hop.clone())),
     }
 }
 
