@@ -114,7 +114,7 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
-    let client_methods = methods.iter().map(|(name, receiver, args, ret)| {
+    let client_methods = methods.iter().map(|(name, _receiver, args, ret)| {
         let arg_names = args.iter().map(|(n, _)| n).collect::<Vec<_>>();
         let arg_tys = args.iter().map(|(_, t)| t).collect::<Vec<_>>();
         let request_variant = format_ident!(
@@ -135,13 +135,10 @@ pub fn anybus_rpc_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         let response_match = quote! {
             #response_ident::#request_variant(result) => result
         };
-        let self_ref = if receiver.as_ref().map_or(false, |r| r.mutability.is_some()) {
-            quote!(&mut self)
-        } else {
-            quote!(&self)
-        };
+        // `request_to_uuid` borrows the helper mutably, so the client method
+        // is `&mut self` even when the trait method is `&self`.
         quote! {
-            pub async fn #name(#self_ref, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
+            pub async fn #name(&mut self, #(#arg_names: #arg_tys),*) -> Result<#ret, ::anybus::errors::AnyBusHandleError> {
                 let request = #request_creation;
                 let response = self.rpc_helper.request_to_uuid(request, self.endpoint_uuid).await?;
                 let result = match response {
