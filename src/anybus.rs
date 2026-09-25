@@ -290,6 +290,59 @@ impl AnyBus {
         Ok(())
     }
 
+    /// Connect a test peer over one half of a [`tokio::io::duplex`] pair.
+    ///
+    /// Call this after [`AnyBus::run`]. The other half belongs to the peer
+    /// `AnyBus`. The link cost is `10`, and the link carries the `Userspace`
+    /// and `Global` realms. The returned handle closes this half of the link.
+    #[cfg(all(feature = "dummy_peer", not(target_arch = "wasm32")))]
+    pub fn new_dummy_peer(
+        &self,
+        stream: crate::tokio::io::DuplexStream,
+    ) -> crate::peers::dummy::DummyPeerKill {
+        self.new_dummy_peer_with(stream, 10, &[crate::Realm::Userspace, crate::Realm::Global])
+    }
+
+    /// [`AnyBus::new_dummy_peer`] with an explicit link cost and realm list.
+    ///
+    /// An empty `realms` slice uses `Userspace` and `Global`.
+    #[cfg(all(feature = "dummy_peer", not(target_arch = "wasm32")))]
+    pub fn new_dummy_peer_with(
+        &self,
+        stream: crate::tokio::io::DuplexStream,
+        cost: u16,
+        realms: &[crate::Realm],
+    ) -> crate::peers::dummy::DummyPeerKill {
+        use crate::routing::RealmList;
+
+        let mut realm_list = RealmList::default();
+        if realms.is_empty() {
+            realm_list.add(crate::Realm::Userspace);
+            realm_list.add(crate::Realm::Global);
+        } else {
+            for realm in realms {
+                realm_list.add(*realm);
+            }
+        }
+        let handle = self.handle.clone();
+        let our_id = self.id;
+        let connection_counter = self.connection_counter.clone();
+        let (kill, kill_rx) = crate::tokio::sync::oneshot::channel();
+        spawn(async move {
+            crate::peers::dummy::run(
+                stream,
+                handle,
+                our_id,
+                connection_counter,
+                cost.into(),
+                realm_list,
+                kill_rx,
+            )
+            .await;
+        });
+        crate::peers::dummy::DummyPeerKill::new(kill)
+    }
+
     /// Remove an existing WebSocket peer
     #[cfg(feature = "ws")]
     pub async fn remove_websocket_peer(&mut self, url: url::Url) -> Result<(), String> {

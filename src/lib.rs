@@ -39,6 +39,8 @@ pub use handle::Handle;
 pub use handle::RequestHelper;
 pub use helper::spawn;
 pub use messages::AnyBusStatusMsg;
+#[cfg(all(feature = "dummy_peer", not(target_arch = "wasm32")))]
+pub use peers::dummy::{DummyPeerKill, DummyPeerStop};
 #[cfg(feature = "ws_server")]
 pub use peers::ws::WsListenerOptions;
 #[cfg(feature = "ws")]

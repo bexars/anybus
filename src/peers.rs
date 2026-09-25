@@ -1,5 +1,7 @@
 // use tokio_with_wasm::alias as tokio;
 
+#[cfg(all(feature = "dummy_peer", not(target_arch = "wasm32")))]
+pub(crate) mod dummy;
 #[cfg(feature = "ipc")]
 mod ipc;
 #[cfg(feature = "ws")]
