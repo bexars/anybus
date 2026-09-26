@@ -333,6 +333,7 @@ impl WebsocketManager {
             connection_id,
             20.into(),
             realms,
+            "",
         );
 
         let (tx, rx) = tokio::sync::mpsc::channel(32);

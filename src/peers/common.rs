@@ -88,6 +88,7 @@ pub(crate) struct Peer {
     pub(crate) cost: Cost,
     pub(crate) stats: PeerStats,
     pub(crate) realms: RealmList,
+    pub(crate) name: String,
 }
 
 impl Peer {
@@ -99,6 +100,7 @@ impl Peer {
         connection_id: ConnectionId,
         cost: Cost,
         realms: RealmList,
+        name: impl Into<String>,
     ) -> Self {
         let (peer_tx, rx_node) = tokio::sync::mpsc::channel(32);
 
@@ -112,6 +114,7 @@ impl Peer {
             cost,
             stats: PeerStats::default(),
             realms,
+            name: name.into(),
         };
 
         let peer_entry = PeerEntry {

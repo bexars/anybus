@@ -136,6 +136,7 @@ pub(crate) async fn run(
         connection_id,
         cost,
         realms,
+        "",
     );
     let mut hb = Heartbeat::new(Instant::now(), HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT);
     tracing::info!("dummy peer connected to {peer_id}");

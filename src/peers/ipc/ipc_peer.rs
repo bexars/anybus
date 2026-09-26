@@ -150,6 +150,7 @@ impl State for Hello {
             connection_id,
             10.into(),
             realms,
+            "",
         ));
 
         if let Err(e) = state_machine
